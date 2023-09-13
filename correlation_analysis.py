@@ -106,7 +106,7 @@ def run_stats(path_to_data,list_of_columns):
     # run the merged file data
     cor_table = process_data(data=merged_data,id="merged_data",params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,list_of_correlations=list_of_corelations,cor_table=cor_table)
     cor_table.to_csv(cor_path,index=False)
-    sadasdas
+    
 
 def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations, cor_table):
     # create empty list for info entered to cor_data_table
