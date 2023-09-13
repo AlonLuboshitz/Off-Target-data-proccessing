@@ -1,0 +1,1 @@
+python "/home/alon/masterfiles/pythonscripts/data_processing.py" "/home/alon/masterfiles/guideseq40files/guideseq" "/home/alon/masterfiles/guideseq40files/outputs" "/home/alon/masterfiles/guideseq40files/bedfiles"
