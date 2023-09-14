@@ -32,10 +32,10 @@ def merge_files(file_list,list_of_columns):
     rows=len(merged_df)
     if not amount_of_rows == rows:
         print("error contanicating rows")
-    # labels = (merged_df['Label_negative']==1).sum()
-    # if not amount_of_lables == labels:
-    #     print("error contanicating rows")
-    # print ("number of total label: {}".format(labels))
+    labels = (merged_df['Label_negative']==1).sum()
+    if not amount_of_lables == labels:
+        print("error contanicating rows")
+    print ("number of total label: {}".format(labels))
     return merged_df
 
 ''' function transfor information to log of  (1 + val)
@@ -89,7 +89,7 @@ def run_stats(path_to_data,list_of_columns):
     # create output folder for correlation
     cor_path = os.path.join(os.path.dirname(path_to_data),f"cor_folder")
     if not os.path.exists(cor_path):
-        print("Create corelation folder")
+        print(f"Create corelation folder in: {cor_path}")
         os.mkdir(cor_path)
     # create cor_table in cor folder
     cor_table, cor_path = create_cor_table(cor_path)
@@ -98,22 +98,44 @@ def run_stats(path_to_data,list_of_columns):
     params = re.search(pattern,path_to_data).group(1)
     # run on each file pearson/spearman/phi
     list_of_corelations = ["Pearson","Spearman"]
+    positive_sum = 0
+    negative_sum = 0
     for path in files_path:
         data = pd.read_csv(path)
         # exp id = targetseq
         id_exp = data.loc[0, 'TargetSequence_negative']
-        cor_table = process_data(data,id=id_exp,params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,list_of_correlations=list_of_corelations,cor_table=cor_table)
+        # get amount of positive and negative
+        positive,negative = extract_amount_of_pos_neg(data)
+        positive_sum = positive_sum + positive
+        negative_sum = negative_sum + negative
+        cor_table = process_data(data,id=id_exp,params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,
+                                 list_of_correlations=list_of_corelations,cor_table=cor_table,positive_amount=positive,negative_amount=negative)
+    
+    merged_positive,merged_negative = extract_amount_of_pos_neg(merged_data)
+    if not merged_positive == positive_sum and not merged_negative == negative_sum:
+        print("concanting diffrenet files into merged files with loss of data!")
     # run the merged file data
-    cor_table = process_data(data=merged_data,id="merged_data",params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,list_of_correlations=list_of_corelations,cor_table=cor_table)
+    cor_table = process_data(data=merged_data,id="merged_data",params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,
+                             list_of_correlations=list_of_corelations,cor_table=cor_table,positive_amount=merged_positive,negative_amount=merged_negative)
     cor_table.to_csv(cor_path,index=False)
     
-
-def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations, cor_table):
+'''function args:
+data - active/inactive - chrom info data
+id - name of data
+params - type of params with guideseq exp
+x,y-axis- axis list to run correlation on
+cor_list - names of correlations need to be tested
+cor_table - the correlation output to be put in a table.'''
+def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations, cor_table,positive_amount,negative_amount):
     # create empty list for info entered to cor_data_table
     temp_insert_dict = {}
     
     temp_insert_dict["Id"] = id
     temp_insert_dict["Params"] = params
+    
+    temp_insert_dict['Positive_amount'] = positive_amount
+    temp_insert_dict['Negative_amount'] = negative_amount
+    
     # make a copy to preserve basic data
     combined_values = temp_insert_dict.copy()
     # iterate axiss and get the series data from each exp
@@ -135,8 +157,12 @@ def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations
                 temp_df = pd.DataFrame(temp_values)
                 cor_table = pd.concat([cor_table, temp_df], axis=0, ignore_index=True)
     return cor_table
-
-
+'''extract amounts of positive off target and negative off targets'''
+def extract_amount_of_pos_neg(data):
+    counts = data['Label_negative'].value_counts()
+    ones_count = counts.get(1, 0)
+    zeros_count = counts.get(0, 0)
+    return (ones_count, zeros_count)
                 
 '''function to run corelation:
 args: x,y, data series, x,y names, cor_name
@@ -160,7 +186,7 @@ def run_correlation(x_data,y_data,x_name,y_name,cor_name):
 '''function create table for corlation data in spesific path
 return tuple of table,path to table.'''
 def create_cor_table(path):
-    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val']
+    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount']
     cor_table = pd.DataFrame(columns=columns)
     file_path = os.path.join(path,f"Cor_data.csv")
     cor_table.to_csv(file_path,index=False)
@@ -250,7 +276,7 @@ def extract_axis(data_path,function_applied,columns):
 
 if __name__ == '__main__':
     # run stats create for each guideseq folder the cor_folder
-    #run_stats(sys.argv[1],2)
+    run_stats(sys.argv[1],2)
     new_path = os.path.abspath(os.path.join(sys.argv[1], os.pardir, os.pardir))
     merge_cor_data(new_path)
     
