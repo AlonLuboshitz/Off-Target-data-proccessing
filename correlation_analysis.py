@@ -45,17 +45,36 @@ def log_transf(val):
     if log_val == 0 and not val == 0:
         print("error transforming log val, inital was: {}, log: {}".format(val,log_val) )
     return log_val
-'''Function args: 
-1. path to data - folder of seperate files
-2. list_of_columns - columns need to be kept and find correlation on.
-run this steps:
-a. on each file in the folder
-b. merge all filed togther 
-runs 1: pearson and spearman on log + 1 read count transformation vs chrom_info(binary).
-2: phi coefficeint on binary inactive/active (0/1) labeling vs chrom_info(binary).
-3 creates plots from regression being made with r,r(sqr),p, values.
-'''
 
+'''function to get amount of peaks from chromatin information bed files.
+args: 1. path to bed files. 
+2. list of chromatin info columns using the get_chrom_info
+return peak amount for every file'''
+def get_peak_amount(path_to_bed,bed_by_column,chrom_type):
+    # iterate bed_file themself and retrive peak amount for each one.
+    line_counts = {}
+    
+    # Iterate through the directory using os.walk
+    for dirpath, _, filenames in os.walk(path_to_bed):
+        for filename in filenames:
+            if filename.endswith('.bed'):
+                full_path = os.path.join(dirpath, filename)
+                
+                # Open the bed file and count the lines
+                bed_data = pd.read_csv(full_path, sep='\t', header=None)
+                peaks = len(bed_data)
+                # add the bed file name the chromtype to match the column
+                # Remove '.bed' from the filename
+                base_filename = filename[:-4]
+                # Create the modified name
+                modified_name = chrom_type + "_" + base_filename
+                # Store the line count in the dictionary
+                line_counts[modified_name] = peaks
+    # update bed_by_column tuple list with peaks for each bed file
+    for i, (modified_filename, axis) in enumerate(bed_by_column):
+        peaks = line_counts.get(modified_filename, None)
+        bed_by_column[i] = (modified_filename, axis, peaks)
+    return bed_by_column
 '''function to get columns for chrom_info
 args - 1. file with data
 2. chrom_type
@@ -72,12 +91,14 @@ label/amount - Y axis
 function create one data set of:
 columns: exp_id_params, corelation_type, p-val,R,R(sqr), phi
 runs this corelations on all expriments.'''
-def run_stats(path_to_data,list_of_columns):
+def run_stats(path_to_data,list_of_columns,bed_files_path):
     list_of_columns = [("Label_negative","y"),("bi.sum.mi","y")]
     # get list of files paths:
     files_path = [os.path.join(path_to_data,file) for file in os.listdir(path_to_data)]
     # name of dic is type on chrom_info - retrive the name and get the corresponding columns
     chrom_info_columns = get_chrom_info(files_path[0],os.path.basename(path_to_data))
+    # extend chrom_info_columns to have peak amount
+    chrom_info_columns = get_peak_amount(bed_files_path,chrom_info_columns,os.path.basename(path_to_data))
     # merge the columns list -e.a Y axis, with X axis.
     extened_columns = list_of_columns + chrom_info_columns
     # merge the data via the extened_columns
@@ -117,6 +138,7 @@ def run_stats(path_to_data,list_of_columns):
     # run the merged file data
     cor_table = process_data(data=merged_data,id="merged_data",params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,
                              list_of_correlations=list_of_corelations,cor_table=cor_table,positive_amount=merged_positive,negative_amount=merged_negative)
+    
     cor_table.to_csv(cor_path,index=False)
     
 '''function args:
@@ -186,7 +208,7 @@ def run_correlation(x_data,y_data,x_name,y_name,cor_name):
 '''function create table for corlation data in spesific path
 return tuple of table,path to table.'''
 def create_cor_table(path):
-    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount']
+    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount','Peak_amount']
     cor_table = pd.DataFrame(columns=columns)
     file_path = os.path.join(path,f"Cor_data.csv")
     cor_table.to_csv(file_path,index=False)
@@ -276,7 +298,7 @@ def extract_axis(data_path,function_applied,columns):
 
 if __name__ == '__main__':
     # run stats create for each guideseq folder the cor_folder
-    run_stats(sys.argv[1],2)
+    run_stats(sys.argv[1],2,sys.argv[2])
     new_path = os.path.abspath(os.path.join(sys.argv[1], os.pardir, os.pardir))
     merge_cor_data(new_path)
     
