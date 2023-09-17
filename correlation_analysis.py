@@ -97,8 +97,6 @@ def run_stats(path_to_data,list_of_columns,bed_files_path):
     files_path = [os.path.join(path_to_data,file) for file in os.listdir(path_to_data)]
     # name of dic is type on chrom_info - retrive the name and get the corresponding columns
     chrom_info_columns = get_chrom_info(files_path[0],os.path.basename(path_to_data))
-    # extend chrom_info_columns to have peak amount
-    chrom_info_columns = get_peak_amount(bed_files_path,chrom_info_columns,os.path.basename(path_to_data))
     # merge the columns list -e.a Y axis, with X axis.
     extened_columns = list_of_columns + chrom_info_columns
     # merge the data via the extened_columns
@@ -138,9 +136,24 @@ def run_stats(path_to_data,list_of_columns,bed_files_path):
     # run the merged file data
     cor_table = process_data(data=merged_data,id="merged_data",params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,
                              list_of_correlations=list_of_corelations,cor_table=cor_table,positive_amount=merged_positive,negative_amount=merged_negative)
-    
+    # extend chrom_info_columns to have peak amount
+    chrom_info_columns = get_peak_amount(bed_files_path,chrom_info_columns,os.path.basename(path_to_data))
+    # add peak amount
+    cor_table = add_peak_amount(chrom_info_columns,cor_table)
+    # save file
     cor_table.to_csv(cor_path,index=False)
-    
+
+'''function add the peak amount of each bed file into correspoding column via the x axis.
+args: 1. tuple list with name,axis,peak
+2. the cor_table need to be updated'''
+def add_peak_amount(peak_info_by_column,cor_data):
+    # Iterate through the tuples and add values to the groups
+    for item in peak_info_by_column:
+        bed_info, axis, peak_value = item
+        cor_data.loc[cor_data['x'] == bed_info, 'Peak_amount'] = peak_value
+
+    return cor_data
+   
 '''function args:
 data - active/inactive - chrom info data
 id - name of data
