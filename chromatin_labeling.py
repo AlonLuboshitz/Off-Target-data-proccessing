@@ -10,14 +10,15 @@ output_path - path to place new file with intersections with the bed file inform
 chrom_info - folder name of type of chrom info - accsesbility, mythlation, phsos...
 '''
 def add_opencrhom_label(combined_path,bed_path,output_path,chrom_info):
-    # check if already the combined file has been labeled with difrrenet bed file:
-    # retrive ending of file name 
-    file_path_ending =  combined_path.split('/')[-1].split('.')[0] + "_" + chrom_info + ".csv"
-    # merge the ending with the output folder
-    output_path = os.path.join(output_path,file_path_ending)
-    # if the file exists -> use this file instead of the original combined.
-    if os.path.exists(output_path):
-        combined_path = output_path
+    if not combined_path == output_path:
+        # check if already the combined file has been labeled with difrrenet bed file:
+        # retrive ending of file name 
+        file_path_ending =  combined_path.split('/')[-1].split('.')[0] + "_" + chrom_info + ".csv"
+        # merge the ending with the output folder
+        output_path = os.path.join(output_path,file_path_ending)
+        # if the file exists -> use this file instead of the original combined.
+        if os.path.exists(output_path):
+            combined_path = output_path
         
     # Read BED file into a DataFrame bed file has no headers
     bed_data = pd.read_csv(bed_path, sep='\t', header=None)
@@ -69,11 +70,51 @@ def apply_for_folder(folder_combined_path,bed_path,chrom_info):
         combined_path = os.path.join(folder_combined_path,combined_file)
         # label the combined file vie bed fils
         add_opencrhom_label(combined_path,bed_path,output_path,chrom_info) 
-''' function gets 3 arguments:
-1 - path for folder with combined paths.
-2 - path for a bed file.
-3 - type of bed information - openchrom\mtyhl etc..'''
+
+
+'''manual update:
+function update a folder of data files that already been marked with more chrom information.
+args: 1. folder of files needed to be update
+2. path for chrom information.
+the dir name of the bed files represents the crhom type infromation.'''
+def update_info(chrom_tagged_folder,chrom_info_bed):
+    # get chrom type from the bed folder name.
+    chrom_type =  os.path.basename(chrom_info_bed)
+    # get list of the bed files
+    bed_files = get_bed_files(chrom_info_bed)
+    # iterate on taged folder and retrive data sets from it
+    for taged_file in os.listdir(chrom_tagged_folder):
+        taged_path = os.path.join(chrom_tagged_folder,taged_file)
+        # get a list of columns with the same chrom_type
+        columns_list = list_of_bed_columns(chrom_type,taged_path)
+        # comprenhense a new bed_files list without columns that already exists in the data
+        filtered_bed_files = [bed_file for bed_file in bed_files if not any(col + '.bed' in bed_file for col in columns_list)]
+        # apply to the data points the new bed infromation
+        for bed_path in filtered_bed_files:
+            add_opencrhom_label(taged_path,bed_path,taged_path,chrom_type)
+
+def list_of_bed_columns(chrom_type,data_path):
+    data = pd.read_csv(data_path,sep=",",encoding='latin-1',on_bad_lines='skip')
+    chrom_type = chrom_type + "_"
+    # Filter columns that start with "chrom type _"
+    filtered_columns = [col for col in data.columns if col.startswith(chrom_type)]
+    # Extract what comes after "chrom_type"
+    bed_names = [col.split("Openchrom_")[1] for col in filtered_columns]
+    # return the bed names by column
+    return bed_names
+def get_bed_files(bed_files_folder):
+    bed_files = []
+    for foldername, subfolders, filenames in os.walk(bed_files_folder):
+        for name in filenames:
+            if '.bed' in name:
+                bed_path = os.path.join(foldername, name)
+                bed_files.append(bed_path)
+    return bed_files
 if __name__ == "__main__":
+    input = input("Do you want to update manually an exisintg tagged file? (y/n)")
+    if input == "y":
+        update_info("/home/alon/masterfiles/guideseq40files/guideseq/0915params/Openchrom","/home/alon/masterfiles/guideseq40files/bedfiles/Openchrom")
+        exit(0)
     apply_for_folder(sys.argv[1],sys.argv[2],sys.argv[3])
 
 

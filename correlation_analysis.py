@@ -11,7 +11,6 @@ import os
 import sys
 import matplotlib.pyplot as plt
 import re
-import warnings
 
 '''this function merge the files given in the path data.'''
 def merge_files(file_list,list_of_columns):
