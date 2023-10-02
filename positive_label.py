@@ -57,7 +57,7 @@ def process_folder(input_folder):
         if filename.endswith('.txt'):
             txt_file_path = os.path.join(input_folder, filename)
             label_identified(txt_file_path, label_output_folder)
-            #make_input_txt_files(txt_file_path,cas_offinder_output_folder)
+            make_input_txt_files(txt_file_path,cas_offinder_output_folder)
 
 '''Example input file (DNA bulge size 2, RNA bulge size 1):
 /var/chromosomes/human_hg38
@@ -78,7 +78,7 @@ def make_input_txt_files(input_path,output_path):
         with open(output_path, 'w') as txt_file:
             txt_file.write("/home/labhendel/Documents/cas-offinder_linux_x86-64/hg38noalt\n")
             txt_file.write(n_string + "\n")
-            txt_file.write(seq + ' 1')
+            txt_file.write(seq + ' 6')
 '''
 function looks for multiple duplicates from the same exprimenet and merge the data from them
 args - folder paths, number of duplicated, file ending - exmp: '_labeled.csv, erase: for erasing the previous folder.'
@@ -87,37 +87,20 @@ NOTE: before set should *n_duplicates more then after
 function calls each file by iterating the number on duplicates and changing the file ending '''
 def merge_positives(folder_path,n_duplicates,file_ending,erase):
     file_names = os.listdir(folder_path)
-    # create pattern of xxx-D(n) + suffix
-    pattern = r"(.+?-D)\d+" + re.escape(file_ending)
-    # create one string from all the file names and find the matching pattern.
-    file_names = ''.join(file_names)
-    mathces = re.findall(pattern,file_names)
-    # use a set to create a unique value for n duplicates
-    unique = list(set(mathces))
-    print('before mergning: ',len(mathces))
-    print('after mergning: ',len(unique))
-    
-    # merge files:
-    # list of tuples including exp name and the merged df.
-    final_file_list = []
-    for file_name in unique:
-        # create n duplicates file list
-        n_file_list =[]
-        for count in range(int(n_duplicates)):
-            # create string for matching duplicate file
-            temp_file_name = file_name + str(count+1) + file_ending 
-            input_path = os.path.join(folder_path,f'{temp_file_name}')
-            # append df into the list
-            n_file_list.append(pd.read_csv(input_path,sep=",",encoding='latin-1',on_bad_lines='skip'))
-        # n_file_list have all duplicates in it, merge them:
-        merged_df = pd.concat(n_file_list, axis=0, ignore_index=True)
-        print ('before grouping: ',len(merged_df))
-        # group by position, number of missmatches, and siteseq. sum the bi - reads
-        grouped_df = merged_df.groupby(['Site_SubstitutionsOnly.Start','Missmatches','Site_SubstitutionsOnly.Sequence','WindowChromosome','Label','TargetSequence'], as_index=False)['bi.sum.mi'].sum()
-        print ('after grouping: ',len(grouped_df))
-          
-        # append df to final list
-        final_file_list.append((grouped_df,file_name))   
+    if int(n_duplicates) > 1:
+        # create pattern of xxx-D(n) + suffix
+        pattern = r"(.+?-D)\d+" + re.escape(file_ending)
+        # create one string from all the file names and find the matching pattern.
+        file_names = ''.join(file_names)
+        mathces = re.findall(pattern,file_names)
+        # use a set to create a unique value for n duplicates
+        unique = list(set(mathces))
+        print('before mergning: ',len(mathces))
+        print('after mergning: ',len(unique))
+    else : 
+        unique = file_names
+    # get tuple list - df, name
+    final_file_list = mergning(unique,n_duplicates,file_ending,folder_path)   
     # create folder for output combined expriment:
     # remove .csv\.txt from ending.
     file_ending = file_ending.rsplit('.', 1)[0]
@@ -136,8 +119,42 @@ def merge_positives(folder_path,n_duplicates,file_ending,erase):
             rmtree(folder_path)
             print(f"Directory '{folder_path}' and its contents have been removed.")
         except Exception as e:
-            print(f"Error: {e}")     
+            print(f"Error: {e}") 
 
+
+''' return tuple of merged files - data frame, file name.'''    
+def mergning(files,n,file_ending,folder_path):
+    final_file_list = []
+    if int(n) > 1:
+        for file_name in files:
+            # create n duplicates file list
+            n_file_list =[]
+            for count in range(int(n)):
+                # create string for matching duplicate file
+                temp_file_name = file_name + str(count+1) + file_ending 
+                input_path = os.path.join(folder_path,f'{temp_file_name}')
+                # append df into the list
+                n_file_list.append(pd.read_csv(input_path,sep=",",encoding='latin-1',on_bad_lines='skip'))
+            # n_file_list have all duplicates in it, merge them:
+            merged_df = pd.concat(n_file_list, axis=0, ignore_index=True)
+            print ('before grouping: ',len(merged_df))
+            # group by position, number of missmatches, and siteseq. sum the bi - reads
+            grouped_df = merged_df.groupby(['Site_SubstitutionsOnly.Start','Missmatches','Site_SubstitutionsOnly.Sequence','WindowChromosome','Label','TargetSequence'], as_index=False)['bi.sum.mi'].sum()
+            print ('after grouping: ',len(grouped_df))
+            
+            # append df to final list
+            final_file_list.append((grouped_df,file_name)) 
+    # no duplicates, keep original file with less columns        
+    else :
+        for file_name in files:
+            input_path = os.path.join(folder_path,f'{file_name}')
+            df = pd.read_csv(input_path,sep=",",encoding='latin-1',on_bad_lines='skip')
+            file_name = file_name.replace(".csv","")
+            df = df[['Site_SubstitutionsOnly.Start','Missmatches','Site_SubstitutionsOnly.Sequence','WindowChromosome','Label','TargetSequence']]
+            final_file_list.append((df,file_name))
+
+            
+    return final_file_list
 '''
 function gets path for identified (guideseq output data) folder and calls:
 process_folder function, which creates csv folder named: identified_labeled_sub_only
