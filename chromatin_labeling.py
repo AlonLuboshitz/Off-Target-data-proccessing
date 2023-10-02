@@ -22,7 +22,7 @@ def add_opencrhom_label(combined_path,bed_path,output_path,chrom_info):
         
     # Read BED file into a DataFrame bed file has no headers
     bed_data = pd.read_csv(bed_path, sep='\t', header=None)
-    #get number of columns
+    # Get number of columns
     num_columns = bed_data.shape[1]
     # Create column names based on the number of columns
     column_names = ['Chr', 'Start', 'End'] + [str(i) for i in range(4, num_columns + 1)]
