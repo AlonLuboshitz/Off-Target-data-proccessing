@@ -15,7 +15,6 @@ import subprocess as sub
 import os
 import sys
 from shutil import rmtree
-import time
 
 
 '''function iterate on folder with guideseq folders with identified folders in them.
@@ -33,7 +32,7 @@ def run_positive_labeling(path_to_script,path_list):
     # get number of duplicates and erasing data info. (args for positive)
     duplicates = input("please enter number of duplicates per exp (int): ")
     erase = input("please enter True or False for erasing the identified_label folder created: ")
-    assert int(duplicates) > 1,"number of duplicates smaller then 1 please start agian!"
+    assert int(duplicates) > 0,"number of duplicates smaller then 1 please start agian!"
     # join path to script
     positive_script_path = "python " + os.path.join(path_to_script,f'positive_label.py')
     # iterate on files in the guideseq path to label them
@@ -51,7 +50,6 @@ def run_negative_positive(labeled_paths,path_to_script,output_folder):
         # create args for function.
         temp_arg = negative_positive_script + " " + output_folder + " " + path
         print("runnning negative_positive on: {}".format(path))
-        time.sleep(10)
         combined = sub.run(temp_arg,capture_output=True,text=True,shell=True,check=True)
         print(combined.stdout)
     # delete casoffinder_output_csv folder and files
@@ -69,23 +67,7 @@ def path_to_merged_files(identified_paths):
         temp_path = os.path.join(os.path.dirname(path),f'_label_sub_only_merged')
         labeled_merged_paths.append(temp_path)
     return labeled_merged_paths  
-''' given bed files folder (open,mtyhl,etc..) return a list of the bed files''' 
-def get_bed_files(bed_files_folder):
-    bed_files = []
-    for foldername, subfolders, filenames in os.walk(bed_files_folder):
-        for name in filenames:
-            if '.bed' in name:
-                bed_path = os.path.join(foldername, name)
-                bed_files.append(bed_path)
-    return bed_files
-''' function iterate on bed folder and returns a list of tuples:
-each tuple: [0] - folder name [1] - list of paths for the bed files in that folder.'''
-def get_bed_folder(bed_parent_folder):
-    # create a list of tuples - each tuple contain - folder name, folder path inside the parent bed file folder.
-    subfolders_info = [(entry.name, entry.path) for entry in os.scandir(bed_parent_folder) if entry.is_dir()]
-    # Create a new list of tuples with folder names and the information retrieved from the get bed files
-    result_list = [(folder_name, get_bed_files(folder_path)) for folder_name, folder_path in subfolders_info]
-    return result_list
+
 '''function args: 1 - bed folder path
 2 - path for guideseq folder, inside combined files needs chrom labeling
 3 - path for current script dir
@@ -95,35 +77,13 @@ combined file path, bed file path, and the type of chrominfo
 def run_chrom_labeling(bed_parent_folder_path,guideseq_folder,script_dir_path):
     # create script path commnad:
     chrom_labeling_script = "python " + os.path.join(script_dir_path,f'chromatin_labeling.py')
-    # get list of tuples from get_bed_fodler function contains:
-    # type of chrom info and list of paths to the correspoding bed files.
-    chrom_type_path_list = get_bed_folder(bed_parent_folder_path)
-    # get list of combined_output paths:
-    combined_output_path_list = get_combined_paths(guideseq_folder)
-    for combined_path in combined_output_path_list:
-        # for each combined path run the script on:
-        # retrive chrom type and list of bed files
-        for chrom_type,path_list in chrom_type_path_list:
-            # for each path in the bed files list run the script
-            for bed_path in path_list:
-                temp_arg = (chrom_labeling_script + " " + combined_path + " " 
-                + bed_path + " " + chrom_type)
-                
-                try: 
-                    chrom_labeling = sub.run(temp_arg,capture_output=True,text=True,shell=True,check=True)
-                    print(chrom_labeling.stdout)
-                except sub.CalledProcessError as e:
-                    print(e)
-''' function args:
-1 guideseq folder
-returns list of paths for combined_output folder.'''
-def get_combined_paths(guideseq_folder):
-    combined_out_put_path_list = []
-    for folder,subfolders,filenames in os.walk(guideseq_folder):
-        if 'combined_output' in subfolders:
-            combined_output_path = os.path.join(folder,f'combined_output')
-            combined_out_put_path_list.append(combined_output_path)
-    return combined_out_put_path_list   
+    temp_arg = chrom_labeling_script + " " + bed_parent_folder_path + " " + guideseq_folder
+    try: 
+        chrom_labeling = sub.run(temp_arg,capture_output=True,text=True,shell=True,check=True)
+        print(chrom_labeling.stdout)
+    except sub.CalledProcessError as e:
+        print(e)
+ 
 '''
 argv 1 - path to guideseq folders.
 argv 2 - path to output (casoffinder)
@@ -134,7 +94,7 @@ if __name__ == '__main__':
     # Get the directory where the current script is located
     current_script_directory = os.path.dirname(os.path.abspath(__file__))
     # Positive runner
-    # run_positive_labeling(current_script_directory,identified_paths)
+    #run_positive_labeling(current_script_directory,identified_paths)
     # get paths for merged_labeled
     labeled_paths = path_to_merged_files(identified_paths)
     # negative\positive runner

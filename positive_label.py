@@ -87,6 +87,7 @@ NOTE: before set should *n_duplicates more then after
 function calls each file by iterating the number on duplicates and changing the file ending '''
 def merge_positives(folder_path,n_duplicates,file_ending,erase):
     file_names = os.listdir(folder_path)
+    # more then 1 duplicate
     if int(n_duplicates) > 1:
         # create pattern of xxx-D(n) + suffix
         pattern = r"(.+?-D)\d+" + re.escape(file_ending)
@@ -122,9 +123,14 @@ def merge_positives(folder_path,n_duplicates,file_ending,erase):
             print(f"Error: {e}") 
 
 
-''' return tuple of merged files - data frame, file name.'''    
+'''args: 1. files list
+2. n duplicates
+3. file ending - e.a - _labeled.csv
+4. path for folder with labeled files.
+return tuple of merged files - data frame, file name.'''    
 def mergning(files,n,file_ending,folder_path):
     final_file_list = []
+    # more then 1 duplicate per file
     if int(n) > 1:
         for file_name in files:
             # create n duplicates file list
@@ -141,16 +147,15 @@ def mergning(files,n,file_ending,folder_path):
             # group by position, number of missmatches, and siteseq. sum the bi - reads
             grouped_df = merged_df.groupby(['Site_SubstitutionsOnly.Start','Missmatches','Site_SubstitutionsOnly.Sequence','WindowChromosome','Label','TargetSequence'], as_index=False)['bi.sum.mi'].sum()
             print ('after grouping: ',len(grouped_df))
-            
             # append df to final list
             final_file_list.append((grouped_df,file_name)) 
-    # no duplicates, keep original file with less columns        
+    # no duplicates, keep original file with less columns       
     else :
         for file_name in files:
             input_path = os.path.join(folder_path,f'{file_name}')
             df = pd.read_csv(input_path,sep=",",encoding='latin-1',on_bad_lines='skip')
             file_name = file_name.replace(".csv","")
-            df = df[['Site_SubstitutionsOnly.Start','Missmatches','Site_SubstitutionsOnly.Sequence','WindowChromosome','Label','TargetSequence']]
+            df = df[['Site_SubstitutionsOnly.Start','Missmatches','Site_SubstitutionsOnly.Sequence','WindowChromosome','Label','TargetSequence','bi.sum.mi']]
             final_file_list.append((df,file_name))
 
             
@@ -172,6 +177,3 @@ if __name__ == '__main__':
         
 
 
-
-# merge_positives('/home/alon/masterfiles/guideseq40files/identified_labeled_sub_only',2,'_label_sub_only.csv')
-# process_folder('/home/alon/masterfiles/guideseq40files/identified')
