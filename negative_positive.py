@@ -84,7 +84,11 @@ def negatives_tocsv(file_path):
             file_ends = file.replace('.txt','.csv')
             # read .txt file and create new df with headers
             file_temp_path = os.path.join(file_path,file)
-            negative_file = pd.read_csv(file_temp_path,sep="\t",encoding='latin-1',on_bad_lines='skip')
+            try:
+                negative_file = pd.read_csv(file_temp_path,sep="\t",encoding='latin-1',on_bad_lines='skip')
+            except pd.errors.EmptyDataError as e:
+                print(file," is empty, continuing to next file!")
+                continue
             columns = ['TargetSequence','Chrinfo','Position','Siteseq','Strand','Missmatches']
             negative_file.columns = columns
             # create output path in the new created folder and the csv file in it.
@@ -104,6 +108,4 @@ if __name__ == '__main__':
     path_to_csv = os.path.join(os.path.dirname(sys.argv[1]),f'casoffinder_outputs_csvs')
     negative_positive(sys.argv[2],path_to_csv)
          
-# negatives_tocsv('/home/alon/masterfiles/guideseq40files/outputs')    
-# negative_positive('/home/alon/masterfiles/guideseq40files/_label_sub_only_merged',
-#                      '/home/alon/masterfiles/guideseq40files/casoffinder_outputs_csvs')
+
