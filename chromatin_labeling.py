@@ -74,7 +74,7 @@ def apply_for_folder(folder_combined_path,bed_path,chrom_info):
         combined_path = os.path.join(folder_combined_path,combined_file)
         # label the combined file vie bed fils
         add_chrom_label(combined_path,bed_path,output_path,chrom_info) 
-
+   
 '''function args:
 1. gets path for combined file - with active\inactive labeling
 2. bed_path - bedfile for chromatin info e.g - accesability, methylation, phopholyration etc..
@@ -110,21 +110,18 @@ def add_chrom_label(combined_path,bed_path,output_path,chrom_info):
     # Add a new column to combined_data for bed file indexing for later corelation analysis
     bedindex_column = column_bed_filename + "_index"
     combined_data[bedindex_column] = 0
-    
+    combined_data[bedindex_column] = combined_data[bedindex_column].astype(float)
     # intersection is not empty
     if not intersection_df.empty:
-        bed_index_values = intersection_df['IndexBed']
-        intersection_indices = intersection_df['Index']
+        # transform bed indexes into a list for further assignment
+        bed_index_list = intersection_df["IndexBed"].tolist()
 
         try:
-            for index, value in zip(intersection_indices, bed_index_values):
-                values_tuple = (1, value)
-                combined_data.loc[index, [column_bed_filename, bedindex_column]] = values_tuple
-            
-        #     # index keeps original index of data frame of combined file
-        #     # combined_data.loc[intersection_indices, column_bed_filename] = 1
-        #     # # set the corresponding index of the bed file in new column for correlation analysis.
-        #      combined_data.loc[intersection_indices, bedindex_column] = bed_index_values
+            # index keeps original index of data frame of combined file
+            # assign intersection indexes with 1
+            combined_data.loc[intersection_df["Index"], column_bed_filename] = 1
+            # set the corresponding index of the bed file in new column for correlation analysis.
+            combined_data.loc[intersection_df["Index"], bedindex_column] = bed_index_list
         except KeyError as e:
               print(combined_path,': file has no intersections output will be with 0')
         #     # # : input is dismissed via running this as subprocess

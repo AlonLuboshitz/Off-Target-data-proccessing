@@ -71,10 +71,10 @@ def run_stats(path_to_data,list_of_columns,bed_files_path):
     cor_table = process_data(data=merged_data,id="merged_data",params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,
                              list_of_correlations=list_of_corelations,cor_table=cor_table,
                              positive_amount=merged_positive,negative_amount=merged_negative,columns_info=chrom_info_columns)
-    # extend chrom_info_columns to have peak amount
-    chrom_info_columns = get_peak_amount(bed_files_path,chrom_info_columns,os.path.basename(path_to_data))
     # add peak amount
     cor_table = add_peak_amount(chrom_info_columns,cor_table)
+    # add intersect amount
+    cor_table = add_intersect(cor_table,chrom_info_columns,files_path)
     # save file
     cor_table.to_csv(cor_path,index=False)
 
@@ -96,6 +96,8 @@ def get_chrom_info(data,CHROM_TYPES):
             matching_columns.extend(temp_matching_columns)
             print(f"Corresponding columns for chrom_type {chrom_type}: {matching_columns}")
     if matching_columns:
+        # Filter out elements ending with "_index"
+        matching_columns = [(col, val) for col, val in matching_columns if not col.endswith("_index")]    
         return matching_columns
 
 def add_peak_path(columns_tuples,bed_parent_folder):
@@ -175,7 +177,7 @@ def merge_files(file_list,list_of_columns):
 '''function create table for corlation data in spesific path
 return tuple of table,path to table.'''
 def create_cor_table(path):
-    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount','Peak_amount']
+    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount','Peak_amount','intersect_amount']
     cor_table = pd.DataFrame(columns=columns)
     file_path = os.path.join(path,f"Cor_data.csv")
     cor_table.to_csv(file_path,index=False)
@@ -211,8 +213,11 @@ def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations
     combined_values = temp_insert_dict.copy()
     # iterate axiss and get the series data from each exp
     for x in x_axis_list:
+    
+        x_data = data[x]
+        
         for y in y_axis_list:
-            x_data = data[x]
+            
             if y == "bi.sum.mi":
                 y_data = data["bi.sum.mi"] = data["bi.sum.mi"].fillna(0)
                 y_data = y_data.apply(log_transf)
@@ -227,6 +232,8 @@ def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations
                 #cor_table = cor_table.append(combined_values,ignore_index=True)
                 temp_df = pd.DataFrame(temp_values)
                 cor_table = pd.concat([cor_table, temp_df], axis=0, ignore_index=True)
+               
+
     return cor_table
 
 '''function to run corelation:
@@ -326,16 +333,28 @@ def get_peak_amount(path_to_bed,bed_by_column,chrom_type):
     return bed_by_column
 
 '''function add the peak amount of each bed file into correspoding column via the x axis.
-args: 1. tuple list with name,axis,peak
+args: 1. tuple list with name,axis,path,peak
 2. the cor_table need to be updated'''
 def add_peak_amount(peak_info_by_column,cor_data):
     # Iterate through the tuples and add values to the groups
     for item in peak_info_by_column:
-        bed_info, axis, peak_value = item
+        bed_info, axis, path, peak_value = item
         cor_data.loc[cor_data['x'] == bed_info, 'Peak_amount'] = peak_value
 
     return cor_data
-   
+
+def add_intersect(cor_table,chrom_info,files_path):
+    #files_path = [os.path.join(path_to_data,file) for file in os.listdir(path_to_data)]
+    for path in files_path:
+        df = pd.read_csv(path)
+        id = df.loc[0, 'TargetSequence_negative']
+        for item in chrom_info:
+            bed_info, axis, path, peak_value = item
+            amount = df[bed_info].value_counts().get(1,0) 
+            cor_table.loc[(cor_table['x'] == bed_info) & (cor_table["Id"]== id), 'intersect_amount'] = amount
+    return cor_table
+
+
 '''function merge cor_data into one data set from all three guideseq params'''
 def merge_cor_data(path):
     df_list = []
@@ -421,6 +440,7 @@ def extract_axis(data_path,function_applied,columns):
 if __name__ == '__main__':
     # run stats create for each guideseq folder the cor_folder
     run_stats(sys.argv[1],2,sys.argv[2])
+    
     new_path = os.path.abspath(os.path.join(sys.argv[1], os.pardir, os.pardir))
     merge_cor_data(new_path)
     
