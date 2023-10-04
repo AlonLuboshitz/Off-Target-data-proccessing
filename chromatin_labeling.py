@@ -92,38 +92,65 @@ def add_chrom_label(combined_path,bed_path,output_path,chrom_info):
         # if the file exists -> use this file instead of the original combined.
         if os.path.exists(output_path):
             combined_path = output_path
-        
+    # transfrom files into data frames with chr,strat,end,index 
+    # get combined file to df.
+    combined_data = pd.read_csv(combined_path)   
+    combined_bed_data,bed_data = create_bed_and_combined(combined_data,bed_path)
+    # Perform the intersection using pybedtools, -wo keeps information from both - e.a both columns and base pair amount for each intersection 
+    combined_tool = pybedtools.BedTool.from_dataframe(combined_bed_data)
+    bed_tool_data = pybedtools.BedTool.from_dataframe(bed_data)
+    intersections = combined_tool.intersect(bed_tool_data, wo=True, s=False) 
+    # concate btoh columns and pair amount
+    intersect_colmuns = combined_bed_data.columns.tolist() + bed_data.columns.tolist() + ["pair_amount"]
+    # convert intersection output into df.
+    intersection_df = intersections.to_dataframe(header=None, names=intersect_colmuns)
+    # Add a new column to combined_data based on the intersection result - 1 for intersect
+    column_bed_filename = get_exp_name_to_column(bed_path,chrom_info)
+    combined_data[column_bed_filename] = 0  
+    # Add a new column to combined_data for bed file indexing for later corelation analysis
+    bedindex_column = column_bed_filename + "_index"
+    combined_data[bedindex_column] = 0
+    
+    # intersection is not empty
+    if not intersection_df.empty:
+        bed_index_values = intersection_df['IndexBed']
+        intersection_indices = intersection_df['Index']
+
+        try:
+            for index, value in zip(intersection_indices, bed_index_values):
+                values_tuple = (1, value)
+                combined_data.loc[index, [column_bed_filename, bedindex_column]] = values_tuple
+            
+        #     # index keeps original index of data frame of combined file
+        #     # combined_data.loc[intersection_indices, column_bed_filename] = 1
+        #     # # set the corresponding index of the bed file in new column for correlation analysis.
+        #      combined_data.loc[intersection_indices, bedindex_column] = bed_index_values
+        except KeyError as e:
+              print(combined_path,': file has no intersections output will be with 0')
+        #     # # : input is dismissed via running this as subprocess
+        #     #input("press anything to continue: ")
+ 
+    combined_data.to_csv(output_path, index=False)
+def create_bed_and_combined(combined_data,bed_path):
     # Read BED file into a DataFrame bed file has no headers
     bed_data = pd.read_csv(bed_path, sep='\t', header=None)
     # Get number of columns
     num_columns = bed_data.shape[1]
     # Create column names based on the number of columns
-    column_names = ['Chr', 'Start', 'End'] + [str(i) for i in range(4, num_columns + 1)]
+    column_names = ['Chrbed', 'Startbed', 'Endbed'] + [str(i) for i in range(4, num_columns + 1)]
     # Assign the new column names to the DataFrame
     bed_data.columns = column_names 
-    # get combined file to df.
-    combined_data = pd.read_csv(combined_path)
+    # set index
+    bed_data['IndexBed'] = bed_data.index
+   
     # convert combined df into bedfile with : Chr,Start,End,Index 
     csv_bed_data = combined_data[['chrinfo_extracted', 'Position']].copy()
     csv_bed_data['End'] = csv_bed_data['Position'] + 23
     csv_bed_data.rename(columns={'Position': 'Start','chrinfo_extracted':'Chr'}, inplace=True)
     csv_bed_data['Index'] = csv_bed_data.index
-    csv_bed = pybedtools.BedTool.from_dataframe(csv_bed_data)
-    # Perform the intersection using pybedtools
-    intersections = csv_bed.intersect(bed_path, u=True, s=False)
-    # convert intersection output into df.
-    intersection_df = intersections.to_dataframe(header=None, names=['Chr', 'Start','End','Index'])
-    column_bed_filename = get_exp_name_to_column(bed_path,chrom_info)
-    # Add a new column to combined_data based on the intersection result - 1 for intersect
-    combined_data[column_bed_filename] = 0  
-    try:
-        combined_data.loc[intersection_df['Index'], column_bed_filename] = 1
-    except KeyError as e:
-        print(combined_path,': file has no intersections output will be with 0')
-        # # : input is dismissed via running this as subprocess
-        #input("press anything to continue: ")
- 
-    combined_data.to_csv(output_path, index=False)
+
+    return (csv_bed_data,bed_data)
+
 ''' args:
 1. path for bed file
 2. chrom type
