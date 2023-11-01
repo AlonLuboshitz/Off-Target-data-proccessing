@@ -11,80 +11,11 @@ import os
 import sys
 import matplotlib.pyplot as plt
 import re
+# chrom_types are defualt and can be change manauly.
+# they correspond to bed files and should be found in the columns of the data
+CHROM_TYPES = ['Mtyhlation', 'Openchrom']
 
-'''this function merge the files given in the path data.'''
-def merge_files(file_list,list_of_columns):
-    
-    merged_df = pd.DataFrame()
-    if list_of_columns:
-        selected_columns = [col[0] for col in list_of_columns]
-    amount_of_rows = 0
-    amount_of_lables = 0
-    for file_path in file_list:
-        df = pd.read_csv(file_path)
-        # sum amount of rows from all data files
-        amount_of_rows = amount_of_rows + len(df)
-        # add the 1 label amounts to check equality
-        amount_of_lables = amount_of_lables + (df['Label_negative'] == 1).sum()
-        temp_df = df[selected_columns]
-        merged_df = pd.concat([merged_df, temp_df], axis=0, ignore_index=True)
-    rows=len(merged_df)
-    if not amount_of_rows == rows:
-        print("error contanicating rows")
-    labels = (merged_df['Label_negative']==1).sum()
-    if not amount_of_lables == labels:
-        print("error contanicating rows")
-    print ("number of total label: {}".format(labels))
-    return merged_df
 
-''' function transfor information to log of  (1 + val)
-+ 1 so log 0 will be define'''
-def log_transf(val):
-    log_val = np.log(1 + val)
-    if log_val == 0 and not val == 0:
-        print("error transforming log val, inital was: {}, log: {}".format(val,log_val) )
-    return log_val
-
-'''function to get amount of peaks from chromatin information bed files.
-args: 1. path to bed files. 
-2. list of chromatin info columns using the get_chrom_info
-return peak amount for every file'''
-def get_peak_amount(path_to_bed,bed_by_column,chrom_type):
-    # iterate bed_file themself and retrive peak amount for each one.
-    line_counts = {}
-    
-    # Iterate through the directory using os.walk
-    for dirpath, _, filenames in os.walk(path_to_bed):
-        for filename in filenames:
-            if filename.endswith('.bed'):
-                full_path = os.path.join(dirpath, filename)
-                
-                # Open the bed file and count the lines
-                bed_data = pd.read_csv(full_path, sep='\t', header=None)
-                peaks = len(bed_data)
-                # add the bed file name the chromtype to match the column
-                # Remove '.bed' from the filename
-                base_filename = filename[:-4]
-                # Create the modified name
-                modified_name = chrom_type + "_" + base_filename
-                # Store the line count in the dictionary
-                line_counts[modified_name] = peaks
-    # update bed_by_column tuple list with peaks for each bed file
-    for i, (modified_filename, axis) in enumerate(bed_by_column):
-        peaks = line_counts.get(modified_filename, None)
-        bed_by_column[i] = (modified_filename, axis, peaks)
-    return bed_by_column
-'''function to get columns for chrom_info
-args - 1. file with data
-2. chrom_type
-return list of columns with that type and correspoding X axis'''
-def get_chrom_info(data,chrom_type):
-    data = pd.read_csv(data)
-    columns = data.columns
-    columns_list = [(col,"x") for col in columns if col.startswith(chrom_type)]
-    if columns_list:
-        return columns_list
-    print(f"no columns have been found with {chrom_type} type")
 '''chrom_type - X axis = binary chrom_info e.a - open/close
 label/amount - Y axis
 function create one data set of:
@@ -95,7 +26,9 @@ def run_stats(path_to_data,list_of_columns,bed_files_path):
     # get list of files paths:
     files_path = [os.path.join(path_to_data,file) for file in os.listdir(path_to_data)]
     # name of dic is type on chrom_info - retrive the name and get the corresponding columns
-    chrom_info_columns = get_chrom_info(files_path[0],os.path.basename(path_to_data))
+    chrom_info_columns = get_chrom_info(files_path[0],CHROM_TYPES)
+    # extend chrom_info_columns to have peak amount and paths
+    chrom_info_columns = add_peak_path(chrom_info_columns,bed_files_path)
     # merge the columns list -e.a Y axis, with X axis.
     extened_columns = list_of_columns + chrom_info_columns
     # merge the data via the extened_columns
@@ -115,9 +48,10 @@ def run_stats(path_to_data,list_of_columns,bed_files_path):
     pattern = r'(\d+)params'
     params = re.search(pattern,path_to_data).group(1)
     # run on each file pearson/spearman/phi
-    list_of_corelations = ["Pearson","Spearman"]
+    list_of_corelations = ["Hypergeo"]
     positive_sum = 0
     negative_sum = 0
+    
     for path in files_path:
         data = pd.read_csv(path)
         # exp id = targetseq
@@ -127,32 +61,142 @@ def run_stats(path_to_data,list_of_columns,bed_files_path):
         positive_sum = positive_sum + positive
         negative_sum = negative_sum + negative
         cor_table = process_data(data,id=id_exp,params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,
-                                 list_of_correlations=list_of_corelations,cor_table=cor_table,positive_amount=positive,negative_amount=negative)
+                                 list_of_correlations=list_of_corelations,cor_table=cor_table,
+                                 positive_amount=positive,negative_amount=negative,columns_info=chrom_info_columns)
     
     merged_positive,merged_negative = extract_amount_of_pos_neg(merged_data)
     if not merged_positive == positive_sum and not merged_negative == negative_sum:
         print("concanting diffrenet files into merged files with loss of data!")
     # run the merged file data
     cor_table = process_data(data=merged_data,id="merged_data",params=params,x_axis_list=x_axis_list,y_axis_list=y_axis_list,
-                             list_of_correlations=list_of_corelations,cor_table=cor_table,positive_amount=merged_positive,negative_amount=merged_negative)
-    # extend chrom_info_columns to have peak amount
-    chrom_info_columns = get_peak_amount(bed_files_path,chrom_info_columns,os.path.basename(path_to_data))
+                             list_of_correlations=list_of_corelations,cor_table=cor_table,
+                             positive_amount=merged_positive,negative_amount=merged_negative,columns_info=chrom_info_columns)
     # add peak amount
     cor_table = add_peak_amount(chrom_info_columns,cor_table)
+    # add intersect amount
+    cor_table = add_intersect(cor_table,chrom_info_columns,files_path)
     # save file
     cor_table.to_csv(cor_path,index=False)
 
-'''function add the peak amount of each bed file into correspoding column via the x axis.
-args: 1. tuple list with name,axis,peak
-2. the cor_table need to be updated'''
-def add_peak_amount(peak_info_by_column,cor_data):
-    # Iterate through the tuples and add values to the groups
-    for item in peak_info_by_column:
-        bed_info, axis, peak_value = item
-        cor_data.loc[cor_data['x'] == bed_info, 'Peak_amount'] = peak_value
 
-    return cor_data
-   
+'''function to get columns for chrom_info
+args - 1. file with data
+2. chrom_types
+return list of columns with that type and correspoding X axis'''
+def get_chrom_info(data,CHROM_TYPES):
+    data = pd.read_csv(data)
+    columns = data.columns
+    matching_columns = []
+    # iterate on chrom types and check for corresponding columns
+    for chrom_type in CHROM_TYPES:
+        temp_matching_columns = [(col, "x") for col in columns if col.startswith(chrom_type)]
+        if not temp_matching_columns:
+            print(f"No corresponding columns found for chrom_type: {chrom_type}")
+        else:
+            matching_columns.extend(temp_matching_columns)
+            print(f"Corresponding columns for chrom_type {chrom_type}: {matching_columns}")
+    if matching_columns:
+        # Filter out elements ending with "_index"
+        matching_columns = [(col, val) for col, val in matching_columns if not col.endswith("_index")]    
+        return matching_columns
+
+def add_peak_path(columns_tuples,bed_parent_folder):
+    # Initialize an empty list to store the processed tuples
+    processed_tuples = []
+    for column_name, axis in columns_tuples:
+        
+        # Get the bed path for the current name
+        bed_path = get_bed_from_name_and_path(bed_parent_folder, column_name)
+        
+        # Read the data frame and get its length
+        try:
+            df = pd.read_csv(bed_path, sep='\t', header=None)
+            peak_amount = len(df)
+        except FileNotFoundError:
+            peak_amount = None
+
+        # Create a new tuple with the information
+        processed_tuple = (column_name, 'x', bed_path, peak_amount)
+        
+        # Append the processed tuple to the list
+        processed_tuples.append(processed_tuple)
+    return processed_tuples
+        
+
+def get_bed_from_name_and_path(bed_path,bed_name):
+    # split the bed name to parts to create a path.
+    # 1 part -> chrom_type
+    # 2 + 3 cell type + exp type
+    bed_path_parts = bed_name.split("_")
+    # concate bed path with chrom type, cell type and exp
+    bed_path = os.path.join(bed_path,f'{bed_path_parts[0]}',f'{bed_path_parts[1]}_{bed_path_parts[2]}')
+    # concate all the rest of the parts to one string and look for the bed file.
+    bed_file_name = ""
+    for i in range(3,len(bed_path_parts) - 1):
+        bed_file_name = bed_file_name + bed_path_parts[i] + "_"
+    bed_file_name = bed_file_name + bed_path_parts[len(bed_path_parts)-1]
+    # look for bed file in bed path
+    for dir,subdir,files in os.walk(bed_path):
+        for file in files:
+            if bed_file_name in file:
+                bed_path = os.path.join(dir,file)
+                return bed_path
+    
+
+
+'''this function merge the files given in the path data.'''
+def merge_files(file_list,list_of_columns):
+    # init data frame for mergning
+    merged_df = pd.DataFrame()
+    # get columns names
+    if list_of_columns:
+        selected_columns = [col[0] for col in list_of_columns]
+        selected_columns.append("chrinfo_extracted")
+        selected_columns.append("Position")
+    amount_of_rows = 0
+    amount_of_lables = 0
+    for file_path in file_list:
+        df = pd.read_csv(file_path)
+        # sum amount of rows from all data files
+        amount_of_rows = amount_of_rows + len(df)
+        # add the 1 label amounts to check equality
+        amount_of_lables = amount_of_lables + (df['Label_negative'] == 1).sum()
+        # create temp df via columns names
+        temp_df = df[selected_columns]
+        # merge togther with temp
+        merged_df = pd.concat([merged_df, temp_df], axis=0, ignore_index=True)
+    rows=len(merged_df)
+    if not amount_of_rows == rows:
+        print("error contanicating rows")
+    labels = (merged_df['Label_negative']==1).sum()
+    if not amount_of_lables == labels:
+        print("error contanicating rows")
+    print ("number of total label: {}".format(labels))
+    return merged_df
+
+'''function create table for corlation data in spesific path
+return tuple of table,path to table.'''
+def create_cor_table(path):
+    file_path = os.path.join(path,f"Cor_data.csv")
+    if os.path.exists(file_path):
+        cor_table = pd.read_csv(file_path)
+        
+    else:
+        columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount','Peak_amount','intersect_amount']
+        cor_table = pd.DataFrame(columns=columns)
+        cor_table.to_csv(file_path,index=False)
+    
+    return (cor_table,file_path)
+
+'''extract amounts of positive off target and negative off targets'''
+def extract_amount_of_pos_neg(data):
+    counts = data['Label_negative'].value_counts()
+    ones_count = counts.get(1, 0)
+    zeros_count = counts.get(0, 0)
+    return (ones_count, zeros_count)
+
+
+
 '''function args:
 data - active/inactive - chrom info data
 id - name of data
@@ -160,7 +204,7 @@ params - type of params with guideseq exp
 x,y-axis- axis list to run correlation on
 cor_list - names of correlations need to be tested
 cor_table - the correlation output to be put in a table.'''
-def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations, cor_table,positive_amount,negative_amount):
+def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations, cor_table,positive_amount,negative_amount,columns_info):
     # create empty list for info entered to cor_data_table
     temp_insert_dict = {}
     
@@ -173,35 +217,41 @@ def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations
     # make a copy to preserve basic data
     combined_values = temp_insert_dict.copy()
     # iterate axiss and get the series data from each exp
-    for x in x_axis_list:
-        for y in y_axis_list:
+    for cor in list_of_correlations:
+        for x in x_axis_list:
+    
             x_data = data[x]
-            if y == "bi.sum.mi":
-                y_data = data["bi.sum.mi"] = data["bi.sum.mi"].fillna(0)
-                y_data = y_data.apply(log_transf)
-                y = "Log_" + y
-            else: 
-                y_data = data[y]
-            # returned values are in a dict {x,y,cor_type,R,r^2,P-val}
-            for cor in list_of_correlations:
-                added_dict = run_correlation(x_data=x_data,y_data=y_data, x_name=x, y_name=y, cor_name=cor)
+            if cor == "Hypergeo":
+                added_dict = run_correlation(x_data=x_data,y_data=None, x_name=x, y_name='Label_negative', cor_name=cor,data=data,columns_info=columns_info)
                 combined_values.update(added_dict)
                 temp_values = [combined_values]
                 #cor_table = cor_table.append(combined_values,ignore_index=True)
                 temp_df = pd.DataFrame(temp_values)
                 cor_table = pd.concat([cor_table, temp_df], axis=0, ignore_index=True)
-    return cor_table
-'''extract amounts of positive off target and negative off targets'''
-def extract_amount_of_pos_neg(data):
-    counts = data['Label_negative'].value_counts()
-    ones_count = counts.get(1, 0)
-    zeros_count = counts.get(0, 0)
-    return (ones_count, zeros_count)
+                continue
+            for y in y_axis_list:
                 
+                if y == "bi.sum.mi":
+                    y_data = data["bi.sum.mi"] = data["bi.sum.mi"].fillna(0)
+                    y_data = y_data.apply(log_transf)
+                    y = "Log_" + y
+                else: 
+                    y_data = data[y]
+                # returned values are in a dict {x,y,cor_type,R,r^2,P-val}
+                
+                added_dict = run_correlation(x_data=x_data,y_data=y_data, x_name=x, y_name=y, cor_name=cor,data=data,columns_info=columns_info)
+                combined_values.update(added_dict)
+                temp_values = [combined_values]
+                temp_df = pd.DataFrame(temp_values)
+                cor_table = pd.concat([cor_table, temp_df], axis=0, ignore_index=True)
+               
+
+    return cor_table
+
 '''function to run corelation:
 args: x,y, data series, x,y names, cor_name
 return list of params returned by corelation'''
-def run_correlation(x_data,y_data,x_name,y_name,cor_name):
+def run_correlation(x_data,y_data,x_name,y_name,cor_name,data,columns_info):
     returned_params = {}
     returned_params["Cor_type"] = cor_name
     returned_params['x'] = x_name
@@ -211,20 +261,108 @@ def run_correlation(x_data,y_data,x_name,y_name,cor_name):
         correlation, p_value = stats.pearsonr(x_data,y_data)
     elif cor_name == "Spearman":
         correlation, p_value = stats.spearmanr(x_data,y_data)
+    elif cor_name == "Hypergeo":
+        correlation = 0
+        p_value = hypergeometric_test(data,bed_name=x_name,y_data=y_name)
+    
     r_sqr = correlation**2
     returned_params["R"] = correlation
     returned_params["R-Sqr"] =  r_sqr
     returned_params["P-val"] = p_value
     return returned_params
+'''args:
+1. offtarget data - get the off target population size - N . n - get succses (active)
+2. bed name - x column
+function: 
+Population - off targets - active + in acttive
+Succses - active of target
+Sample size - chromatin info intergration amount
+succses in sample - active off target via sample size
+returns p-val
+ '''
+def hypergeometric_test(offtarget_data,bed_name,y_data):
+    # Get active and inactive off targets
+    active,inactive = extract_amount_of_pos_neg(offtarget_data)
+    # N population size - off targets
+    population_size = active + inactive
+    # intergration with chrom info
+    sample_size = offtarget_data[bed_name].value_counts().get(1,0)
+    # succses in sample - where x column(chrom info) is 1 -> open, and y column is 1 (active)
+    successes_in_sample = len(offtarget_data[(offtarget_data[bed_name] == 1) & (offtarget_data[y_data] >= 1)])
+    # hypergeo test
+    p_value_more_than = 1 - stats.hypergeom.cdf(successes_in_sample - 1, population_size, active, sample_size)
+
+
+
+
+    
+    
+    
+    return p_value_more_than
+
+
+''' function transfor information to log of  (1 + val)
++ 1 so log 0 will be define'''
+def log_transf(val):
+    log_val = np.log(1 + val)
+    if log_val == 0 and not val == 0:
+        print("error transforming log val, inital was: {}, log: {}".format(val,log_val) )
+    return log_val
+
+'''function to get amount of peaks from chromatin information bed files.
+args: 1. path to bed files. 
+2. list of chromatin info columns using the get_chrom_info
+return peak amount for every file'''
+def get_peak_amount(path_to_bed,bed_by_column,chrom_type):
    
-'''function create table for corlation data in spesific path
-return tuple of table,path to table.'''
-def create_cor_table(path):
-    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount','Peak_amount']
-    cor_table = pd.DataFrame(columns=columns)
-    file_path = os.path.join(path,f"Cor_data.csv")
-    cor_table.to_csv(file_path,index=False)
-    return (cor_table,file_path)
+    # iterate bed_file themself and retrive peak amount for each one.
+    line_counts = {}
+    
+    # Iterate through the directory using os.walk
+    for dirpath, _, filenames in os.walk(path_to_bed):
+        file_type = ('.bed','.broadPeak','.narrowPeak')
+        for filename in filenames:
+            if filename.endswith(file_type):
+                full_path = os.path.join(dirpath, filename)
+                
+                # Open the bed file and count the lines
+                bed_data = pd.read_csv(full_path, sep='\t', header=None)
+                peaks = len(bed_data)
+                # add the bed file name the chromtype to match the column
+                # Remove '.bed' from the filename
+                base_filename = filename[:-4]
+                # Create the modified name
+                modified_name = chrom_type + "_" + base_filename
+                # Store the line count in the dictionary
+                line_counts[modified_name] = peaks
+    # update bed_by_column tuple list with peaks for each bed file
+    for i, (modified_filename, axis) in enumerate(bed_by_column):
+        peaks = line_counts.get(modified_filename, None)
+        bed_by_column[i] = (modified_filename, axis, peaks)
+    return bed_by_column
+
+'''function add the peak amount of each bed file into correspoding column via the x axis.
+args: 1. tuple list with name,axis,path,peak
+2. the cor_table need to be updated'''
+def add_peak_amount(peak_info_by_column,cor_data):
+    # Iterate through the tuples and add values to the groups
+    for item in peak_info_by_column:
+        bed_info, axis, path, peak_value = item
+        cor_data.loc[cor_data['x'] == bed_info, 'Peak_amount'] = peak_value
+
+    return cor_data
+
+def add_intersect(cor_table,chrom_info,files_path):
+    #files_path = [os.path.join(path_to_data,file) for file in os.listdir(path_to_data)]
+    for path in files_path:
+        df = pd.read_csv(path)
+        id = df.loc[0, 'TargetSequence_negative']
+        for item in chrom_info:
+            bed_info, axis, path, peak_value = item
+            amount = df[bed_info].value_counts().get(1,0) 
+            cor_table.loc[(cor_table['x'] == bed_info) & (cor_table["Id"]== id), 'intersect_amount'] = amount
+    return cor_table
+
 
 '''function merge cor_data into one data set from all three guideseq params'''
 def merge_cor_data(path):
@@ -311,6 +449,7 @@ def extract_axis(data_path,function_applied,columns):
 if __name__ == '__main__':
     # run stats create for each guideseq folder the cor_folder
     run_stats(sys.argv[1],2,sys.argv[2])
+    
     new_path = os.path.abspath(os.path.join(sys.argv[1], os.pardir, os.pardir))
     merge_cor_data(new_path)
     
