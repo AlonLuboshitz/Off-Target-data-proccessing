@@ -48,7 +48,7 @@ def run_stats(path_to_data,list_of_columns,bed_files_path):
     pattern = r'(\d+)params'
     params = re.search(pattern,path_to_data).group(1)
     # run on each file pearson/spearman/phi
-    list_of_corelations = ["Pearson","Spearman","Hypergeo"]
+    list_of_corelations = ["Hypergeo"]
     positive_sum = 0
     negative_sum = 0
     
@@ -177,10 +177,15 @@ def merge_files(file_list,list_of_columns):
 '''function create table for corlation data in spesific path
 return tuple of table,path to table.'''
 def create_cor_table(path):
-    columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount','Peak_amount','intersect_amount']
-    cor_table = pd.DataFrame(columns=columns)
     file_path = os.path.join(path,f"Cor_data.csv")
-    cor_table.to_csv(file_path,index=False)
+    if os.path.exists(file_path):
+        cor_table = pd.read_csv(file_path)
+        
+    else:
+        columns = ['Id','Params','Cor_type','x','y','R','R-Sqr','P-val','Positive_amount','Negative_amount','Peak_amount','intersect_amount']
+        cor_table = pd.DataFrame(columns=columns)
+        cor_table.to_csv(file_path,index=False)
+    
     return (cor_table,file_path)
 
 '''extract amounts of positive off target and negative off targets'''
@@ -212,24 +217,31 @@ def process_data(data,id, params, x_axis_list, y_axis_list, list_of_correlations
     # make a copy to preserve basic data
     combined_values = temp_insert_dict.copy()
     # iterate axiss and get the series data from each exp
-    for x in x_axis_list:
+    for cor in list_of_correlations:
+        for x in x_axis_list:
     
-        x_data = data[x]
-        
-        for y in y_axis_list:
-            
-            if y == "bi.sum.mi":
-                y_data = data["bi.sum.mi"] = data["bi.sum.mi"].fillna(0)
-                y_data = y_data.apply(log_transf)
-                y = "Log_" + y
-            else: 
-                y_data = data[y]
-            # returned values are in a dict {x,y,cor_type,R,r^2,P-val}
-            for cor in list_of_correlations:
-                added_dict = run_correlation(x_data=x_data,y_data=y_data, x_name=x, y_name=y, cor_name=cor,data=data,columns_info=columns_info)
+            x_data = data[x]
+            if cor == "Hypergeo":
+                added_dict = run_correlation(x_data=x_data,y_data=None, x_name=x, y_name='Label_negative', cor_name=cor,data=data,columns_info=columns_info)
                 combined_values.update(added_dict)
                 temp_values = [combined_values]
                 #cor_table = cor_table.append(combined_values,ignore_index=True)
+                temp_df = pd.DataFrame(temp_values)
+                cor_table = pd.concat([cor_table, temp_df], axis=0, ignore_index=True)
+                continue
+            for y in y_axis_list:
+                
+                if y == "bi.sum.mi":
+                    y_data = data["bi.sum.mi"] = data["bi.sum.mi"].fillna(0)
+                    y_data = y_data.apply(log_transf)
+                    y = "Log_" + y
+                else: 
+                    y_data = data[y]
+                # returned values are in a dict {x,y,cor_type,R,r^2,P-val}
+                
+                added_dict = run_correlation(x_data=x_data,y_data=y_data, x_name=x, y_name=y, cor_name=cor,data=data,columns_info=columns_info)
+                combined_values.update(added_dict)
+                temp_values = [combined_values]
                 temp_df = pd.DataFrame(temp_values)
                 cor_table = pd.concat([cor_table, temp_df], axis=0, ignore_index=True)
                
@@ -251,7 +263,7 @@ def run_correlation(x_data,y_data,x_name,y_name,cor_name,data,columns_info):
         correlation, p_value = stats.spearmanr(x_data,y_data)
     elif cor_name == "Hypergeo":
         correlation = 0
-        p_value = hypergeometric_test(data,columns_info,bed_name=x_name)
+        p_value = hypergeometric_test(data,bed_name=x_name,y_data=y_name)
     
     r_sqr = correlation**2
     returned_params["R"] = correlation
@@ -259,37 +271,34 @@ def run_correlation(x_data,y_data,x_name,y_name,cor_name,data,columns_info):
     returned_params["P-val"] = p_value
     return returned_params
 '''args:
-1. offtarget data - get the off target population size - N . get succses (active) via chromatin location from bedfile
-2. column info - (culumn name, axis, path, peak amount) - population of peak amount - K . randomly choose peak location and check if active or not.
-function: randomly choose chromatin location - n, out of all chromatin location - N and checks if active or not.
-if active - sucsses - x
-if inactive - failure
+1. offtarget data - get the off target population size - N . n - get succses (active)
+2. bed name - x column
+function: 
+Population - off targets - active + in acttive
+Succses - active of target
+Sample size - chromatin info intergration amount
+succses in sample - active off target via sample size
 returns p-val
  '''
-def hypergeometric_test(offtarget_data,column_info,bed_name):
+def hypergeometric_test(offtarget_data,bed_name,y_data):
+    # Get active and inactive off targets
+    active,inactive = extract_amount_of_pos_neg(offtarget_data)
     # N population size - off targets
-    N = len(offtarget_data) # raws are inactive+active
-    bed_path = ""
-    # K population size - chromatin size information - amount of peaks
-    K = 0
-    for tuple in column_info:
-        if tuple[0] == bed_name:
-            bed_path = tuple[2]
-            K = tuple[3]
-            break
-    # init data frame to randomly pick a chrom location
-    bed_data = pd.read_csv(bed_path,delimiter='\t',header=None)
-    # pick third of the chrom location
-    picks_amount = round(len(bed_data)/3)
-    random_picks = bed_data.sample(n=picks_amount)
-    # succsess data frame - by position,chr and label:
-    
+    population_size = active + inactive
+    # intergration with chrom info
+    sample_size = offtarget_data[bed_name].value_counts().get(1,0)
+    # succses in sample - where x column(chrom info) is 1 -> open, and y column is 1 (active)
+    successes_in_sample = len(offtarget_data[(offtarget_data[bed_name] == 1) & (offtarget_data[y_data] >= 1)])
+    # hypergeo test
+    p_value_more_than = 1 - stats.hypergeom.cdf(successes_in_sample - 1, population_size, active, sample_size)
+
+
 
 
     
     
-    pval = 0
-    return pval
+    
+    return p_value_more_than
 
 
 ''' function transfor information to log of  (1 + val)

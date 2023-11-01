@@ -94,13 +94,13 @@ if __name__ == '__main__':
     # Get the directory where the current script is located
     current_script_directory = os.path.dirname(os.path.abspath(__file__))
     # Positive runner
-    #run_positive_labeling(current_script_directory,identified_paths)
+    run_positive_labeling(current_script_directory,identified_paths)
     # get paths for merged_labeled
     labeled_paths = path_to_merged_files(identified_paths)
     # negative\positive runner
-    #run_negative_positive(labeled_paths,current_script_directory,sys.argv[2])
+    run_negative_positive(labeled_paths,current_script_directory,sys.argv[2])
     # run chrom_labeling on the guideseq combined output foler
-    run_chrom_labeling(sys.argv[3],sys.argv[1],current_script_directory)
+    #run_chrom_labeling(sys.argv[3],sys.argv[1],current_script_directory)
 
 
     

@@ -4,7 +4,9 @@ import os
 import pandas as pd
 import pybedtools
 import sys
+import subprocess
 import re
+from correlation_analysis import merge_files
 '''function args: 1 - bed folder path
 2 - path for guideseq folder, inside combined files needs chrom labeling
 
@@ -74,7 +76,7 @@ def apply_for_folder(folder_combined_path,bed_path,chrom_info):
         combined_path = os.path.join(folder_combined_path,combined_file)
         # label the combined file vie bed fils
         add_chrom_label(combined_path,bed_path,output_path,chrom_info) 
-   
+
 '''function args:
 1. gets path for combined file - with active\inactive labeling
 2. bed_path - bedfile for chromatin info e.g - accesability, methylation, phopholyration etc..
@@ -95,7 +97,8 @@ def add_chrom_label(combined_path,bed_path,output_path,chrom_info):
     # transfrom files into data frames with chr,strat,end,index 
     # get combined file to df.
     combined_data = pd.read_csv(combined_path)   
-    combined_bed_data,bed_data = create_bed_and_combined(combined_data,bed_path)
+    combined_bed_data = create_from_data_bed_data_frame(combined_data,False)
+    bed_data = create_from_bed_to_data_frame(bed_path,False)
     # Perform the intersection using pybedtools, -wo keeps information from both - e.a both columns and base pair amount for each intersection 
     combined_tool = pybedtools.BedTool.from_dataframe(combined_bed_data)
     bed_tool_data = pybedtools.BedTool.from_dataframe(bed_data)
@@ -128,25 +131,43 @@ def add_chrom_label(combined_path,bed_path,output_path,chrom_info):
         #     #input("press anything to continue: ")
  
     combined_data.to_csv(output_path, index=False)
-def create_bed_and_combined(combined_data,bed_path):
+''' create data frame from bed file
+args is path to bed file
+if strand - add strand information'''
+def create_from_bed_to_data_frame(bed_path,if_strand):
     # Read BED file into a DataFrame bed file has no headers
     bed_data = pd.read_csv(bed_path, sep='\t', header=None)
     # Get number of columns
     num_columns = bed_data.shape[1]
     # Create column names based on the number of columns
-    column_names = ['Chrbed', 'Startbed', 'Endbed'] + [str(i) for i in range(4, num_columns + 1)]
+    if if_strand:
+        column_names = ['Chrbed', 'Startbed', 'Endbed','Strand'] + [str(i) for i in range(5, num_columns + 1)]
+    else:
+        column_names = ['Chrbed', 'Startbed', 'Endbed'] + [str(i) for i in range(4, num_columns + 1)]
     # Assign the new column names to the DataFrame
     bed_data.columns = column_names 
     # set index
     bed_data['IndexBed'] = bed_data.index
-   
-    # convert combined df into bedfile with : Chr,Start,End,Index 
-    csv_bed_data = combined_data[['chrinfo_extracted', 'Position']].copy()
+    return bed_data
+''' create bed type data frame from combined file
+arg is data frame
+if_starnd = keep strand information'''   
+def create_from_data_bed_data_frame(combined_data,if_strand):
+    # convert combined df into bedfile with : Chr,Start,End,Index (strand, if strand)
+    columns = ['chrinfo_extracted', 'Position']
+    
+    if if_strand:
+        ordered_columns = ['Chr', 'Start', 'End', 'Index', 'Score', 'Strand']
+        columns.append('Strand')
+    csv_bed_data = combined_data[columns].copy()
     csv_bed_data['End'] = csv_bed_data['Position'] + 23
     csv_bed_data.rename(columns={'Position': 'Start','chrinfo_extracted':'Chr'}, inplace=True)
     csv_bed_data['Index'] = csv_bed_data.index
+    if if_strand:
+        csv_bed_data['Score'] = 0
+        csv_bed_data = csv_bed_data[ordered_columns]
+    return csv_bed_data
 
-    return (csv_bed_data,bed_data)
 
 ''' args:
 1. path for bed file
@@ -198,10 +219,60 @@ def list_of_bed_columns(chrom_type,data_path):
     bed_names = [item.split('_', 1)[1] for item in bed_names_and_exp]
     # return the bed names by column
     return bed_names
+def pie_plot_intersection(guideseq40,guideseq50,genome_folder):
+    # merge all data into one data frame- get a list of one 40\50 guideseq
+    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)
+    list_of_colums = [("Strand",1),('Label_negative',2)] # merge_files get list of tuples
+    merge_data = merge_files(file_paths,list_of_colums)
+    mergedata_bed_df = create_from_data_bed_data_frame(merge_data,False) # create bed file data
+    mergedata_bed = pybedtools.BedTool.from_dataframe(mergedata_bed_df)
+    total_intervals = len(mergedata_bed_df) + 1 # include raw 0 
+    # create empty list for tuples : (genome_category,intersection_fraction)
+    fraction_list = []
+    # create genome bed file list
+    bed_path_list = get_bed_files(genome_folder)
+    # run intersection on each file:
+    for path in bed_path_list:
+        #check_intervals(path)
+        genome_data = pybedtools.BedTool(path) # bed information
+        intersection = mergedata_bed.intersect(genome_data,s=False) 
+        intersection_amount = count_intervals_bed_file(intersection.fn) # get intersection amount
+        fraction = intersection_amount / total_intervals
+        genome_category = os.path.basename(path).rstrip('.bed') # exons\introns\etc..
+        fraction_list.append((genome_category,fraction))
+    sum = 0
+    for cat,frac in fraction_list:
+        sum = sum + frac
+    print(sum)
 
 
 
-  
+    # get fraction of intersection and create pie plot
+    pass
+def create_path_list(combined_folder):
+    path_list = []
+    for combined_file in os.listdir(combined_folder):
+        combined_path = os.path.join(combined_folder,combined_file)
+        path_list.append(combined_path)
+    return path_list
+def check_intervals(genome_data_path):
+    
+    bed_data = pybedtools.BedTool(genome_data_path)
+    total_amount = count_intervals_bed_file(genome_data_path)
+   
+    intersection_s = bed_data.intersect(bed_data,s=True)
+    intersection_no_s = bed_data.intersect(bed_data,s=False)
+    amount_intersection_s = count_intervals_bed_file(intersection_s.fn)
+    amount_intersection_no_s = count_intervals_bed_file(intersection_no_s.fn)
+    if amount_intersection_s > total_amount:
+        print("overlapping with Strand")
+    if amount_intersection_no_s > total_amount:
+        print("overlapping with no Strand")    
+def count_intervals_bed_file(file_path):
+    command = f"wc -l < {file_path}"
+    result = subprocess.run(command, shell=True, text=True, capture_output=True)
+    return int(result.stdout.strip()) 
+   
 '''args: 1 path to bedfiles
 2 path to guideseq folder'''
 if __name__ == "__main__":
@@ -210,5 +281,6 @@ if __name__ == "__main__":
     # if input == "y":
     #     update_info("/home/alon/masterfiles/guideseq50files/guideseq/0915/chrom_info_tag","/home/alon/masterfiles/guideseq40files/bedfiles/Openchrom")
     #     exit(0)
-    run_chrom_labeling(sys.argv[1],sys.argv[2])
+    #run_chrom_labeling(sys.argv[1],sys.argv[2])
+    pie_plot_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/bedfiles/Genome_info")
 
