@@ -2,7 +2,7 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["TargetSequence_negative","Siteseq"]
+FEATURES_COLUMNS = ["TargetSequence_negative","Siteseq","Label_negative"]
 LABEL = ["Label_negative"]
 ENCODED_LENGTH = 6 * 23
 import pandas as pd
@@ -27,6 +27,8 @@ def run_leave_one_out(guideseq40,guideseq50):
     # leave one out - run model
     for i,path in enumerate(file_paths):
         x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i)
+        # print (f'x_train: {x_train[:15]}, y_train: {y_train[:15]}')
+        # num_ones = np.count_nonzero(y_train)
         # run logistic model
         auroc,auprc = get_logreg_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
         print(f"Ith: {i+1} split is done")
@@ -62,15 +64,29 @@ def order_data(X_feature,Y_labels,i):
     permutation_indices = np.random.permutation(x_train.shape[0])
     x_train = x_train[permutation_indices]
     y_train = y_train[permutation_indices]
- 
     return (x_train,y_train,x_test,y_test)
+
+'''function to balance amount of y labels- e.a same amount of 1,0
+agiasnt x features.'''
+def balance_data(y_train,x_train):
+    # Get the indices of ones
+    indices_ones = np.where(y_train == 1)[0]
+    # Get the indices of zeros
+    indices_zeros = np.where(y_train == 0)[0]
+    # Randomly pick the same number of indices as the number of ones
+    random_indices_zeros = np.random.choice(indices_zeros, len(indices_ones), replace=False)
+    # Merge indices
+    combined_indices = np.concatenate((indices_ones, random_indices_zeros))
+    y_train = y_train[combined_indices] 
+    x_train = x_train[combined_indices]
+    return (y_train,x_train)
 def generate_feature_labels(path_list):
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     for file_path in (path_list):
         # Load data from the file
         data = pd.read_csv(file_path)
-        
+        #print(data[FEATURES_COLUMNS]) check data
         # Get x_data using your get_features function
         x_data = get_features(data, only_seq_info=True)  # Set only_seq_info as needed
         
