@@ -1,0 +1,90 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Features",
+            "type": "python",
+            "request": "launch",
+            "program": "feature_engineering.py",
+            "console": "integratedTerminal",
+            "args": ["/home/alon/masterfiles/guideseq40files/guideseq/0610params/combined_output",
+            "/home/alon/masterfiles/guideseq50files/guideseq/0915params/testa"],
+            "justMyCode": true
+        },
+        {
+            "name": "negative,positive",
+            "type": "python",
+            "request": "launch",
+            "program": "negative_positive.py",
+            "console": "integratedTerminal",
+            "args": [
+                "/home/alon/masterfiles/guideseq50files/casoffinder_outputs",
+                "/home/alon/masterfiles/guideseq50files/guideseq/0610/_label_sub_only_merged"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "peak to bed",
+            "type": "python",
+            "request": "launch",
+            "program": "continous_peak_to_bed.py",
+            "console": "integratedTerminal",
+            "args": [
+                "/home/alon/masterfiles/guideseq40files/bedfiles/Mtyhlation/h3k4me3/GSE99407_ChIPseq_Peaks.Untransfected.antiH3K4me3.protocolC.p10e-5.sep250.txt/ChIPseq_Peaks.Untransfected.antiH3K4me3.protocolC.p10e-5.sep250.txt"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "chrom_label",
+            "type": "python",
+            "request": "launch",
+            "program": "chromatin_labeling.py",
+            "console": "integratedTerminal",
+            "args": [
+                "/home/alon/masterfiles/guideseq40files/bedfiles",
+                "/home/alon/masterfiles/guideseq40files-copy/guideseq"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Correlation analysis",
+            "type": "python",
+            "request": "launch",
+            "program": "correlation_analysis.py",
+            "console": "integratedTerminal",
+            "args": [
+                "/home/alon/masterfiles/guideseq50files/guideseq/0915params/chrom_info_tag",
+                "/home/alon/masterfiles/guideseq40files/bedfiles/"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "data processing",
+            "type": "python",
+            "request": "launch",
+            "program": "data_processing.py",
+            "console": "integratedTerminal",
+            "args": [
+                "/home/alon/masterfiles/guideseq40files-copy/guideseq",
+                "/home/alon/masterfiles/guideseq40files-copy/outputs",
+                "/home/alon/masterfiles/guideseq40files/bedfiles"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "positive",
+            "type": "python",
+            "request": "launch",
+            "program": "positive_label.py",
+            "args": [
+                "/home/alon/masterfiles/guideseq40files-copy/guideseq/0915params/identified",
+                "2",
+                "False"
+            ],
+            "justMyCode": true
+        },
+    ]
+}

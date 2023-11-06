@@ -2,7 +2,8 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["TargetSequence_negative","Siteseq","Label_negative"]
+FEATURES_COLUMNS = ["Mtyhlation_293_h3k4me3_ENCFF498ERO"]
+ONLY_SEQ_INFO = False #set as needed, if only seq then True.
 LABEL = ["Label_negative"]
 ENCODED_LENGTH = 6 * 23
 import pandas as pd
@@ -21,7 +22,7 @@ run logreg with leaving one file out for testing the data.
 update results and extract csv file.
 '''
 def run_leave_one_out(guideseq40,guideseq50):
-    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)    
+    file_paths = create_path_list(guideseq50) #+ create_path_list(guideseq50)    
     x_feature,y_label = generate_feature_labels(file_paths) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc', 'Features', 'File_out'])
     # leave one out - run model
@@ -31,7 +32,7 @@ def run_leave_one_out(guideseq40,guideseq50):
         # num_ones = np.count_nonzero(y_train)
         # run logistic model
         auroc,auprc = get_logreg_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
-        print(f"Ith: {i+1} split is done")
+        print(f"Ith: {i+1}\{len(file_paths)} split is done")
         ith_file_name = os.path.basename(path).split("_")[0]
         results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=ith_file_name,table=results_table,ML_type="log_reg")
     results_table.to_csv('ML_results.csv')
@@ -88,7 +89,7 @@ def generate_feature_labels(path_list):
         data = pd.read_csv(file_path)
         #print(data[FEATURES_COLUMNS]) check data
         # Get x_data using your get_features function
-        x_data = get_features(data, only_seq_info=True)  # Set only_seq_info as needed
+        x_data = get_features(data, only_seq_info=ONLY_SEQ_INFO)  # Set only_seq_info as needed
         
         # Append x_data to the list
         x_data_all.append(x_data)

@@ -1,1 +1,2 @@
 python "/home/alon/masterfiles/pythonscripts/data_processing.py" "/home/alon/masterfiles/guideseq40files/guideseq" "/home/alon/masterfiles/guideseq40files/outputs" "/home/alon/masterfiles/guideseq40files/bedfiles"
+"/home/alon/masterfiles/guideseq40files/guideseq/0610params/combined_output" "/home/alon/masterfiles/guideseq50files/guideseq/0610params/combined_output"
