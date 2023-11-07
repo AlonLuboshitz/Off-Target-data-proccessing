@@ -10,7 +10,7 @@ ENCODED_LENGTH = 6 * 23
 import pandas as pd
 import numpy as np
 import sys
-
+import time
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.metrics import roc_curve, auc, average_precision_score
@@ -28,6 +28,7 @@ def run_leave_one_out(guideseq40,guideseq50):
     x_feature,y_label = generate_feature_labels(file_paths) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc', 'Features', 'File_out'])
     # leave one out - run model
+    print("Starting ml")
     for i,path in enumerate(file_paths):
         x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i)
         # print (f'x_train: {x_train[:15]}, y_train: {y_train[:15]}')
@@ -37,7 +38,8 @@ def run_leave_one_out(guideseq40,guideseq50):
         print(f"Ith: {i+1}\{len(file_paths)} split is done")
         ith_file_name = os.path.basename(path).split("_")[0]
         results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=ith_file_name,table=results_table,ML_type="log_reg")
-    results_table.to_csv('ML_results.csv')
+    file_name = ML_TYPE + "_" +  FEATURES_COLUMNS +".csv"
+    results_table.to_csv(file_name)
 '''function write to table: auroc,auprc from log_reg.
 what file was left out.'''
 def write_to_table(auroc,auprc,file_left_out,table,ML_type):
@@ -49,42 +51,7 @@ def write_to_table(auroc,auprc,file_left_out,table,ML_type):
     except: # empty data frame
         table.loc[0] = [ML_type, auroc, auprc, FEATURES_COLUMNS, file_left_out]
     return table
-    
-    
 
-'''given feature list, label list split them into
-test and train data.
-transform into ndarray and shuffle the train data'''
-def order_data(X_feature,Y_labels,i):
-    # into nd array
-    x_test = np.array(X_feature[i])
-    y_test = np.array(Y_labels[i]).ravel() # flatten to one dimension the y label
-    # exclude ith data from train set using slicing.
-    x_train = X_feature[:i] + X_feature[i+1:]
-    y_train = Y_labels[:i] + Y_labels[i+1:]
-    # transform into ndarray
-    x_train = np.concatenate(x_train,axis=0)
-    y_train = np.concatenate(y_train,axis=0).ravel() # flatten to one dimension the y label
-    # shuffle the data keeping matching labels for corresponding x values.
-    permutation_indices = np.random.permutation(x_train.shape[0])
-    x_train = x_train[permutation_indices]
-    y_train = y_train[permutation_indices]
-    return (x_train,y_train,x_test,y_test)
-
-'''function to balance amount of y labels- e.a same amount of 1,0
-agiasnt x features.'''
-def balance_data(y_train,x_train):
-    # Get the indices of ones
-    indices_ones = np.where(y_train == 1)[0]
-    # Get the indices of zeros
-    indices_zeros = np.where(y_train == 0)[0]
-    # Randomly pick the same number of indices as the number of ones
-    random_indices_zeros = np.random.choice(indices_zeros, len(indices_ones), replace=False)
-    # Merge indices
-    combined_indices = np.concatenate((indices_ones, random_indices_zeros))
-    y_train = y_train[combined_indices] 
-    x_train = x_train[combined_indices]
-    return (y_train,x_train)
 def generate_feature_labels(path_list):
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
@@ -102,14 +69,11 @@ def generate_feature_labels(path_list):
         y_labels_all.append(data[LABEL].values)
     # return lists
     return (x_data_all,y_labels_all)
-def create_path_list(combined_folder):
-    path_list = []
-    for combined_file in os.listdir(combined_folder):
-        combined_path = os.path.join(combined_folder,combined_file)
-        path_list.append(combined_path)
-    return path_list   
+
 '''funcion to run logsitic regression model and return roc,prc'''
-def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): #
+def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfold "#"
+    # time_test(X_train,y_train)
+    # exit(0)
     classifier = get_classifier()
     classifier.fit(X_train, y_train)
     y_scores = classifier.predict(X_test)
@@ -120,11 +84,12 @@ def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): #
     auprc = average_precision_score(y_test, y_scores)
     print("ML DONE")
     return (auroc,auprc)
+
 def get_classifier():
     if ML_TYPE == "LOGREG":
         return LogisticRegression(random_state=42,n_jobs=-1)
     elif ML_TYPE == "SVM":
-        return SVC(random_state=42)
+        return SVC(kernel="linear",random_state=42)
 '''get x_axis features for ml algo.
 data - data frame for guiderna
 only_seq_info - bolean for only seq or other features.'''
@@ -166,12 +131,77 @@ def seq_to_one_hot(sequence, seq_guide):
             except ValueError:  # Non-ATCG base found
                 pass
     return onehot
+    
+'''given feature list, label list split them into
+test and train data.
+transform into ndarray and shuffle the train data'''
+def order_data(X_feature,Y_labels,i):
+    # into nd array
+    x_test = np.array(X_feature[i])
+    y_test = np.array(Y_labels[i]).ravel() # flatten to one dimension the y label
+    # exclude ith data from train set using slicing.
+    x_train = X_feature[:i] + X_feature[i+1:]
+    y_train = Y_labels[:i] + Y_labels[i+1:]
+    # transform into ndarray
+    x_train = np.concatenate(x_train,axis=0)
+    y_train = np.concatenate(y_train,axis=0).ravel() # flatten to one dimension the y label
+    # shuffle the data keeping matching labels for corresponding x values.
+    permutation_indices = np.random.permutation(x_train.shape[0])
+    x_train = x_train[permutation_indices]
+    y_train = y_train[permutation_indices]
+    return (x_train,y_train,x_test,y_test)
+
+'''function check running time for amount of data points'''
+def time_test(x_train,y_train):
+    points = [100,1000,10000,100000] # Amount of data points to check
+    for n in points:
+        X_train_subset, y_train_subset = balance_data(x_train,y_train,n) # Balance data hopefully with n//2 for each label
+        clf = get_classifier()
+        start_time = time.time()
+        clf.fit(X_train_subset,y_train_subset)
+        end_time = time.time()
+        training_time = end_time - start_time
+        print(f"Training {ML_TYPE} with {n} data points took {training_time:.4f} seconds.")
+
+'''function to balance amount of y labels- e.a same amount of 1,0
+agiasnt x features.
+data_points - amount of wanted data points'''
+def balance_data(x_train,y_train,data_points):
+    # Get the indices of ones
+    indices_ones = np.where(y_train == 1)[0]
+    # Get the indices of zeros
+    indices_zeros = np.where(y_train == 0)[0]
+    # Try to split positive label and negative equaly
+    if len(indices_ones) >= (data_points//2): # Enough positive equal amount
+        n = (data_points//2) 
+        m = n
+    else: # Not enough positive, set positive to all positive amount and the rest negative
+        n = len(indices_ones)
+        m = data_points - n
+    if m > len(indices_zeros): # Not enough negative points
+        print(f"There are less data points then: {data_points}\nPlease change amount")
+        exit(0)
+        
+    # Randomly pick n/2 indices from both ones and zeros
+    random_indices_ones = np.random.choice(indices_ones, n, replace=False)
+    random_indices_zeros = np.random.choice(indices_zeros, m, replace=False)
+    # Merge indices
+    combined_indices = np.concatenate((random_indices_ones, random_indices_zeros))
+    y_train = y_train[combined_indices] 
+    x_train = x_train[combined_indices]
+    return (x_train,y_train)        
+
 def set_if_seq():
     if_seq = input("press y/Y to keep only_seq, any other for more\n")
     if not if_seq.lower() == "y":
         return False
     else: return True
-
+def create_path_list(combined_folder):
+    path_list = []
+    for combined_file in os.listdir(combined_folder):
+        combined_path = os.path.join(combined_folder,combined_file)
+        path_list.append(combined_path)
+    return path_list   
 if __name__ == "__main__":
     ONLY_SEQ_INFO = set_if_seq()
     ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")
