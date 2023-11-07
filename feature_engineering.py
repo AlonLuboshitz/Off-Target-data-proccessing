@@ -10,7 +10,7 @@ ENCODED_LENGTH = 6 * 23
 import pandas as pd
 import numpy as np
 import sys
-from chromatin_labeling import create_path_list
+
 from sklearn.linear_model import LogisticRegression
 from sklearn import svm
 from sklearn.metrics import roc_curve, auc, average_precision_score
@@ -102,7 +102,12 @@ def generate_feature_labels(path_list):
         y_labels_all.append(data[LABEL].values)
     # return lists
     return (x_data_all,y_labels_all)
-   
+def create_path_list(combined_folder):
+    path_list = []
+    for combined_file in os.listdir(combined_folder):
+        combined_path = os.path.join(combined_folder,combined_file)
+        path_list.append(combined_path)
+    return path_list   
 '''funcion to run logsitic regression model and return roc,prc'''
 def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): #
     classifier = get_classifier()
