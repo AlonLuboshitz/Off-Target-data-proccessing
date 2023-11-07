@@ -12,7 +12,7 @@ import numpy as np
 import sys
 
 from sklearn.linear_model import LogisticRegression
-from sklearn import svm
+from sklearn.svm import SVC
 from sklearn.metrics import roc_curve, auc, average_precision_score
 import os
 
@@ -24,7 +24,7 @@ run logreg with leaving one file out for testing the data.
 update results and extract csv file.
 '''
 def run_leave_one_out(guideseq40,guideseq50):
-    file_paths = create_path_list(guideseq50) #+ create_path_list(guideseq50)    
+    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)    
     x_feature,y_label = generate_feature_labels(file_paths) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc', 'Features', 'File_out'])
     # leave one out - run model
@@ -124,7 +124,7 @@ def get_classifier():
     if ML_TYPE == "LOGREG":
         return LogisticRegression(random_state=42,n_jobs=-1)
     elif ML_TYPE == "SVM":
-        return svm.SVC(kernel="linear",random_state=42)
+        return SVC(random_state=42)
 '''get x_axis features for ml algo.
 data - data frame for guiderna
 only_seq_info - bolean for only seq or other features.'''
