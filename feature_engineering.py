@@ -3,14 +3,16 @@
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
 FEATURES_COLUMNS = ["Mtyhlation_293_h3k4me3_ENCFF498ERO"]
-ONLY_SEQ_INFO = False #set as needed, if only seq then True.
+ONLY_SEQ_INFO = True #set as needed, if only seq then True.
 LABEL = ["Label_negative"]
+ML_TYPE = "" # String inputed by user
 ENCODED_LENGTH = 6 * 23
 import pandas as pd
 import numpy as np
 import sys
 from chromatin_labeling import create_path_list
 from sklearn.linear_model import LogisticRegression
+from sklearn import svm
 from sklearn.metrics import roc_curve, auc, average_precision_score
 import os
 
@@ -31,7 +33,7 @@ def run_leave_one_out(guideseq40,guideseq50):
         # print (f'x_train: {x_train[:15]}, y_train: {y_train[:15]}')
         # num_ones = np.count_nonzero(y_train)
         # run logistic model
-        auroc,auprc = get_logreg_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+        auroc,auprc = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
         print(f"Ith: {i+1}\{len(file_paths)} split is done")
         ith_file_name = os.path.basename(path).split("_")[0]
         results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=ith_file_name,table=results_table,ML_type="log_reg")
@@ -39,6 +41,8 @@ def run_leave_one_out(guideseq40,guideseq50):
 '''function write to table: auroc,auprc from log_reg.
 what file was left out.'''
 def write_to_table(auroc,auprc,file_left_out,table,ML_type):
+    if ONLY_SEQ_INFO:
+        FEATURES_COLUMNS = ["Only_Seq"]
     try:
         new_row_index = len(table)  # Get the index for the new row
         table.loc[new_row_index] = [ML_type, auroc, auprc, FEATURES_COLUMNS, file_left_out]  # Add data to the new row
@@ -98,20 +102,24 @@ def generate_feature_labels(path_list):
         y_labels_all.append(data[LABEL].values)
     # return lists
     return (x_data_all,y_labels_all)
-    
+   
 '''funcion to run logsitic regression model and return roc,prc'''
-def get_logreg_auroc_auprc(X_train, y_train, X_test, y_test): #
-    logreg_classifier = LogisticRegression(random_state=42, n_jobs=-1)
-    logreg_classifier.fit(X_train, y_train)
-    y_scores_logreg = logreg_classifier.predict(X_test)
+def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): #
+    classifier = get_classifier()
+    classifier.fit(X_train, y_train)
+    y_scores = classifier.predict(X_test)
     # Calculate AUROC
-    fpr_logreg, tpr_logreg, _ = roc_curve(y_test, y_scores_logreg)
-    auroc_logreg = auc(fpr_logreg, tpr_logreg)
+    fpr, tpr, _ = roc_curve(y_test, y_scores)
+    auroc = auc(fpr, tpr)
     # Calculate AUPRC
-    auprc_logreg = average_precision_score(y_test, y_scores_logreg)
-    print("LOGREG DONE")
-    return (auroc_logreg,auprc_logreg)
-
+    auprc = average_precision_score(y_test, y_scores)
+    print("ML DONE")
+    return (auroc,auprc)
+def get_classifier():
+    if ML_TYPE == "LOGREG":
+        return LogisticRegression(random_state=42,n_jobs=-1)
+    elif ML_TYPE == "SVM":
+        return svm.SVC(kernel="linear",random_state=42)
 '''get x_axis features for ml algo.
 data - data frame for guiderna
 only_seq_info - bolean for only seq or other features.'''
@@ -153,7 +161,14 @@ def seq_to_one_hot(sequence, seq_guide):
             except ValueError:  # Non-ATCG base found
                 pass
     return onehot
+def set_if_seq():
+    if_seq = input("press y/Y to keep only_seq, any other for more\n")
+    if not if_seq.lower() == "y":
+        return False
+    else: return True
 
 if __name__ == "__main__":
+    ONLY_SEQ_INFO = set_if_seq()
+    ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")
     run_leave_one_out(sys.argv[1],sys.argv[2])
     
