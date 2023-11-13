@@ -79,6 +79,24 @@ def make_input_txt_files(input_path,output_path):
             txt_file.write("/home/labhendel/Documents/cas-offinder_linux_x86-64/hg38noalt\n")
             txt_file.write(n_string + "\n")
             txt_file.write(seq + ' 6')
+
+''' on time function for crispr sql'''
+def create_cas_ofinder_inputs(picrispr_data):
+    picrispr_data = pd.read_csv(picrispr_data)
+    output_path = f"/home/alon/masterfiles/pythonscripts/crisprsql_casoffiner_inputs"
+    guides = set(picrispr_data['grna_target_sequence'])
+    for guide in guides:
+        n_string = 'N' * len(guide)
+        output_filename = f"{guide}_input.txt"
+        temp_path = os.path.join(output_path,output_filename)
+        with open(temp_path, 'w') as txt_file:
+            txt_file.write("/home/labhendel/Documents/cas-offinder_linux_x86-64/hg19\n")
+            txt_file.write(n_string + "\n")
+            txt_file.write(guide + ' 6')
+
+
+
+
 '''
 function looks for multiple duplicates from the same exprimenet and merge the data from them
 args - folder paths, number of duplicated, file ending - exmp: '_labeled.csv, erase: for erasing the previous folder.'
@@ -173,6 +191,7 @@ if __name__ == '__main__':
     # join path to identified +  labeled only.
     labeld_path = sys.argv[1] + f'_labeled_sub_only' 
     merge_positives(labeld_path,sys.argv[2],'_label_sub_only.csv',sys.argv[3])
+    
 
         
 
