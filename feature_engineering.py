@@ -11,6 +11,9 @@ import pandas as pd
 import numpy as np
 import sys
 import time
+from imblearn.over_sampling import RandomOverSampler
+
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.metrics import roc_curve, auc, average_precision_score
@@ -24,34 +27,50 @@ run logreg with leaving one file out for testing the data.
 update results and extract csv file.
 '''
 def run_leave_one_out(guideseq40,guideseq50):
-    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)    
+    file_paths = create_path_list(guideseq40) #+ create_path_list(guideseq50)    
     x_feature,y_label = generate_feature_labels(file_paths) # List of arrays
-    results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc', 'Features', 'File_out'])
+    results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
     # leave one out - run model
     print("Starting ml")
     for i,path in enumerate(file_paths):
         x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i)
-        # print (f'x_train: {x_train[:15]}, y_train: {y_train[:15]}')
-        # num_ones = np.count_nonzero(y_train)
-        # run logistic model
+       # run model
+        #x_train,y_train = balance_data(x_train,y_train,12000)      
         auroc,auprc = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+        tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
         print(f"Ith: {i+1}\{len(file_paths)} split is done")
         ith_file_name = os.path.basename(path).split("_")[0]
-        results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=ith_file_name,table=results_table,ML_type="log_reg")
-    file_name = ML_TYPE + "_" +  FEATURES_COLUMNS +".csv"
+        results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=ith_file_name,table=results_table,ML_type=ML_TYPE,Tpn_tuple=tps_tns)
+    feature_str = ""
+    for feature in FEATURES_COLUMNS:
+      feature_str = feature_str + "_" + feature
+    file_name = ML_TYPE + "_" +  feature_str +"1000_balance.csv"
+    results_table = results_table.sort_values(by="File_out")
     results_table.to_csv(file_name)
-'''function write to table: auroc,auprc from log_reg.
+'''function write to table by columsn:
+ML type, auroc, auprc from log_reg, unpacks 4 element tuple - tp,tn test, tp,tn train.
+features included for training the model
 what file was left out.'''
-def write_to_table(auroc,auprc,file_left_out,table,ML_type):
+def write_to_table(auroc,auprc,file_left_out,table,ML_type,Tpn_tuple):
+    global FEATURES_COLUMNS
     if ONLY_SEQ_INFO:
         FEATURES_COLUMNS = ["Only_Seq"]
     try:
         new_row_index = len(table)  # Get the index for the new row
-        table.loc[new_row_index] = [ML_type, auroc, auprc, FEATURES_COLUMNS, file_left_out]  # Add data to the new row
+        table.loc[new_row_index] = [ML_type, auroc, auprc,*Tpn_tuple, FEATURES_COLUMNS, file_left_out]  # Add data to the new row
     except: # empty data frame
-        table.loc[0] = [ML_type, auroc, auprc, FEATURES_COLUMNS, file_left_out]
+        table.loc[0] = [ML_type, auroc, auprc,*Tpn_tuple , FEATURES_COLUMNS, file_left_out]
     return table
-
+def get_tp_tn(y_test,y_train):
+    tp_train = np.count_nonzero(y_train) # count 1's
+    tn_train = y_train.size - tp_train # count 0's
+    if not tn_train == np.count_nonzero(y_train==0):
+        print("error")
+    tp_test = np.count_nonzero(y_test) # count 1's
+    tn_test = y_test.size - tp_test #count 0's
+    if not tn_test == np.count_nonzero(y_test==0):
+        print("error")
+    return (tp_test,tn_test,tp_train,tn_train)
 def generate_feature_labels(path_list):
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
@@ -74,6 +93,7 @@ def generate_feature_labels(path_list):
 def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfold "#"
     # time_test(X_train,y_train)
     # exit(0)
+    
     classifier = get_classifier()
     classifier.fit(X_train, y_train)
     y_scores = classifier.predict(X_test)
@@ -90,6 +110,9 @@ def get_classifier():
         return LogisticRegression(random_state=42,n_jobs=-1)
     elif ML_TYPE == "SVM":
         return SVC(kernel="linear",random_state=42)
+    elif ML_TYPE == "RANDOMFOREST":
+        return RandomForestClassifier(random_state=42,n_jobs=-1,n_estimators=1000)
+
 '''get x_axis features for ml algo.
 data - data frame for guiderna
 only_seq_info - bolean for only seq or other features.'''
@@ -166,7 +189,7 @@ def time_test(x_train,y_train):
 '''function to balance amount of y labels- e.a same amount of 1,0
 agiasnt x features.
 data_points - amount of wanted data points'''
-def balance_data(x_train,y_train,data_points):
+def balance_data(x_train,y_train,data_points) -> tuple:
     # Get the indices of ones
     indices_ones = np.where(y_train == 1)[0]
     # Get the indices of zeros
@@ -189,8 +212,19 @@ def balance_data(x_train,y_train,data_points):
     combined_indices = np.concatenate((random_indices_ones, random_indices_zeros))
     y_train = y_train[combined_indices] 
     x_train = x_train[combined_indices]
-    return (x_train,y_train)        
-
+    return (x_train,y_train) 
+''' need to add over/under sampling'''       
+def over_under_sample(X_train,y_train) -> tuple:
+    num_minority_samples_before = sum(y_train == 1)
+    # Apply RandomOverSampler to the training data
+    ros = RandomOverSampler(sampling_strategy='auto', random_state=42)
+    X_train, y_train = ros.fit_resample(X_train, y_train)
+    # Count the number of samples in the minority class after oversampling
+    num_minority_samples_after = sum(y_train == 1)
+    # Calculate the number of samples that have been duplicated
+    num_samples_duplicated = num_minority_samples_after - num_minority_samples_before
+    print(f"Number of samples duplicated: {num_samples_duplicated}")
+    return (X_train,y_train)
 def set_if_seq():
     if_seq = input("press y/Y to keep only_seq, any other for more\n")
     if not if_seq.lower() == "y":
