@@ -10,8 +10,9 @@
             "request": "launch",
             "program": "feature_engineering.py",
             "console": "integratedTerminal",
-            "args": ["/home/alon/masterfiles/guideseq40files/guideseq/0610params/combined_output",
-            "/home/alon/masterfiles/guideseq50files/guideseq/0915params/testa"],
+            "args": ["/home/alon/masterfiles/guideseq50files/guideseq/0915params/testa",
+            "/home/alon/masterfiles/guideseq40files-copy/guideseq/0915params/chrom_info_tag",
+            "/home/alon/masterfiles/offtarget_260520_nuc.csv"],
             "justMyCode": true
         },
         {
@@ -82,7 +83,8 @@
             "args": [
                 "/home/alon/masterfiles/guideseq40files-copy/guideseq/0915params/identified",
                 "2",
-                "False"
+                "False",
+                "/home/alon/masterfiles/offtarget_260520_nuc.csv"
             ],
             "justMyCode": true
         },

@@ -85,7 +85,13 @@ def create_cas_ofinder_inputs(picrispr_data):
     picrispr_data = pd.read_csv(picrispr_data)
     output_path = f"/home/alon/masterfiles/pythonscripts/crisprsql_casoffiner_inputs"
     guides = set(picrispr_data['grna_target_sequence'])
+    m = 0
+    lengths = []
     for guide in guides:
+        if not len(guide) == 23:
+            m +=1
+            lengths.append(len(guide))
+            continue
         n_string = 'N' * len(guide)
         output_filename = f"{guide}_input.txt"
         temp_path = os.path.join(output_path,output_filename)
@@ -93,8 +99,7 @@ def create_cas_ofinder_inputs(picrispr_data):
             txt_file.write("/home/labhendel/Documents/cas-offinder_linux_x86-64/hg19\n")
             txt_file.write(n_string + "\n")
             txt_file.write(guide + ' 6')
-
-
+    print(f'{m} grnas are not 23 long with the lengths: {lengths}')
 
 
 '''
@@ -187,11 +192,11 @@ argv 2 -  number of duplicated expriments
 argv 3 - keep the identified label folder or erase it
 '''
 if __name__ == '__main__':
-    process_folder(sys.argv[1])
-    # join path to identified +  labeled only.
-    labeld_path = sys.argv[1] + f'_labeled_sub_only' 
-    merge_positives(labeld_path,sys.argv[2],'_label_sub_only.csv',sys.argv[3])
-    
+    # process_folder(sys.argv[1])
+    # # join path to identified +  labeled only.
+    # labeld_path = sys.argv[1] + f'_labeled_sub_only' 
+    # merge_positives(labeld_path,sys.argv[2],'_label_sub_only.csv',sys.argv[3])
+    create_cas_ofinder_inputs(sys.argv[4])
 
         
 
