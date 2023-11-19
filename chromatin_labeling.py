@@ -97,7 +97,7 @@ def add_chrom_label(combined_path,bed_path,output_path,chrom_info):
     # transfrom files into data frames with chr,strat,end,index 
     # get combined file to df.
     combined_data = pd.read_csv(combined_path)   
-    combined_bed_data = create_from_data_bed_data_frame(combined_data,False)
+    combined_bed_data = create_from_combined_data_bed_data_frame(combined_data,False)
     bed_data = create_from_bed_to_data_frame(bed_path,False)
     # Perform the intersection using pybedtools, -wo keeps information from both - e.a both columns and base pair amount for each intersection 
     combined_tool = pybedtools.BedTool.from_dataframe(combined_bed_data)
@@ -109,7 +109,7 @@ def add_chrom_label(combined_path,bed_path,output_path,chrom_info):
     intersection_df = intersections.to_dataframe(header=None, names=intersect_colmuns)
     # Add a new column to combined_data based on the intersection result - 1 for intersect
     column_bed_filename = get_exp_name_to_column(bed_path,chrom_info)
-    combined_data[column_bed_filename] = 0  
+    combined_data[column_bed_filename] = 0 # fill the colum with zeros
     # Add a new column to combined_data for bed file indexing for later corelation analysis
     bedindex_column = column_bed_filename + "_index"
     combined_data[bedindex_column] = 0
@@ -152,7 +152,7 @@ def create_from_bed_to_data_frame(bed_path,if_strand):
 ''' create bed type data frame from combined file
 arg is data frame
 if_starnd = keep strand information'''   
-def create_from_data_bed_data_frame(combined_data,if_strand):
+def create_from_combined_data_bed_data_frame(combined_data,if_strand):
     # convert combined df into bedfile with : Chr,Start,End,Index (strand, if strand)
     columns = ['chrinfo_extracted', 'Position']
     
@@ -224,7 +224,7 @@ def pie_plot_intersection(guideseq40,guideseq50,genome_folder):
     file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)
     list_of_colums = [("Strand",1),('Label_negative',2)] # merge_files get list of tuples
     merge_data = merge_files(file_paths,list_of_colums)
-    mergedata_bed_df = create_from_data_bed_data_frame(merge_data,False) # create bed file data
+    mergedata_bed_df = create_from_combined_data_bed_data_frame(merge_data,False) # create bed file data
     mergedata_bed = pybedtools.BedTool.from_dataframe(mergedata_bed_df)
     total_intervals = len(mergedata_bed_df) + 1 # include raw 0 
     # create empty list for tuples : (genome_category,intersection_fraction)
@@ -245,6 +245,24 @@ def pie_plot_intersection(guideseq40,guideseq50,genome_folder):
         sum = sum + frac
     print(sum)
 
+'''function check for overlaps in off targets locations via data'''
+def nagative_intersection(guideseq40,guideseq50):
+    # merge all data into one data frame- get a list of one 40\50 guideseq
+    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)
+    total =0
+    for i,path in enumerate(file_paths):
+        print(f"ith iteration: {i}")
+        file_df = pd.read_csv(path)
+        file_bed_df = create_from_combined_data_bed_data_frame(file_df,False)
+        file_bed = pybedtools.BedTool.from_dataframe(file_bed_df)
+        for other_path in (file_paths[i+1:]):
+            other_df = pd.read_csv(other_path)
+            other_bed_df = create_from_combined_data_bed_data_frame(other_df,False)
+            other_bed = pybedtools.BedTool.from_dataframe(other_bed_df)
+            intersection = file_bed.intersect(other_bed,s=False) 
+            intersection_amount = count_intervals_bed_file(intersection.fn)
+            total = total+intersection_amount
+    print(total)
 
 
     # get fraction of intersection and create pie plot
@@ -282,5 +300,6 @@ if __name__ == "__main__":
     #     update_info("/home/alon/masterfiles/guideseq50files/guideseq/0915/chrom_info_tag","/home/alon/masterfiles/guideseq40files/bedfiles/Openchrom")
     #     exit(0)
     #run_chrom_labeling(sys.argv[1],sys.argv[2])
-    pie_plot_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/bedfiles/Genome_info")
-
+    #pie_plot_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/bedfiles/Genome_info")
+    #nagative_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output")
+    pass
