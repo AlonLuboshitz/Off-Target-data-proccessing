@@ -85,21 +85,21 @@ def create_cas_ofinder_inputs(picrispr_data):
     picrispr_data = pd.read_csv(picrispr_data)
     output_path = f"/home/alon/masterfiles/pythonscripts/crisprsql_casoffiner_inputs"
     guides = set(picrispr_data['grna_target_sequence'])
-    m = 0
-    lengths = []
+    lengths = {}
     for guide in guides:
-        if not len(guide) == 23:
-            m +=1
-            lengths.append(len(guide))
-            continue
-        n_string = 'N' * len(guide)
-        output_filename = f"{guide}_input.txt"
-        temp_path = os.path.join(output_path,output_filename)
-        with open(temp_path, 'w') as txt_file:
-            txt_file.write("/home/labhendel/Documents/cas-offinder_linux_x86-64/hg19\n")
-            txt_file.write(n_string + "\n")
-            txt_file.write(guide + ' 6')
-    print(f'{m} grnas are not 23 long with the lengths: {lengths}')
+        length_g = len(guide) # length of guide
+        if length_g in lengths.keys():
+            lengths[length_g] += 1
+        else:   lengths[length_g] = 1
+
+        # n_string = 'N' * len(guide)
+        # output_filename = f"{guide}_input.txt"
+        # temp_path = os.path.join(output_path,output_filename)
+        # with open(temp_path, 'w') as txt_file:
+        #     txt_file.write("/home/labhendel/Documents/cas-offinder_linux_x86-64/hg19\n")
+        #     txt_file.write(n_string + "\n")
+        #     txt_file.write(guide + ' 6')
+    print(lengths)
 
 
 '''

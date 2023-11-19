@@ -2,7 +2,7 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["grna_target_sequence"]
+FEATURES_COLUMNS = ["Openchrom_293T_Ctcf_LHH0085V"]
 ONLY_SEQ_INFO = True #set as needed, if only seq then True.
 LABEL = ["Label_negative"]
 ML_TYPE = "" # String inputed by user
@@ -28,22 +28,23 @@ run logreg with leaving one file out for testing the data.
 update results and extract csv file.
 '''
 def run_leave_one_out(guideseq40,guideseq50):
-    file_paths = create_path_list(guideseq40) #+ create_path_list(guideseq50)    
+    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)    
     x_feature,y_label = generate_feature_labels(file_paths) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+    file_name = create_file_name("lables")
     # leave one out - run model
     print("Starting ml")
     for i,path in enumerate(file_paths):
-        x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i)
+        x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=SHUFFLE,if_print=False)
        # run model
         #x_train,y_train = balance_data(x_train,y_train,12000)      
-        auroc,auprc = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+        auroc,auprc,y_score = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
         print(f"Ith: {i+1}\{len(file_paths)} split is done")
         ith_file_name = os.path.basename(path).split("_")[0]
         results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=ith_file_name,table=results_table,ML_type=ML_TYPE,Tpn_tuple=tps_tns)
-    
-    file_name = create_file_name("")
+        if auroc <= 0.5:
+            write_scores(ith_file_name,y_test,y_score,file_name,auroc) 
     results_table = results_table.sort_values(by="File_out")
     results_table.to_csv(file_name)
 '''function write to table by columsn:
@@ -188,9 +189,10 @@ def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfo
     classifier = get_classifier()
     classifier.fit(X_train, y_train)
     # predict probs
+    #y_pos_scores_probs = classifier.predict(X_test)
     y_scores_probs = classifier.predict_proba(X_test)
     y_pos_scores_probs = y_scores_probs[:,1] # probalities for positive label (1 column for positive)
-    # Calculate AUROC,AUPRC
+    # # Calculate AUROC,AUPRC
     fpr, tpr, tresholds = roc_curve(y_test, y_pos_scores_probs)
     auroc = auc(fpr, tpr)
     # Calculate AUPRC
@@ -204,7 +206,7 @@ def get_classifier():
     elif ML_TYPE == "SVM":
         return SVC(kernel="linear",random_state=42)
     elif ML_TYPE == "RANDOMFOREST":
-        return RandomForestClassifier(random_state=42,n_jobs=-1,n_estimators=1000)
+        return RandomForestClassifier(random_state=42,n_jobs=-1)
 def enforce_seq_length(sequence, requireLength):
     if (len(sequence) < requireLength): sequence = '0'*(requireLength-len(sequence))+sequence # in case sequence is too short, fill in zeros from the beginning (or sth arbitrary thats not ATCG)
     return sequence[-requireLength:] # in case sequence is too long
@@ -216,7 +218,7 @@ def get_features(data, only_seq_info):
     
     seq_info = np.ones((x.shape[0], ENCODED_LENGTH))
     # siteseq, negative target seq
-    for index, (otseq, grnaseq) in enumerate(zip(data['target_sequence'], data['grna_target_sequence'])):
+    for index, (otseq, grnaseq) in enumerate(zip(data['Siteseq'], data['TargetSequence_negative'])):
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
@@ -365,6 +367,6 @@ def create_path_list(combined_folder):
 if __name__ == "__main__":
     ONLY_SEQ_INFO = set_if_seq()
     ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")
-    #run_leave_one_out(sys.argv[1],sys.argv[2])
-    crisprsql(sys.argv[1])
+    run_leave_one_out(sys.argv[1],sys.argv[2])
+    #crisprsql(sys.argv[1])
     
