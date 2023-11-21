@@ -70,9 +70,12 @@ def write_dict_to_file(results_dict,name):
     with open(file_name, 'w') as file:
         for key, sub_dict in results_dict.items(): # key is the name of data
             for test,metric_dict in sub_dict.items(): # test is the statistic test
+                base_str = f"{key}: {test}: "
+                added_str = ""
                 for metric,stats_val in metric_dict.items(): # metric - type of data
-                    file.write(f"{key}: {test}: {metric}: {stats_val}\n") # stats- are values of the test
-
+                    added_str = added_str + f"{metric}: {stats_val}, " # stats- are values of the test
+                added_str = base_str + added_str + "\n"
+                file.write(added_str)
 
 
 
