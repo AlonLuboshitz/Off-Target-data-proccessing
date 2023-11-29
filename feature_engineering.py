@@ -73,8 +73,8 @@ def create_file_name(ending):
     else: shuffle_str = "no_shuflle_"
     file_name = ML_TYPE + "_" +  feature_str + "_" + shuffle_str + ending + ".csv"
     return file_name
-def crisprsql(df_sql):
-    df_sql = pd.read_csv(df_sql)
+def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name):
+    data_table = pd.read_csv(data_table)
     # Set the threshold and update the column
     # threshold = 1e-5
     # print('cleavage>treshold: ',sum(df_sql['cleavage_freq']>1e-5))
@@ -85,24 +85,24 @@ def crisprsql(df_sql):
     # print('measured=0: ',sum(df_sql['measured']==0))
     # before = sum(df_sql['measured']==1)
     # print(f"data length before target chr: {len(df_sql)}")
-    df_sql = df_sql[df_sql['target_chr'] != '0']
+    #df_sql = df_sql[df_sql['target_chr'] != '0']
     # print(f"data length after target chr: {len(df_sql)}")
 
     # after = sum(df_sql['measured']==1)
     # print(before-after)
-
-    df_sql = df_sql[['target_sequence','grna_target_sequence','measured']]
-    guides = set(df_sql['grna_target_sequence'])
+    #data_table = data_table[['target_sequence','grna_target_sequence','measured']]
+    
+    guides = set(data_table[target_colmun]) # set unquie guide identifier
 
     # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
-    df_dict = {grna: group for grna, group in df_sql.groupby('grna_target_sequence')}
+    df_dict = {grna: group for grna, group in data_table.groupby(target_colmun)}
 
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
-    x_feature,y_label = generate_features_labels_sql(result_dataframes) # List of arrays
+    x_feature,y_label = generate_features_labels_sql(result_dataframes,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
     print("staring ml")
-    file_name = create_file_name("crisprSql")
+    file_name = create_file_name(file_name)
     for i,key in enumerate(result_dataframes.keys()):
         x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=SHUFFLE,if_print=False)
         auroc,auprc,y_score = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
@@ -113,8 +113,7 @@ def crisprsql(df_sql):
             write_scores(key,y_test,y_score,file_name,auroc)            
     results_table = results_table.sort_values(by="File_out")
     results_table.to_csv(file_name)
-    # leave one out - run model
-    pass
+    
 '''write score vs test if auc<0.5'''
 def write_scores(seq,y_test,y_score,file_name,auroc):
     folder_name = 'y_scores_output'
@@ -140,13 +139,13 @@ def create_low_auc_table():
 
 
 
-def generate_features_labels_sql(splited_guide_data):
+def generate_features_labels_sql(splited_guide_data,target_column,off_target_column,y_column):
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     for val in splited_guide_data.values():
-        x_data = get_features(val,only_seq_info=ONLY_SEQ_INFO)
+        x_data = get_features(val,only_seq_info=ONLY_SEQ_INFO,target_column=target_column,off_target_column=off_target_column)
         x_data_all.append(x_data)
-        y_labels_all.append(val[['measured']].values)
+        y_labels_all.append(val[[y_column]].values)
     return (x_data_all,y_labels_all)
 
 
@@ -199,6 +198,35 @@ def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfo
     auprc = average_precision_score(y_test, y_pos_scores_probs)
     print("ML DONE")
     return (auroc,auprc,y_pos_scores_probs)
+'''get the true positive rate for up to n expriemnets by calculating:
+the first n prediction values, what the % of positive predcition out of the the TP amount.
+calculate auc value for 1-n'''
+def get_tpr_by_n_expriments(predicted_vals,y_test,n):
+    # valid that test amount is more then n
+    if n > len(y_test):
+        print(f"n expriments: {n} is bigger then data points amount: {len(y_test)}, n set to data points")
+        n = len(y_test)
+    
+    tp_amount = np.count_nonzero(y_test) # get tp amount
+    sorted_indices = np.argsort(predicted_vals)[::-1] # Get the indices that would sort the prediction values array in descending order    
+    tp_amount_by_prediction = 0 # set tp amount by prediction
+    tpr_array = np.empty(0) # array for tpr
+    for i in range(n):
+        # y_test has label of 1\0 if 1 adds it to tp_amount
+        tp_amount_by_prediction = tp_amount_by_prediction + y_test[sorted_indices[i]]
+        tp_rate = tp_amount_by_prediction / tp_amount
+        tpr_array= np.append(tpr_array,tp_rate)
+        if tp_rate == 1.0:
+            # tp amount == tp amount in prediction no need more expriments and all tp are found
+            tpr_array = np.concatenate((tpr_array, np.ones(n - (i + 1)))) # fill the tpr array with 1 
+            break    
+    return tpr_array  
+ 
+def get_auc_by_tpr(tpr_arr):
+    x_values = np.arange(1, len(tpr_arr) + 1) # x values by lenght of tpr_array
+    calculated_auc = auc(x_values,tpr_arr)
+    return calculated_auc
+    
 
 def get_classifier():
     if ML_TYPE == "LOGREG":
@@ -213,12 +241,11 @@ def enforce_seq_length(sequence, requireLength):
 '''get x_axis features for ml algo.
 data - data frame for guiderna
 only_seq_info - bolean for only seq or other features.'''
-def get_features(data, only_seq_info):
-    x = data[FEATURES_COLUMNS].values
+def get_features(data, only_seq_info,target_column,off_target_column):
     
-    seq_info = np.ones((x.shape[0], ENCODED_LENGTH))
+    seq_info = np.ones((data.shape[0], ENCODED_LENGTH))
     # siteseq, negative target seq
-    for index, (otseq, grnaseq) in enumerate(zip(data['Siteseq'], data['TargetSequence_negative'])):
+    for index, (otseq, grnaseq) in enumerate(zip(data[off_target_column], data[target_column])):
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
@@ -226,6 +253,7 @@ def get_features(data, only_seq_info):
     if only_seq_info:
         x = seq_info
     else:
+        x = data[FEATURES_COLUMNS].values 
         x = np.append(x, seq_info, axis = 1)
     return x
 '''encoding for grna and off target
@@ -365,8 +393,9 @@ def create_path_list(combined_folder):
         path_list.append(combined_path)
     return path_list   
 if __name__ == "__main__":
-    ONLY_SEQ_INFO = set_if_seq()
-    ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")
-    run_leave_one_out(sys.argv[1],sys.argv[2])
-    #crisprsql(sys.argv[1])
+     ONLY_SEQ_INFO = set_if_seq()
+     ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")
+    # run_leave_one_out(sys.argv[1],sys.argv[2])
+     crisprsql(data_table=sys.argv[1],target_colmun="target",off_target_column="offtarget_sequence",y_column="Label",file_name="Changeseq_csgs")
+    #get_tpr_by_n_expriments(predicted_vals=np.array([0.2,0.8,0.7,0.6,0.5]),y_test=np.array([0,1,0,1,0]),n=5)
     

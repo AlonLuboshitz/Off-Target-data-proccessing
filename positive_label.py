@@ -44,20 +44,20 @@ folder name created: _labeled_sub_only'''
 def process_folder(input_folder):
     # create folder for the labeled procceses identified.
     label_output_folder = input_folder + '_labeled_sub_only'
-    if not os.path.exists(label_output_folder):
-        os.makedirs(label_output_folder)
-        print("created new folder: ", label_output_folder)
-        # create folder for the casofinder inputs procceses identified.
+    create_folder(label_output_folder)
     cas_offinder_output_folder = input_folder + '_casoffinder_inputs'
-    if not os.path.exists(cas_offinder_output_folder):
-        os.makedirs(cas_offinder_output_folder)
-        print("created new folder: ", cas_offinder_output_folder)
+    create_folder(cas_offinder_output_folder)
 
     for filename in os.listdir(input_folder):
         if filename.endswith('.txt'):
             txt_file_path = os.path.join(input_folder, filename)
             label_identified(txt_file_path, label_output_folder)
-            make_input_txt_files(txt_file_path,cas_offinder_output_folder)
+            create_csofinder_input_by_identified(txt_file_path,cas_offinder_output_folder)
+'''create folder in spesefic path'''
+def create_folder(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+        print("created new folder: ", path)
 
 '''Example input file (DNA bulge size 2, RNA bulge size 1):
 /var/chromosomes/human_hg38
@@ -65,7 +65,7 @@ NNNNNNNNNNNNNNNNNNNNNRG 2 1
 GGCCGACCTGTCGCTGACGCNNN 5'''
 # inputpath for folder containing indentified files.
 # extract guide sequence and create intput file out of it.
-def make_input_txt_files(input_path,output_path):
+def create_csofinder_input_by_identified(input_path,output_path):
     # get targetseq = the guide rna used
     identified_file = pd.read_csv(input_path,sep="\t",encoding='latin-1',on_bad_lines='skip')
     seq = identified_file.iloc[0]['TargetSequence']
@@ -80,27 +80,58 @@ def make_input_txt_files(input_path,output_path):
             txt_file.write(n_string + "\n")
             txt_file.write(seq + ' 6')
 
-''' on time function for crispr sql'''
-def create_cas_ofinder_inputs(picrispr_data):
-    picrispr_data = pd.read_csv(picrispr_data)
-    output_path = f"/home/alon/masterfiles/pythonscripts/crisprsql_casoffiner_inputs"
-    guides = set(picrispr_data['grna_target_sequence'])
-    lengths = {}
+'''function to read a table and get the unique target grna to create an input text file
+for casofinder
+table - all data
+target_colmun - column to get the data
+outputname - name of folder to create in the scripts folder'''
+def create_cas_ofinder_inputs(table,target_column,output_name,path_for_casofiner):
+    table = pd.read_excel(table)
+    output_path = os.getcwd() # get working dir path
+    output_path = os.path.join(output_path,output_name) # add folder name to it
+    create_folder(output_path)
+    try:
+        guides = set(table[target_column]) # create a set (unquie) guides
+    except KeyError as e:
+        print(f"no column: {target_column} in data set, make sure you entered the right one.")
+        exit(0)
+    casofinder_path = get_casofinder_path(path_for_casofiner)
+    casofinder_path = casofinder_path + "\n"
+    one_file_path = os.path.join(output_path,f"one_input.txt")
+    n_string = 'N' * 23
+    with open(one_file_path,'w') as file:
+        file.write(casofinder_path)
+        file.write(n_string + "\n")
     for guide in guides:
+        n_string = 'N' * len(guide)
+        output_filename = f"{guide}_input.txt"
+        temp_path = os.path.join(output_path,output_filename)
+        with open(temp_path, 'w') as txt_file:
+            txt_file.write(casofinder_path)
+            txt_file.write(n_string + "\n")
+            txt_file.write(guide + ' 6')
+        with open(one_file_path,'a') as txt:
+            txt.write(guide + ' 6\n')
+    
+'''if genome == hg19,hg38 set own path else keep others.'''
+def get_casofinder_path(genome):
+    path = genome
+    if genome == "hg19":   
+        path = "/home/labhendel/Documents/cas-offinder_linux_x86-64/hg19"
+    elif genome == "hg38":
+        path = "/home/labhendel/Documents/cas-offinder_linux_x86-64/hg38noalt"
+    else : print(f"no genome file exists for: {genome}")
+    return path
+''' function to return a dict with the lengths of the guides'''
+def guides_langth(guide_set):
+    lengths = {}
+    for guide in guide_set:
         length_g = len(guide) # length of guide
         if length_g in lengths.keys():
             lengths[length_g] += 1
         else:   lengths[length_g] = 1
-
-        # n_string = 'N' * len(guide)
-        # output_filename = f"{guide}_input.txt"
-        # temp_path = os.path.join(output_path,output_filename)
-        # with open(temp_path, 'w') as txt_file:
-        #     txt_file.write("/home/labhendel/Documents/cas-offinder_linux_x86-64/hg19\n")
-        #     txt_file.write(n_string + "\n")
-        #     txt_file.write(guide + ' 6')
-    print(lengths)
-
+    return lengths
+     
 
 '''
 function looks for multiple duplicates from the same exprimenet and merge the data from them
@@ -196,7 +227,7 @@ if __name__ == '__main__':
     # # join path to identified +  labeled only.
     # labeld_path = sys.argv[1] + f'_labeled_sub_only' 
     # merge_positives(labeld_path,sys.argv[2],'_label_sub_only.csv',sys.argv[3])
-    create_cas_ofinder_inputs(sys.argv[4])
+    create_cas_ofinder_inputs(table="/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.xlsx",target_column="target",output_name="Changeseq/Guide_seq_casofinder",path_for_casofiner="hg38")
 
         
 
