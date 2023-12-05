@@ -121,17 +121,33 @@ def assign_epigenetics(data,intersection,file_ending,chrom_type):
 def get_ending(txt):
     ending = txt.split("/")[-1].split(".")[0]
     return ending
-def run_intersection(merged_data_path,bed_folder):
+def run_intersection(merged_data_path,bed_folder,if_update):
     data = pd.read_csv(merged_data_path)
     data["Index"] = data.index # set index column
     bed_types_nd_paths = get_bed_folder(bed_folder)
+    new_data_name = merged_data_path.replace(".csv","")
+    new_data_name = f'{new_data_name}_withEpigenetic.csv'
+    if if_update:
+        bed_types_nd_paths = remove_exsiting_epigenetics(data,bed_types_nd_paths) # remove exsiting epigenetics
+        new_data_name = merged_data_path # update exsiting data
     for chrom_type,bed_paths in bed_types_nd_paths:
         for bed_path in bed_paths:
             data,intersect = intersect_with_epigentics(data,epigentic_data=bed_path,if_strand=False)
             data = assign_epigenetics(data=data,intersection=intersect,file_ending=get_ending(bed_path),chrom_type=chrom_type)
-    new_data_name = merged_data_path.replace(".csv","")
-    new_data_name = f'{new_data_name}_withEpigenetic.csv'
+    data = data.drop("Index", axis=1) # remove "Index" column
     data.to_csv(new_data_name,index=False)
+
+def remove_exsiting_epigenetics(data,bed_type_nd_paths):
+    new_chrom_information = [] # assign new list to keep only new data
+    for chrom_type,bed_paths in bed_type_nd_paths:
+        paths_list = [] 
+        for bed_path in bed_paths:
+            file_ending = get_ending(bed_path) 
+            column_to_check = f'{chrom_type}_{file_ending}'
+            if not column_to_check in data.columns: # if the name is in the columns data already been made.
+                paths_list.append(bed_path)
+        new_chrom_information.append((chrom_type,paths_list))
+    return new_chrom_information
 
 
 ''' function iterate on bed folder and returns a list of tuples:
@@ -163,5 +179,5 @@ def get_bed_files(bed_files_folder):
 
 if __name__ == "__main__":
     #transofrm_casofiner_into_csv("/home/alon/masterfiles/pythonscripts/Changeseq/one_output.txt")
-    #label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/CHANGE-seq.csv",output_name="merged_csgs",target_column="target")
-    run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics")
+    label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/one_output.csv",output_name="merged_csgs_casofinder",target_column="target")
+    run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)

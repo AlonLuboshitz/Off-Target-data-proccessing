@@ -2,9 +2,9 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["Openchrom_293T_Ctcf_LHH0085V"]
+FEATURES_COLUMNS = ["Chromstate_atacseq_peaks"]
 ONLY_SEQ_INFO = True #set as needed, if only seq then True.
-LABEL = ["Label_negative"]
+LABEL = ["Label"]
 ML_TYPE = "" # String inputed by user
 ENCODED_LENGTH = 6 * 23
 SHUFFLE = True
@@ -30,7 +30,7 @@ update results and extract csv file.
 def run_leave_one_out(guideseq40,guideseq50):
     file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)    
     x_feature,y_label = generate_feature_labels(file_paths) # List of arrays
-    results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+    results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
     file_name = create_file_name("lables")
     # leave one out - run model
     print("Starting ml")
@@ -51,13 +51,13 @@ def run_leave_one_out(guideseq40,guideseq50):
 ML type, auroc, auprc from log_reg, unpacks 4 element tuple - tp,tn test, tp,tn train.
 features included for training the model
 what file was left out.'''
-def write_to_table(auroc,auprc,file_left_out,table,ML_type,Tpn_tuple):
+def write_to_table(auroc,auprc,file_left_out,table,ML_type,Tpn_tuple,n_rank):
     global FEATURES_COLUMNS
     if ONLY_SEQ_INFO:
         FEATURES_COLUMNS = ["Only_Seq"]
     try:
         new_row_index = len(table)  # Get the index for the new row
-        table.loc[new_row_index] = [ML_type, auroc, auprc,*Tpn_tuple, FEATURES_COLUMNS, file_left_out]  # Add data to the new row
+        table.loc[new_row_index] = [ML_type, auroc, auprc,*n_rank,*Tpn_tuple, FEATURES_COLUMNS, file_left_out]  # Add data to the new row
     except: # empty data frame
         table.loc[0] = [ML_type, auroc, auprc,*Tpn_tuple , FEATURES_COLUMNS, file_left_out]
     return table
@@ -100,15 +100,16 @@ def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name):
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
     x_feature,y_label = generate_features_labels_sql(result_dataframes,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column) # List of arrays
-    results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+    results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
     print("staring ml")
     file_name = create_file_name(file_name)
     for i,key in enumerate(result_dataframes.keys()):
         x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=SHUFFLE,if_print=False)
         auroc,auprc,y_score = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+        n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals=y_score,y_test=y_test,n=1000))
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
         print(f"Ith: {i+1}\{len(result_dataframes)} split is done")
-        results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=key,table=results_table,ML_type=ML_TYPE,Tpn_tuple=tps_tns)
+        results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=key,table=results_table,ML_type=ML_TYPE,Tpn_tuple=tps_tns,n_rank=n_rank_score)
         if auroc <= 0.5:
             write_scores(key,y_test,y_score,file_name,auroc)            
     results_table = results_table.sort_values(by="File_out")
@@ -178,7 +179,8 @@ def get_tp_tn(y_test,y_train):
     tn_test = y_test.size - tp_test #count 0's
     if not tn_test == np.count_nonzero(y_test==0):
         print("error")
-    return (tp_test,tn_test,tp_train,tn_train)
+    tp_ratio = tp_test / (tp_test + tn_test)
+    return (tp_ratio,tp_test,tn_test,tp_train,tn_train)
 
 '''funcion to run logsitic regression model and return roc,prc'''
 def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfold "#"
@@ -223,9 +225,11 @@ def get_tpr_by_n_expriments(predicted_vals,y_test,n):
     return tpr_array  
  
 def get_auc_by_tpr(tpr_arr):
-    x_values = np.arange(1, len(tpr_arr) + 1) # x values by lenght of tpr_array
+    amount_of_points = len(tpr_arr)
+    x_values = np.arange(1, amount_of_points + 1) # x values by lenght of tpr_array
     calculated_auc = auc(x_values,tpr_arr)
-    return calculated_auc
+    calculated_auc = calculated_auc / amount_of_points # normalizied auc
+    return calculated_auc,amount_of_points
     
 
 def get_classifier():
