@@ -2,16 +2,27 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["Chromstate_atacseq_peaks"]
+FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_score"]
 ONLY_SEQ_INFO = True #set as needed, if only seq then True.
 LABEL = ["Label"]
 ML_TYPE = "" # String inputed by user
-ENCODED_LENGTH = 6 * 23
+BP_PRESENTATION = 6
+ENCODED_LENGTH =  23 * BP_PRESENTATION
 SHUFFLE = True
+TARGET = "target"
+OFFTARGET = "offtarget_sequence"
+CHROM = "chrom"
+START = "chromStart"
+END = "chromEnd"
+IF_BP = False
+BIGWIG = 0
+from file_management import File_management
+#AMOUNT_OF_BP_EPI = 1
 import pandas as pd
 import numpy as np
 import sys
 import time
+import pyBigWig
 from imblearn.over_sampling import RandomOverSampler
 from sklearn.utils import shuffle
 from sklearn.ensemble import RandomForestClassifier
@@ -73,7 +84,7 @@ def create_file_name(ending):
     else: shuffle_str = "no_shuflle_"
     file_name = ML_TYPE + "_" +  feature_str + "_" + shuffle_str + ending + ".csv"
     return file_name
-def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name):
+def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name,file_manager):
     data_table = pd.read_csv(data_table)
     # Set the threshold and update the column
     # threshold = 1e-5
@@ -99,7 +110,7 @@ def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name):
 
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
-    x_feature,y_label = generate_features_labels_sql(result_dataframes,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column) # List of arrays
+    x_feature,y_label = generate_features_labels_sql(result_dataframes,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column,manager=file_manager) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
     print("staring ml")
     file_name = create_file_name(file_name)
@@ -140,11 +151,11 @@ def create_low_auc_table():
 
 
 
-def generate_features_labels_sql(splited_guide_data,target_column,off_target_column,y_column):
+def generate_features_labels_sql(splited_guide_data,target_column,off_target_column,y_column,manager):
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     for val in splited_guide_data.values():
-        x_data = get_features(val,only_seq_info=ONLY_SEQ_INFO,target_column=target_column,off_target_column=off_target_column)
+        x_data = get_features(val,only_seq_info=ONLY_SEQ_INFO,target_column=target_column,off_target_column=off_target_column,manager=manager)
         x_data_all.append(x_data)
         y_labels_all.append(val[[y_column]].values)
     return (x_data_all,y_labels_all)
@@ -245,21 +256,48 @@ def enforce_seq_length(sequence, requireLength):
 '''get x_axis features for ml algo.
 data - data frame for guiderna
 only_seq_info - bolean for only seq or other features.'''
-def get_features(data, only_seq_info,target_column,off_target_column):
-    
+def get_features(data, only_seq_info,target_column,off_target_column,manager):
+    bigwig_info = np.ones((data.shape[0],ENCODED_LENGTH))
     seq_info = np.ones((data.shape[0], ENCODED_LENGTH))
     # siteseq, negative target seq
-    for index, (otseq, grnaseq) in enumerate(zip(data[off_target_column], data[target_column])):
+    for index, (otseq, grnaseq, chrom, start, end) in enumerate(zip(data[off_target_column], data[target_column], data[CHROM], data[START], data[END])):
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
         seq_info[index] = seq_to_one_hot(otseq, grnaseq)
+        if IF_BP:
+            bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end)
+            print (bigwig_info[index])
+        seq_info[index] = seq_info[index] + bigwig_info[index]
+        print(seq_info[index])
+    # if bigwig"
+    
     if only_seq_info:
         x = seq_info
     else:
         x = data[FEATURES_COLUMNS].values 
         x = np.append(x, seq_info, axis = 1)
     return x
+def bws_to_one_hot(file_manager, chr, start, end):
+    # back to original bp presantation
+    indexing = BP_PRESENTATION - file_manager.get_number_of_bigiwig()
+    epi_one_hot = np.zeros(ENCODED_LENGTH,dtype=float) # set epi feature with zeros
+    for i_file,path in enumerate(file_manager.get_bigwig_paths()):
+        bw_file = pyBigWig.open(path)
+        values = bw_file.values(chr, start, end) # get values of base pairs in the coordinate
+        for index, val in enumerate(values):
+            # index * BP =  set index position 
+            # indexing + i_file the gap between bp_presenation to each file slot.
+            epi_one_hot[(index * BP_PRESENTATION) + (indexing + i_file)] = val 
+    return epi_one_hot
+
+def bw_to_one_hot(chr, start, end, bigwig_data, num_of_data):
+    epi_one_hot = np.zeros(ENCODED_LENGTH,dtype=float) # set epi feature with zeros
+    values = bigwig_data.values(chr, start, end) # get values of base pairs in the coordinate
+    for index, val in enumerate(values):
+        epi_one_hot[((index + 1) * BP_PRESENTATION) - num_of_data] = val # index + 1 - 1 based.
+        # num of data - from j + 1 to amount of data + 1 
+    return epi_one_hot
 '''encoding for grna and off target
 creating 6 dimnesional vector * length of sequence(23 bp)
 first 4 dimnesions are for A,T,C,G
@@ -272,19 +310,19 @@ def seq_to_one_hot(sequence, seq_guide):
     for i in range(sequence_length):
         for key, base in enumerate(bases):
             if sequence[i] == base:
-                onehot[6 * i + key] = 1
+                onehot[BP_PRESENTATION * i + key] = 1
             if seq_guide[i] == base:
-                onehot[6 * i + key] = 1
+                onehot[BP_PRESENTATION * i + key] = 1
         if sequence[i] != seq_guide[i]:  # Mismatch
             try:
                 if bases.index(sequence[i]) < bases.index(seq_guide[i]):
-                    onehot[6 * i + 4] = 1
+                    onehot[BP_PRESENTATION * i + 4] = 1
                 else:
-                    onehot[6 * i + 5] = 1
+                    onehot[BP_PRESENTATION * i + 5] = 1
             except ValueError:  # Non-ATCG base found
                 pass
     return onehot
-    
+
 '''given feature list, label list split them into
 test and train data.
 transform into ndarray and shuffle the train data'''
@@ -390,6 +428,13 @@ def set_if_seq():
     if not if_seq.lower() == "y":
         return False
     else: return True
+def set_bp_coding(management):
+    global ENCODED_LENGTH,BP_PRESENTATION,IF_BP
+    if_bp = input("press y/Y if bp coding is intended\n")
+    if if_bp.lower() == "y":
+        BP_PRESENTATION = 6 + management.get_number_of_bigiwig()
+        ENCODED_LENGTH = 23 * BP_PRESENTATION
+        IF_BP = True
 def create_path_list(combined_folder):
     path_list = []
     for combined_file in os.listdir(combined_folder):
@@ -399,7 +444,9 @@ def create_path_list(combined_folder):
 if __name__ == "__main__":
      ONLY_SEQ_INFO = set_if_seq()
      ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")
+     management = File_management("pos","neg","bed","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
+     set_bp_coding(management)
     # run_leave_one_out(sys.argv[1],sys.argv[2])
-     crisprsql(data_table=sys.argv[1],target_colmun="target",off_target_column="offtarget_sequence",y_column="Label",file_name="Changeseq_csgs")
+     crisprsql(data_table=sys.argv[1],target_colmun=TARGET,off_target_column=OFFTARGET,y_column="Label",file_name="Changeseq_csgs",file_manager= management)
     #get_tpr_by_n_expriments(predicted_vals=np.array([0.2,0.8,0.7,0.6,0.5]),y_test=np.array([0,1,0,1,0]),n=5)
     

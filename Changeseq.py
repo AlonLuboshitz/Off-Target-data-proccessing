@@ -90,32 +90,54 @@ def upper_case_series(data,colum_name):
     data[colum_name] = upper_values
     print(data.head(5))
     return data
-
+'''function to return a list of columns for the bed epigenetic file and put column 5 with score'''
+def get_bed_columns(bedtool):
+    # Get the first interval
+    first_interval = next(iter(bedtool))
+    # Get the number of fields (columns) for the first interval
+    num_fields = len(first_interval.fields)
+    columns = []
+    for i in range(num_fields):
+            columns.append(i+1)
+    columns[4] = "score"
+    return columns
 def intersect_with_epigentics(whole_data,epigentic_data,if_strand):
-    
+    # get data
     whole_data_bed = pybedtools.BedTool.from_dataframe(whole_data)
     epigentic_data = pybedtools.BedTool(epigentic_data)
-    intersection_wa = whole_data_bed.intersect(epigentic_data,wa=True,s=if_strand)
-    intersection_df_wa = intersection_wa.to_dataframe(header=None,names = whole_data.columns.tolist())
+    # set columns to data columns + bed columns (5th of bed is score)
+    columns = whole_data.columns.tolist() 
+    columns = columns +  get_bed_columns(epigentic_data)
+    intersection_wa = whole_data_bed.intersect(epigentic_data,wb=True,s=if_strand) # wb keep both information
+    intersection_df_wa = intersection_wa.to_dataframe(header=None,names = columns)
     return whole_data,intersection_df_wa
     
 def assign_epigenetics(data,intersection,file_ending,chrom_type):
-    chrom_column = f'{chrom_type}_{file_ending}'
-    data[chrom_column] = 0
+    chrom_column = f'{chrom_type}_{file_ending}' # set chrom type and mark column
+    # set binary and score column with zeros
+    binary_column = f'{chrom_column}_binary'
+    score_column = f'{chrom_column}_score'
+    data[binary_column] = 0 
+    data[score_column] = 0
+    # convert score data from intersection info to list
+    score_vals = intersection["score"].tolist()
     if not intersection.empty:
         try:
-            # index keeps original index of data frame of combined file
+            print(data.head(5))
             # assign intersection indexes with 1
-            data.loc[intersection["Index"], chrom_column] = 1
-            # set the corresponding index of the bed file in new column for correlation analysis.
+            data.loc[intersection["Index"], binary_column] = 1
+            # assign intersection indexes with score values
+            data.loc[intersection["Index"], score_column] = score_vals
+            print(data.head(5))
+            
            
         except KeyError as e:
               print(data,': file has no intersections output will be with 0')
         #     # # : input is dismissed via running this as subprocess
         #     #input("press anything to continue: ")
-    labeled_epig_1 = sum(data[chrom_column]==1)
-    labeled_epig_0 =  sum(data[chrom_column]==0)
-    print(f"length of intersect: {len(intersection)}, amount of labled epigenetics: {sum(data[chrom_column]==1)}")
+    labeled_epig_1 = sum(data[binary_column]==1)
+    labeled_epig_0 =  sum(data[binary_column]==0)
+    print(f"length of intersect: {len(intersection)}, amount of labled epigenetics: {labeled_epig_1}")
     print(f'length of data: {len(data)}, 0: {labeled_epig_0}, 1+0: {labeled_epig_1 + labeled_epig_0}')
     return data
 def get_ending(txt):
@@ -179,5 +201,5 @@ def get_bed_files(bed_files_folder):
 
 if __name__ == "__main__":
     #transofrm_casofiner_into_csv("/home/alon/masterfiles/pythonscripts/Changeseq/one_output.txt")
-    label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/one_output.csv",output_name="merged_csgs_casofinder",target_column="target")
+    #label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/CHANGE-seq.csv",output_name="merged_csgs",target_column="target")
     run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
