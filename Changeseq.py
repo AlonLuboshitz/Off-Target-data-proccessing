@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import os
 import pybedtools
 import re
@@ -100,6 +101,9 @@ def get_bed_columns(bedtool):
     for i in range(num_fields):
             columns.append(i+1)
     columns[4] = "score"
+    columns[6] = "fold_enrichemnt"
+    columns[7] = "logp"
+    columns[8] = "logq"
     return columns
 def intersect_with_epigentics(whole_data,epigentic_data,if_strand):
     # get data
@@ -117,17 +121,34 @@ def assign_epigenetics(data,intersection,file_ending,chrom_type):
     # set binary and score column with zeros
     binary_column = f'{chrom_column}_binary'
     score_column = f'{chrom_column}_score'
+    fold_column = f'{chrom_column}_fold_enrichemnt'
+    log_fold_column = f'{chrom_column}_log_fold_enrichemnt'
+    logp_column = f'{chrom_column}_logp'
+    logq_column = f'{chrom_column}_logq'
     data[binary_column] = 0 
-    data[score_column] = 0
+    # data[score_column] = 0
+    # data[fold_column] = 0 
+    # data[logp_column] = 0
+    # data[logq_column] = 0
+    data[log_fold_column] = 0
     # convert score data from intersection info to list
-    score_vals = intersection["score"].tolist()
+    # score_vals = intersection["score"].tolist()
+    fold_vals= intersection["fold_enrichemnt"].tolist()
+    # logp_vals = intersection["logp"].tolist()
+    # logq_vals = intersection["logq"].tolist()
+    log_fold_vals = np.array(fold_vals)
+    log_fold_vals = np.log(log_fold_vals)
     if not intersection.empty:
         try:
             print(data.head(5))
             # assign intersection indexes with 1
             data.loc[intersection["Index"], binary_column] = 1
-            # assign intersection indexes with score values
-            data.loc[intersection["Index"], score_column] = score_vals
+            # # assign intersection indexes with score values
+            # data.loc[intersection["Index"], score_column] = score_vals
+            # data.loc[intersection["Index"], fold_column] = fold_vals
+            # data.loc[intersection["Index"], logp_column] = logp_vals
+            # data.loc[intersection["Index"], logq_column] = logq_vals
+            data.loc[intersection["Index"], log_fold_column] = log_fold_vals
             print(data.head(5))
             
            
@@ -148,7 +169,7 @@ def run_intersection(merged_data_path,bed_folder,if_update):
     data["Index"] = data.index # set index column
     bed_types_nd_paths = get_bed_folder(bed_folder)
     new_data_name = merged_data_path.replace(".csv","")
-    new_data_name = f'{new_data_name}_withEpigenetic.csv'
+    new_data_name = f'{new_data_name}_withEpigenetic_log.csv'
     if if_update:
         bed_types_nd_paths = remove_exsiting_epigenetics(data,bed_types_nd_paths) # remove exsiting epigenetics
         new_data_name = merged_data_path # update exsiting data
@@ -202,4 +223,4 @@ def get_bed_files(bed_files_folder):
 if __name__ == "__main__":
     #transofrm_casofiner_into_csv("/home/alon/masterfiles/pythonscripts/Changeseq/one_output.txt")
     #label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/CHANGE-seq.csv",output_name="merged_csgs",target_column="target")
-    run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
+    run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
