@@ -285,10 +285,10 @@ def bws_to_one_hot(file_manager, chr, start, end):
     for i_file,path in enumerate(file_manager.get_bigwig_paths()):
         bw_file = pyBigWig.open(path)
         values = bw_file.values(chr, start, end) # get values of base pairs in the coordinate
-        for index, val in enumerate(values):
+        for index in range(23):
             # index * BP =  set index position 
             # indexing + i_file the gap between bp_presenation to each file slot.
-            epi_one_hot[(index * BP_PRESENTATION) + (indexing + i_file)] = val 
+            epi_one_hot[(index * BP_PRESENTATION) + (indexing + i_file)] = values[index] 
     return epi_one_hot
 
 def bw_to_one_hot(chr, start, end, bigwig_data, num_of_data):
