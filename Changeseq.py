@@ -214,7 +214,16 @@ def get_bed_files(bed_files_folder):
                 bed_path = os.path.join(foldername, name)
                 bed_files.append(bed_path)
     return bed_files
-
+'''Keep just chroms info from the type chrN where N is 1-23,X,Y,M'''
+def remove_random_alt_chroms(data,chrom_column):
+    before = len(data)
+    print(data[chrom_column].head(5))
+    # match(r'^chr([1-9]|1[0-9]|2[0-3]|[XYM])_.*$'
+    filtered_df = data[data[chrom_column].str.match(r'^chr([1-9]|1[0-9]|2[0-3]|[XYM])$')]
+    print(filtered_df[chrom_column].head(5))
+    print(f"before fil: {before}, after: {len(filtered_df)}")
+    
+    return filtered_df
            
 
 
@@ -223,4 +232,7 @@ def get_bed_files(bed_files_folder):
 if __name__ == "__main__":
     #transofrm_casofiner_into_csv("/home/alon/masterfiles/pythonscripts/Changeseq/one_output.txt")
     #label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/CHANGE-seq.csv",output_name="merged_csgs",target_column="target")
-    run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
+    #run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
+    caso = pd.read_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder_withEpigenetic.csv")
+    caso = remove_random_alt_chroms(caso,"chrom")
+    caso.to_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder_withEpigenetic.csv",index=False)

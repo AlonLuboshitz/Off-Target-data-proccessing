@@ -22,7 +22,7 @@ import pandas as pd
 import numpy as np
 import sys
 import time
-import pyBigWig
+from xgboost import XGBClassifier
 from imblearn.over_sampling import RandomOverSampler
 from sklearn.utils import shuffle
 from sklearn.ensemble import RandomForestClassifier
@@ -72,10 +72,12 @@ def write_to_table(auroc,auprc,file_left_out,table,ML_type,Tpn_tuple,n_rank):
     except: # empty data frame
         table.loc[0] = [ML_type, auroc, auprc,*Tpn_tuple , FEATURES_COLUMNS, file_left_out]
     return table
-def create_file_name(ending):
+def create_file_name(ending,file_manager):
     global FEATURES_COLUMNS
     if ONLY_SEQ_INFO:
         FEATURES_COLUMNS = ["Only_Seq"]
+    elif IF_BP:
+        FEATURES_COLUMNS = [file_name[0] for file_name in file_manager.get_bigwig_files()]
     feature_str = ""
     for feature in FEATURES_COLUMNS:
       feature_str = feature_str + "_" + feature
@@ -113,7 +115,7 @@ def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name,file
     x_feature,y_label = generate_features_labels_sql(result_dataframes,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column,manager=file_manager) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
     print("staring ml")
-    file_name = create_file_name(file_name)
+    file_name = create_file_name(file_name,file_manager)
     for i,key in enumerate(result_dataframes.keys()):
         x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=SHUFFLE,if_print=False)
         auroc,auprc,y_score = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
@@ -250,6 +252,8 @@ def get_classifier():
         return SVC(kernel="linear",random_state=42)
     elif ML_TYPE == "RANDOMFOREST":
         return RandomForestClassifier(random_state=42,n_jobs=-1)
+    elif ML_TYPE == "XGBOOST":
+        return XGBClassifier(random_state=42, objective='binary:logistic')
 def enforce_seq_length(sequence, requireLength):
     if (len(sequence) < requireLength): sequence = '0'*(requireLength-len(sequence))+sequence # in case sequence is too short, fill in zeros from the beginning (or sth arbitrary thats not ATCG)
     return sequence[-requireLength:] # in case sequence is too long
@@ -259,20 +263,18 @@ only_seq_info - bolean for only seq or other features.'''
 def get_features(data, only_seq_info,target_column,off_target_column,manager):
     bigwig_info = np.ones((data.shape[0],ENCODED_LENGTH))
     seq_info = np.ones((data.shape[0], ENCODED_LENGTH))
-    # siteseq, negative target seq
     for index, (otseq, grnaseq, chrom, start, end) in enumerate(zip(data[off_target_column], data[target_column], data[CHROM], data[START], data[END])):
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
         seq_info[index] = seq_to_one_hot(otseq, grnaseq)
-        if IF_BP:
-            bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end)
-            print (bigwig_info[index])
-        seq_info[index] = seq_info[index] + bigwig_info[index]
-        print(seq_info[index])
-    # if bigwig"
+        if not (end - start) == 23:
+            end = start + 23
+        bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end)
     
-    if only_seq_info:
+    if IF_BP:
+        x = seq_info + bigwig_info
+    elif only_seq_info:
         x = seq_info
     else:
         x = data[FEATURES_COLUMNS].values 
@@ -282,22 +284,17 @@ def bws_to_one_hot(file_manager, chr, start, end):
     # back to original bp presantation
     indexing = BP_PRESENTATION - file_manager.get_number_of_bigiwig()
     epi_one_hot = np.zeros(ENCODED_LENGTH,dtype=float) # set epi feature with zeros
-    for i_file,path in enumerate(file_manager.get_bigwig_paths()):
-        bw_file = pyBigWig.open(path)
-        values = bw_file.values(chr, start, end) # get values of base pairs in the coordinate
-        for index in range(23):
-            # index * BP =  set index position 
-            # indexing + i_file the gap between bp_presenation to each file slot.
-            epi_one_hot[(index * BP_PRESENTATION) + (indexing + i_file)] = values[index] 
+    try:
+        for i_file,file in enumerate(file_manager.get_bigwig_files()):
+            values = file[1].values(chr, start, end) # get values of base pairs in the coordinate
+            for index,val in enumerate(values):
+                # index * BP =  set index position 
+                # indexing + i_file the gap between bp_presenation to each file slot.
+                epi_one_hot[(index * BP_PRESENTATION) + (indexing + i_file)] = val
+    except ValueError as e:
+        return None
     return epi_one_hot
 
-def bw_to_one_hot(chr, start, end, bigwig_data, num_of_data):
-    epi_one_hot = np.zeros(ENCODED_LENGTH,dtype=float) # set epi feature with zeros
-    values = bigwig_data.values(chr, start, end) # get values of base pairs in the coordinate
-    for index, val in enumerate(values):
-        epi_one_hot[((index + 1) * BP_PRESENTATION) - num_of_data] = val # index + 1 - 1 based.
-        # num of data - from j + 1 to amount of data + 1 
-    return epi_one_hot
 '''encoding for grna and off target
 creating 6 dimnesional vector * length of sequence(23 bp)
 first 4 dimnesions are for A,T,C,G
@@ -441,6 +438,7 @@ def create_path_list(combined_folder):
         combined_path = os.path.join(combined_folder,combined_file)
         path_list.append(combined_path)
     return path_list   
+
 if __name__ == "__main__":
      ONLY_SEQ_INFO = set_if_seq()
      ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")

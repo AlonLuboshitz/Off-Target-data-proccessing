@@ -8,7 +8,7 @@ class File_management:
         self.negative_path = negatives
         self.epigenetics_folder_path = epigenetics_bed
         self.bigwig_folder_path = bigwig
-        self.create_bigwig_paths()
+        self.create_bigwig_files_objects()
     ## Getters:
     def get_positive_path(self):
         return self.positive_path
@@ -19,12 +19,25 @@ class File_management:
     def get_bigwig_folder(self):
         return self.bigwig_folder_path
     def get_number_of_bigiwig(self):
-        return len(self.bigwig_paths)
-    def get_bigwig_paths(self):
-        return self.bigwig_paths
+        return len(self.bigwig_files)
+   
+    def get_bigwig_files(self):
+        if len(self.bigwig_files) > 0 :
+            return self.bigwig_files
+        else: raise ValueError("No bigwig files")
     # Functions to create paths from folders
-    def create_bigwig_paths(self):
-        self.bigwig_paths = []
-        for path in os.listdir(self.bigwig_folder_path):
-            complete_path = os.path.join(self.bigwig_folder_path,path)
-            self.bigwig_paths.append(complete_path)
+    '''Create paths list from folder'''
+    def create_paths(self,folder):
+        paths = []
+        for path in os.listdir(folder):
+            paths.append(os.path.join(folder,path))
+        return paths
+
+    '''Create pyBigWig objects list of the bigwig files'''
+    def create_bigwig_files_objects(self):
+        self.bigwig_files = []
+        for path in self.create_paths(self.bigwig_folder_path):
+            name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
+            name_object_tpl = (name,pyBigWig.open(path))
+            self.bigwig_files.append(name_object_tpl)
+        return self.bigwig_files
