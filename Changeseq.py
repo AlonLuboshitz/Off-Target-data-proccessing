@@ -224,6 +224,21 @@ def remove_random_alt_chroms(data,chrom_column):
     print(f"before fil: {before}, after: {len(filtered_df)}")
     
     return filtered_df
+def remove_buldges(data,off_target_column):
+    before = len(data)
+    print(data[off_target_column].head(5))
+    # keep only ots with 23 length
+    data = data[data[off_target_column].str.len() == 23]
+    print(data[off_target_column].head(5))
+    after= len(data)
+    print(f"before fil: {before}, after: {(after)}, removed : {before-after}")
+    before = after
+    # remove ots with "-"
+    data = data[data[off_target_column].str.find("-") == -1]
+    after = len(data)
+    print(f"before fil: {before}, after: {(after)}, removed : {before-after}")
+    return data
+
            
 
 
@@ -233,6 +248,7 @@ if __name__ == "__main__":
     #transofrm_casofiner_into_csv("/home/alon/masterfiles/pythonscripts/Changeseq/one_output.txt")
     #label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/CHANGE-seq.csv",output_name="merged_csgs",target_column="target")
     #run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
-    caso = pd.read_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder_withEpigenetic.csv")
-    caso = remove_random_alt_chroms(caso,"chrom")
-    caso.to_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder_withEpigenetic.csv",index=False)
+   
+    change = pd.read_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv")
+    change =  remove_buldges(change,"offtarget_sequence")
+    change.to_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",index=False)

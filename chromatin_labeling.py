@@ -222,18 +222,19 @@ def list_of_bed_columns(chrom_type,data_path):
     bed_names = [item.split('_', 1)[1] for item in bed_names_and_exp]
     # return the bed names by column
     return bed_names
-def pie_plot_intersection(guideseq40,guideseq50,genome_folder):
+def pie_plot_intersection(guideseq40,guideseq50,merged,genome_folder):
     # merge all data into one data frame- get a list of one 40\50 guideseq
-    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)
-    list_of_colums = [("Strand",1),('Label_negative',2)] # merge_files get list of tuples
-    merge_data = merge_files(file_paths,list_of_colums)
-    positive_bed, negative_bed = split_to_pos_neg(merge_data,'Label_negative') # create bed data for pos and neg
+    # file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)
+    # list_of_colums = [("Strand",1),('Label_negative',2)] # merge_files get list of tuples
+    # merge_data = merge_files(file_paths,list_of_colums)
+    merge_data = pd.read_csv(merged)
+    positive_bed, negative_bed = split_to_pos_neg(merge_data,'Label') # create bed data for pos and neg
     bed_path_list = get_bed_files(genome_folder) # list of path for bed file
      # fractions of intersection
     positive_frac = run_fractions(positive_bed,bed_path_list)
     negative_frac = run_fractions(negative_bed,bed_path_list)
-    pie_ploting(positive_frac,"GUIDE-seq")
-    pie_ploting(negative_frac,"Casofinder")
+    pie_ploting(positive_frac,"change-GUIDE-seq")
+    pie_ploting(negative_frac,"change-Change")
 
     
 def pie_ploting(fraction_list,title):
@@ -250,12 +251,12 @@ def pie_ploting(fraction_list,title):
 
 '''split merged data into positive data and negative data'''
 def split_to_pos_neg(merge_data,on_column):
-    positive_data = merge_data[merge_data[on_column]==1] # df for active spots
+    positive_data = merge_data[merge_data[on_column]>=1] # df for active spots
     negative_data = merge_data[merge_data[on_column]==0] # df for in active spots
-    positive_data_df = create_from_combined_data_bed_data_frame(positive_data,True) # create bed file data
-    negative_data_df =  create_from_combined_data_bed_data_frame(negative_data,True) # create bed file data
-    positive_bed = pybedtools.BedTool.from_dataframe(positive_data_df)
-    negative_bed = pybedtools.BedTool.from_dataframe(negative_data_df)
+    #positive_data_df = create_from_combined_data_bed_data_frame(positive_data,True) # create bed file data
+    #negative_data_df =  create_from_combined_data_bed_data_frame(negative_data,True) # create bed file data
+    positive_bed = pybedtools.BedTool.from_dataframe(positive_data)
+    negative_bed = pybedtools.BedTool.from_dataframe(negative_data)
     return (positive_bed,negative_bed) 
 ''' run genome alignemt of data with bed files annotatios and return fractions'''
 def run_fractions(chrom_cords,bed_path_list):
@@ -323,7 +324,7 @@ def count_intervals_bed_file(file_path):
     command = f"wc -l < {file_path}"
     result = subprocess.run(command, shell=True, text=True, capture_output=True)
     return int(result.stdout.strip()) 
-   
+  
 '''args: 1 path to bedfiles
 2 path to guideseq folder'''
 if __name__ == "__main__":
@@ -334,7 +335,7 @@ if __name__ == "__main__":
     #     exit(0)
     #run_chrom_labeling(sys.argv[1],sys.argv[2])
 
-    pie_plot_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/bedfiles/Genome_info")
+    pie_plot_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output","/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv","/home/alon/masterfiles/guideseq40files/bedfiles/Genome_info")
     #nagative_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output")
     pass
 # %%

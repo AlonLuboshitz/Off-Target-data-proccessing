@@ -2,7 +2,7 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_score"]
+FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_fold_enrichemnt"]
 ONLY_SEQ_INFO = True #set as needed, if only seq then True.
 LABEL = ["Label"]
 ML_TYPE = "" # String inputed by user
@@ -16,6 +16,7 @@ START = "chromStart"
 END = "chromEnd"
 IF_BP = False
 BIGWIG = 0
+IF_OS = False
 from file_management import File_management
 #AMOUNT_OF_BP_EPI = 1
 import pandas as pd
@@ -23,7 +24,7 @@ import numpy as np
 import sys
 import time
 from xgboost import XGBClassifier
-from imblearn.over_sampling import RandomOverSampler
+from imblearn.over_sampling import RandomOverSampler, SMOTE
 from sklearn.utils import shuffle
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -64,29 +65,29 @@ features included for training the model
 what file was left out.'''
 def write_to_table(auroc,auprc,file_left_out,table,ML_type,Tpn_tuple,n_rank):
     global FEATURES_COLUMNS
+    features_columns = FEATURES_COLUMNS.copy()
     if ONLY_SEQ_INFO:
-        FEATURES_COLUMNS = ["Only_Seq"]
+        features_columns = ["Only_Seq"]
     try:
         new_row_index = len(table)  # Get the index for the new row
-        table.loc[new_row_index] = [ML_type, auroc, auprc,*n_rank,*Tpn_tuple, FEATURES_COLUMNS, file_left_out]  # Add data to the new row
+        table.loc[new_row_index] = [ML_type, auroc, auprc,*n_rank,*Tpn_tuple, features_columns, file_left_out]  # Add data to the new row
     except: # empty data frame
-        table.loc[0] = [ML_type, auroc, auprc,*Tpn_tuple , FEATURES_COLUMNS, file_left_out]
+        table.loc[0] = [ML_type, auroc, auprc,*Tpn_tuple , features_columns, file_left_out]
     return table
-def create_file_name(ending,file_manager):
+def create_file_name(ending,file_manager,sampler):
     global FEATURES_COLUMNS
+    features_columns = FEATURES_COLUMNS.copy()
     if ONLY_SEQ_INFO:
-        FEATURES_COLUMNS = ["Only_Seq"]
+        features_columns = ["Only_Seq"]
     elif IF_BP:
-        FEATURES_COLUMNS = [file_name[0] for file_name in file_manager.get_bigwig_files()]
+        features_columns = [file_name[0] for file_name in file_manager.get_bigwig_files()]
     feature_str = ""
-    for feature in FEATURES_COLUMNS:
+    for feature in features_columns:
       feature_str = feature_str + "_" + feature
-    if SHUFFLE:
-        shuffle_str = "with_shuffle_"
-    else: shuffle_str = "no_shuflle_"
-    file_name = ML_TYPE + "_" +  feature_str + "_" + shuffle_str + ending + ".csv"
+    sampler_str = f'{get_sampler_type(sampler)}_'
+    file_name = f'{ML_TYPE}_{sampler_str}{feature_str}_{ending}.csv'
     return file_name
-def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name,file_manager):
+def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name,file_manager,sampler):
     data_table = pd.read_csv(data_table)
     # Set the threshold and update the column
     # threshold = 1e-5
@@ -114,10 +115,11 @@ def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name,file
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
     x_feature,y_label = generate_features_labels_sql(result_dataframes,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column,manager=file_manager) # List of arrays
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+    
     print("staring ml")
-    file_name = create_file_name(file_name,file_manager)
+    file_name = create_file_name(file_name,file_manager,sampler)
     for i,key in enumerate(result_dataframes.keys()):
-        x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=SHUFFLE,if_print=False)
+        x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=SHUFFLE,if_print=False,sampler=sampler)
         auroc,auprc,y_score = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals=y_score,y_test=y_test,n=1000))
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
@@ -200,7 +202,9 @@ def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfo
     # time_test(X_train,y_train)
     # exit(0)
     # train
-    classifier = get_classifier()
+    tprr,tpt,tnt,m,n = get_tp_tn(y_test=y_test,y_train=y_train)
+    inverse_ratio = tnt / tpt
+    classifier = get_classifier(ratio=inverse_ratio)
     classifier.fit(X_train, y_train)
     # predict probs
     #y_pos_scores_probs = classifier.predict(X_test)
@@ -245,7 +249,7 @@ def get_auc_by_tpr(tpr_arr):
     return calculated_auc,amount_of_points
     
 
-def get_classifier():
+def get_classifier(ratio):
     if ML_TYPE == "LOGREG":
         return LogisticRegression(random_state=42,n_jobs=-1)
     elif ML_TYPE == "SVM":
@@ -253,7 +257,10 @@ def get_classifier():
     elif ML_TYPE == "RANDOMFOREST":
         return RandomForestClassifier(random_state=42,n_jobs=-1)
     elif ML_TYPE == "XGBOOST":
-        return XGBClassifier(random_state=42, objective='binary:logistic')
+        return XGBClassifier(random_state=42, objective='binary:logistic',n_jobs=-1)
+    elif ML_TYPE == "XGBOOST_CW":
+        return XGBClassifier(scale_pos_weight=ratio,random_state=42, objective='binary:logistic',n_jobs=-1)
+
 def enforce_seq_length(sequence, requireLength):
     if (len(sequence) < requireLength): sequence = '0'*(requireLength-len(sequence))+sequence # in case sequence is too short, fill in zeros from the beginning (or sth arbitrary thats not ATCG)
     return sequence[-requireLength:] # in case sequence is too long
@@ -261,18 +268,20 @@ def enforce_seq_length(sequence, requireLength):
 data - data frame for guiderna
 only_seq_info - bolean for only seq or other features.'''
 def get_features(data, only_seq_info,target_column,off_target_column,manager):
-    bigwig_info = np.ones((data.shape[0],ENCODED_LENGTH))
+    
     seq_info = np.ones((data.shape[0], ENCODED_LENGTH))
-    for index, (otseq, grnaseq, chrom, start, end) in enumerate(zip(data[off_target_column], data[target_column], data[CHROM], data[START], data[END])):
+    for index, (otseq, grnaseq) in enumerate(zip(data[off_target_column], data[target_column])):
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
         seq_info[index] = seq_to_one_hot(otseq, grnaseq)
-        if not (end - start) == 23:
-            end = start + 23
-        bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end)
     
     if IF_BP:
+        bigwig_info = np.ones((data.shape[0],ENCODED_LENGTH))
+        for index, (chrom, start, end) in enumerate(zip(data[CHROM], data[START], data[END])):
+            if not (end - start) == 23:
+                end = start + 23
+                bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end)
         x = seq_info + bigwig_info
     elif only_seq_info:
         x = seq_info
@@ -323,7 +332,7 @@ def seq_to_one_hot(sequence, seq_guide):
 '''given feature list, label list split them into
 test and train data.
 transform into ndarray and shuffle the train data'''
-def order_data(X_feature,Y_labels,i,if_shuffle,if_print):
+def order_data(X_feature,Y_labels,i,if_shuffle,if_print,sampler):
     # into nd array
     x_test = np.array(X_feature[i])
     y_test = np.array(Y_labels[i]).ravel() # flatten to one dimension the y label
@@ -356,7 +365,8 @@ def order_data(X_feature,Y_labels,i,if_shuffle,if_print):
             varify_by_printing(None,None,x_train,y_train,None,True,indices_to_print)
         else:   
             x_train, y_train = shuffle(x_train, y_train, random_state=42)
-
+    if IF_OS:
+        x_train,y_train = over_sample(x_train,y_train,sampler)
     return (x_train,y_train,x_test,y_test)
 def varify_by_printing(X_feature,Y_labels,x_sub,y_sub,i,if_shuffle,indices):
     if not if_shuffle:
@@ -408,43 +418,114 @@ def balance_data(x_train,y_train,data_points) -> tuple:
     y_train = y_train[combined_indices] 
     x_train = x_train[combined_indices]
     return (x_train,y_train) 
-''' need to add over/under sampling'''       
-def over_under_sample(X_train,y_train) -> tuple:
+
+
+def get_sampler(balanced_ratio):
+    sampler_type = input("1. over sampeling\n2. synthetic sampling\n")
+    if sampler_type == "1": # over sampling
+        return RandomOverSampler(sampling_strategy=balanced_ratio, random_state=42)
+    else : return SMOTE(sampling_strategy=balanced_ratio,random_state=42)
+def over_sample(X_train, y_train, over_sampler):
     num_minority_samples_before = sum(y_train == 1)
-    # Apply RandomOverSampler to the training data
-    ros = RandomOverSampler(sampling_strategy='auto', random_state=42)
-    X_train, y_train = ros.fit_resample(X_train, y_train)
-    # Count the number of samples in the minority class after oversampling
+    num_majority = sum(y_train==0)
+    
+    X_train, y_train = over_sampler.fit_resample(X_train,y_train)
     num_minority_samples_after = sum(y_train == 1)
     # Calculate the number of samples that have been duplicated
     num_samples_duplicated = num_minority_samples_after - num_minority_samples_before
-    print(f"Number of samples duplicated: {num_samples_duplicated}")
-    return (X_train,y_train)
-def set_if_seq():
-    if_seq = input("press y/Y to keep only_seq, any other for more\n")
-    if not if_seq.lower() == "y":
-        return False
-    else: return True
-def set_bp_coding(management):
-    global ENCODED_LENGTH,BP_PRESENTATION,IF_BP
-    if_bp = input("press y/Y if bp coding is intended\n")
-    if if_bp.lower() == "y":
-        BP_PRESENTATION = 6 + management.get_number_of_bigiwig()
-        ENCODED_LENGTH = 23 * BP_PRESENTATION
-        IF_BP = True
+    print(f"Number of samples duplicated: {num_samples_duplicated}\nclass ratio: {num_minority_samples_after / num_majority}")
+    return (X_train, y_train)
+def if_over_sample():
+    global IF_OS
+    if_os = input("press y/Y to oversample, any other for more\n")
+    if if_os.lower() == "y":
+        sampler = get_sampler('auto')
+        IF_OS = True
+        return sampler
+    else : return None
+def get_sampler_type(sampler):
+    if isinstance(sampler, RandomOverSampler):
+        return "ROS"
+    elif isinstance(sampler, SMOTE):
+        return "SMOTE"
+    else:
+        return ""
+
 def create_path_list(combined_folder):
     path_list = []
     for combined_file in os.listdir(combined_folder):
         combined_path = os.path.join(combined_folder,combined_file)
         path_list.append(combined_path)
-    return path_list   
+    return path_list  
+'''''' 
+def create_feature_list(features_column):
+    # Create a dictionary to store groups based on endings
+    groups = {}
+
+    # Group strings based on their endings
+    for feature in features_column:
+        ending = feature.split("_")[-1]  # last part after _ "can be score, enrichment, etc.."
+        groups.setdefault(ending, []).append(feature)
+    return groups
+
+def run_only_seq(params):
+    global ONLY_SEQ_INFO,IF_BP
+    ONLY_SEQ_INFO = True
+    IF_BP = False
+    crisprsql(*params)
+def run_with_epigenetic_features(params):
+    global ONLY_SEQ_INFO,IF_BP,FEATURES_COLUMNS
+    ONLY_SEQ_INFO = IF_BP = False
+    # run corresponding features
+    features_dict = create_feature_list(FEATURES_COLUMNS) # dict of feature by type (score, binary, fold)
+    for feature_group in features_dict.values():
+        # for feature in feature_group: # run single feature
+        #     FEATURES_COLUMNS = [feature]
+        #     crisprsql(*params)
+        # if len(feature_group) == 1: # group containing one feature already been run with previous for loop
+        #     continue
+        FEATURES_COLUMNS = feature_group
+        crisprsql(*params)
+def run_with_bp_represenation(params,manager):
+    global ONLY_SEQ_INFO,IF_BP
+    ONLY_SEQ_INFO = False
+    IF_BP = True
+    BP_PRESENTATION = 6 + manager.get_number_of_bigiwig()
+    ENCODED_LENGTH = 23 * BP_PRESENTATION
+    crisprsql(*params)
+def run_manualy(params,management):
+    answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n")
+    if answer == "1":
+        run_only_seq(params)
+    elif answer == "2":
+        run_with_epigenetic_features(params)
+    elif answer == "3":
+        run_with_bp_represenation(params,management)
+    else: 
+        print("no good option, exiting.")
+        exit(0)
+'''function runs automation of all epigenetics combinations, onyl seq, and bp epigeneitcs represantion.'''
+def auto_run(params,management):
+    run_only_seq(params)
+    run_with_epigenetic_features(params)
+    run_with_bp_represenation(params,management)
+def run(params):
+    global ML_TYPE
+    ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, XGBOOST_CW, RANDOMFOREST):\n") # ask for ML model
+    management = File_management("pos","neg","bed","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
+    sampler = if_over_sample() 
+    new_params = params + (management, sampler)
+    answer = input("press:\n1. auto\n2. manual\n")
+    if answer == "1":
+        auto_run(new_params,management)
+    elif answer == "2":
+        run_manualy(new_params,management)
+    else:
+        print("no good option, exiting.")
+        exit(0)
+
 
 if __name__ == "__main__":
-     ONLY_SEQ_INFO = set_if_seq()
-     ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, RANDOMFOREST):\n")
-     management = File_management("pos","neg","bed","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
-     set_bp_coding(management)
-    # run_leave_one_out(sys.argv[1],sys.argv[2])
-     crisprsql(data_table=sys.argv[1],target_colmun=TARGET,off_target_column=OFFTARGET,y_column="Label",file_name="Changeseq_csgs",file_manager= management)
-    #get_tpr_by_n_expriments(predicted_vals=np.array([0.2,0.8,0.7,0.6,0.5]),y_test=np.array([0,1,0,1,0]),n=5)
+     run((sys.argv[1],TARGET,OFFTARGET,"Label","change_casogs"))
+     
     
