@@ -19,12 +19,32 @@ class File_management:
     def get_bigwig_folder(self):
         return self.bigwig_folder_path
     def get_number_of_bigiwig(self):
-        return len(self.bigwig_files)
+        return self.bigwig_amount
    
     def get_bigwig_files(self):
         if len(self.bigwig_files) > 0 :
-            return self.bigwig_files
+            return self.bigwig_files.copy() # keep original list
         else: raise ValueError("No bigwig files")
+    def set_bigwig_files(self,bw_list):
+        flag = False
+        if bw_list: #bw list isnt empty
+            flag = True
+            # check if bw/bedgraph
+            for file_name,file_object in bw_list:
+                if not file_object.isBigWig():
+                    # not bigwig throw error
+                    flag = False
+                    raise Exception(f'trying to set bigwig files with other type of file\n{bw}, is not bw file')
+                else : 
+                    continue # check next file
+        if flag: # not empty list + all files are big wig
+           #self.close_big_wig(only_bw_object)
+           self.bigwig_files = bw_list
+           self.bigwig_amount = len(self.bigwig_files)
+        else : # flag is false list is empty
+            raise Exception('Trying to set bigwig files with empty list, try agian.') 
+
+
     # Functions to create paths from folders
     '''Create paths list from folder'''
     def create_paths(self,folder):
@@ -40,4 +60,20 @@ class File_management:
             name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
             name_object_tpl = (name,pyBigWig.open(path))
             self.bigwig_files.append(name_object_tpl)
+        self.bigwig_amount = len(self.bigwig_files) # set amount
         return self.bigwig_files
+    '''Function to close all bigwig objects'''
+    def close_big_wig(self,new_bw_object_list):
+        if self.bigwig_files: # not empty
+            for file_name,file_object in self.bigwig_files:
+                if file_object in new_bw_object_list: # setting new list with objects from old one - dont close the file
+                    continue
+                else:
+                    try:
+                        file_object.close()
+                    except Exception as e:
+                        print(e)
+    '''dtor'''
+    def __del__(self):
+        self.close_big_wig([])
+        # call more closing

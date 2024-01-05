@@ -2,12 +2,13 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_fold_enrichemnt"]
+FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary","Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"]
 ONLY_SEQ_INFO = True #set as needed, if only seq then True.
 LABEL = ["Label"]
 ML_TYPE = "" # String inputed by user
 BP_PRESENTATION = 6
-ENCODED_LENGTH =  23 * BP_PRESENTATION
+GUIDE_LENGTH = 23
+ENCODED_LENGTH =  GUIDE_LENGTH * BP_PRESENTATION
 SHUFFLE = True
 TARGET = "target"
 OFFTARGET = "offtarget_sequence"
@@ -17,6 +18,14 @@ END = "chromEnd"
 IF_BP = False
 BIGWIG = 0
 IF_OS = False
+FORCE_USE_CPU = False
+FIT_PARAMS = {
+    'epochs': 15,
+    'batch_size': 128,
+    'verbose' : 2,
+
+    # Add any other fit parameters you need
+}
 from file_management import File_management
 #AMOUNT_OF_BP_EPI = 1
 import pandas as pd
@@ -27,9 +36,20 @@ from xgboost import XGBClassifier
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 from sklearn.utils import shuffle
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.utils.class_weight import compute_class_weight
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
-from sklearn.metrics import roc_curve, auc, average_precision_score, roc_auc_score
+from sklearn.metrics import roc_curve, auc, average_precision_score
+import logging
+if FORCE_USE_CPU:
+    os.environ["CUDA_VISIBLE_DEVICES"]="-1"    
+import tensorflow as tf
+logger = tf.get_logger()
+logger.setLevel(logging.ERROR)
+import tensorflow as tf
+from tensorflow import keras
+from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape, Dropout
+
 import os
 
 #NOTE: if path for files is changed for more features, FEATURES_COLUMNS need to be changed.
@@ -204,12 +224,25 @@ def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfo
     # train
     tprr,tpt,tnt,m,n = get_tp_tn(y_test=y_test,y_train=y_train)
     inverse_ratio = tnt / tpt
+    class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
+    class_weight_dict = dict(enumerate(class_weights))
+    FIT_PARAMS['class_weight'] = class_weight_dict
     classifier = get_classifier(ratio=inverse_ratio)
-    classifier.fit(X_train, y_train)
-    # predict probs
-    #y_pos_scores_probs = classifier.predict(X_test)
-    y_scores_probs = classifier.predict_proba(X_test)
-    y_pos_scores_probs = y_scores_probs[:,1] # probalities for positive label (1 column for positive)
+    if isinstance(classifier,keras.Model):
+        if not (ONLY_SEQ_INFO or IF_BP): #only-seq = bp = false -> only features
+            # bp True != only-seq
+            X_train_seq,X_train_features = extract_features(X_train,ENCODED_LENGTH)
+            X_train = [X_train_seq,X_train_features]
+            X_test_seq,X_test_features = extract_features(X_test,ENCODED_LENGTH)
+            X_test = [X_test_seq,X_test_features]
+           
+        classifier.fit(X_train,y_train,**FIT_PARAMS)
+        y_pos_scores_probs = classifier.predict(X_test,verbose = 2)
+    else :
+        classifier.fit(X_train,y_train)
+        y_scores_probs = classifier.predict_proba(X_test)
+        y_pos_scores_probs = y_scores_probs[:,1] # probalities for positive label (1 column for positive)
+     
     # # Calculate AUROC,AUPRC
     fpr, tpr, tresholds = roc_curve(y_test, y_pos_scores_probs)
     auroc = auc(fpr, tpr)
@@ -217,6 +250,12 @@ def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfo
     auprc = average_precision_score(y_test, y_pos_scores_probs)
     print("ML DONE")
     return (auroc,auprc,y_pos_scores_probs)
+'''function splits one hot encoding into seq encoding and features encoding.'''
+def extract_features(X_train,encoded_length):
+    seq_only = X_train[:, :encoded_length]
+    features = X_train[:, encoded_length:]
+    return seq_only,features
+
 '''get the true positive rate for up to n expriemnets by calculating:
 the first n prediction values, what the % of positive predcition out of the the TP amount.
 calculate auc value for 1-n'''
@@ -260,7 +299,59 @@ def get_classifier(ratio):
         return XGBClassifier(random_state=42, objective='binary:logistic',n_jobs=-1)
     elif ML_TYPE == "XGBOOST_CW":
         return XGBClassifier(scale_pos_weight=ratio,random_state=42, objective='binary:logistic',n_jobs=-1)
+    elif ML_TYPE == "CNN":
+        return create_convolution_model(sequence_length= GUIDE_LENGTH,bp_presenation= BP_PRESENTATION,only_seq_info=ONLY_SEQ_INFO,if_bp=IF_BP,num_of_additional_features=len(FEATURES_COLUMNS))
+     
+        
+        
 
+    
+def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,num_of_additional_features):
+    seq_input = Input(shape=(sequence_length * bp_presenation))
+    seq_input_reshaped = Reshape((sequence_length, bp_presenation)) (seq_input)
+
+    seq_conv_1 = Conv1D(32, 3, kernel_initializer='random_uniform', activation=None,strides=1, padding="valid")(seq_input_reshaped)
+    seq_acti_1 = keras.layers.LeakyReLU(alpha=0.2)(seq_conv_1)
+    seq_drop_1 = keras.layers.Dropout(0.1)(seq_acti_1)
+    
+    seq_conv_2 = Conv1D(64, 3, kernel_initializer='random_uniform', activation=None,strides=1, padding="valid")(seq_drop_1)
+    seq_acti_2 = keras.layers.LeakyReLU(alpha=0.2)(seq_conv_2)
+    seq_max_pooling_1 = MaxPooling1D(pool_size=3, padding="same")(seq_acti_2)
+
+    seq_conv_3 = Conv1D(128, 3, kernel_initializer='random_uniform', activation=None,strides=1, padding="valid")(seq_max_pooling_1)
+    seq_acti_3 = keras.layers.LeakyReLU(alpha=0.2)(seq_conv_3)
+
+    seq_conv_4 = Conv1D(256, 2, kernel_initializer='random_uniform', activation=None,strides=1, padding="valid")(seq_acti_3)
+    seq_acti_4 = keras.layers.LeakyReLU(alpha=0.2)(seq_conv_4)
+    seq_max_pooling_2 = MaxPooling1D(pool_size=3, padding="same")(seq_acti_4)
+
+    seq_conv_5 = Conv1D(512, 2, kernel_initializer='random_uniform', activation=None,strides=1, padding="valid")(seq_max_pooling_2)
+    seq_acti_5 = keras.layers.LeakyReLU(alpha=0.2)(seq_conv_5)
+
+    seq_flatten = Flatten()(seq_acti_5) 
+
+    if (only_seq_info or if_bp):
+        seq_dense_1 = Dense(256, activation='relu')(seq_flatten)
+    else:
+        feature_input = Input(shape=(num_of_additional_features))
+        combined = Concatenate()([seq_flatten, feature_input])
+        seq_dense_1 = Dense(256, activation='relu')(combined)
+    seq_drop_2 = keras.layers.Dropout(0.3)(seq_dense_1)
+    seq_dense_2 = Dense(128, activation='relu')(seq_drop_2)
+    seq_drop_3 = keras.layers.Dropout(0.2)(seq_dense_2)
+    seq_dense_3 = Dense(64, activation='relu')(seq_drop_3)
+    seq_drop_4 = keras.layers.Dropout(0.2)(seq_dense_3)
+    seq_dense_4 = Dense(40, activation='relu')(seq_drop_4)
+    seq_drop_5 = keras.layers.Dropout(0.2)(seq_dense_4)
+
+    output = Dense(1, activation='sigmoid')(seq_drop_5)
+    if (only_seq_info or if_bp):
+        model = keras.Model(inputs=seq_input, outputs=output)
+    else:
+        model = keras.Model(inputs=[seq_input, feature_input], outputs=output)
+    model.compile(loss=keras.losses.BinaryCrossentropy(), optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3), metrics=['binary_accuracy'])
+    print(model.summary())
+    return model
 def enforce_seq_length(sequence, requireLength):
     if (len(sequence) < requireLength): sequence = '0'*(requireLength-len(sequence))+sequence # in case sequence is too short, fill in zeros from the beginning (or sth arbitrary thats not ATCG)
     return sequence[-requireLength:] # in case sequence is too long
@@ -287,7 +378,7 @@ def get_features(data, only_seq_info,target_column,off_target_column,manager):
         x = seq_info
     else:
         x = data[FEATURES_COLUMNS].values 
-        x = np.append(x, seq_info, axis = 1)
+        x = np.append(seq_info,x, axis = 1)
     return x
 def bws_to_one_hot(file_manager, chr, start, end):
     # back to original bp presantation
@@ -479,20 +570,30 @@ def run_with_epigenetic_features(params):
     # run corresponding features
     features_dict = create_feature_list(FEATURES_COLUMNS) # dict of feature by type (score, binary, fold)
     for feature_group in features_dict.values():
-        # for feature in feature_group: # run single feature
-        #     FEATURES_COLUMNS = [feature]
-        #     crisprsql(*params)
-        # if len(feature_group) == 1: # group containing one feature already been run with previous for loop
-        #     continue
+        for feature in feature_group: # run single feature
+            FEATURES_COLUMNS = [feature]
+            crisprsql(*params)
+        if len(feature_group) == 1: # group containing one feature already been run with previous for loop
+            continue
         FEATURES_COLUMNS = feature_group
         crisprsql(*params)
 def run_with_bp_represenation(params,manager):
-    global ONLY_SEQ_INFO,IF_BP
+    global ONLY_SEQ_INFO,IF_BP,BP_PRESENTATION,ENCODED_LENGTH
     ONLY_SEQ_INFO = False
     IF_BP = True
-    BP_PRESENTATION = 6 + manager.get_number_of_bigiwig()
+    bw_copy = manager.get_bigwig_files() # gets a copy of the list
+    for bw in bw_copy: # run each epi mark by file separtly
+        manager.set_bigwig_files([bw])
+        BP_PRESENTATION = 6 + manager.get_number_of_bigiwig() # should be 1
+        ENCODED_LENGTH = 23 * BP_PRESENTATION
+        crisprsql(*params)
+    # run all epigentics mark togther
+    manager.set_bigwig_files(bw_copy)
+    BP_PRESENTATION = 6 + manager.get_number_of_bigiwig() # should be >= 1
     ENCODED_LENGTH = 23 * BP_PRESENTATION
     crisprsql(*params)
+    # no need to close files will be closed by manager
+    
 def run_manualy(params,management):
     answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n")
     if answer == "1":
@@ -509,10 +610,11 @@ def auto_run(params,management):
     run_only_seq(params)
     run_with_epigenetic_features(params)
     run_with_bp_represenation(params,management)
+
 def run(params):
     global ML_TYPE
-    ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, XGBOOST_CW, RANDOMFOREST):\n") # ask for ML model
-    management = File_management("pos","neg","bed","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
+    ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, XGBOOST_CW, RANDOMFOREST, CNN):\n") # ask for ML model
+    management = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
     sampler = if_over_sample() 
     new_params = params + (management, sampler)
     answer = input("press:\n1. auto\n2. manual\n")
@@ -526,6 +628,6 @@ def run(params):
 
 
 if __name__ == "__main__":
-     run((sys.argv[1],TARGET,OFFTARGET,"Label","change_casogs"))
+     run((sys.argv[1],TARGET,OFFTARGET,"Label","change_csgs"))
      
     
