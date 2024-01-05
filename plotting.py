@@ -1,8 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.colors import to_rgba
-
 from file_management import File_management
 
 
@@ -24,33 +22,27 @@ def draw_auc_curve(x_data,y_data,x_pinpoints,y_pinpoints,title):
     plt.legend()
     plt.show()
 def draw_averages_epigenetics():
-    data = pd.read_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv")
-    file_manager = File_management("pos","neg","bed","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
+    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
+    file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
     label_list = [("GUIDE-seq",1),("CHANGE-seq",0)]
+    
     guide_change_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager)
-    #label_list = [("CASOFINDER",0)]
-    #data = pd.read_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_casofinder_withEpigenetic.csv")
-    #casofinder_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager)
-    #merged_dict = {key: guide_change_dict[key] + casofinder_dict[key] for key in guide_change_dict.keys() & casofinder_dict.keys()}
+    label_list = [("CASOFINDER",0)]
+    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_casofinder_withEpigenetic.csv")
+    casofinder_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager)
+    merged_dict = {key: guide_change_dict[key] + casofinder_dict[key] for key in guide_change_dict.keys() & casofinder_dict.keys()}
     #  set x coords for -10kb, center, +10 kb
     x_positions = np.linspace(-10000, 10000, 20000)
     colors = ['blue', 'green', 'red']
 
     # Plot each line
-    for key, name_y_values_list in guide_change_dict.items():
+    for key, name_y_values_list in merged_dict.items():
         plt.figure()  # Create a new figure for each key
 
-        for i, (name, y_values,std) in enumerate(name_y_values_list):
-            # color = colors[i % len(colors)]  # Cycle through the colors
-            # plt.plot(x_positions, y_values, label=name, color=color)
-            color = plt.cm.viridis(i / len(name_y_values_list))  # Using colormap for varying brightness
+        for i, (name, y_values) in enumerate(name_y_values_list):
+            color = colors[i % len(colors)]  # Cycle through the colors
             plt.plot(x_positions, y_values, label=name, color=color)
-    
-            bright_color_plus_std = tuple(c + 0.2 for c in to_rgba(color)[:3])  # Adjust the factor (0.2) as needed
-            plt.plot(x_positions, y_values + std, linestyle='dotted',label=f'{name} + std({std:.4f})' ,color=bright_color_plus_std)
-            plt.plot(x_positions, y_values - std, linestyle='dotted',label=f'{name} - std({std:.4f})', color=bright_color_plus_std)
 
-    
         # Set x-axis limits
         plt.xlim(-10000, 10000)
         
@@ -78,8 +70,8 @@ def get_epigentics_around_center(merged_data,on_column,label_value_list,center_v
     for epigeneitc_mark, epigenetic_file in epigenetics_object: # for each epi mark create a list with tuples - (name, average values)
         epi_dict[epigeneitc_mark] = []
         for name,label_value in label_value_list: # for each data points get averages value
-            averages,std = average_epi_around_center(merged_data=merged_data,on_column=on_column,label_value=label_value,center_value_column=center_value_column,chrom_column=chrom_column,epigenetic_file=epigenetic_file)
-            epi_dict[epigeneitc_mark].append((name,averages,std))
+            averages = average_epi_around_center(merged_data=merged_data,on_column=on_column,label_value=label_value,center_value_column=center_value_column,chrom_column=chrom_column,epigenetic_file=epigenetic_file)
+            epi_dict[epigeneitc_mark].append((name,averages))
     return epi_dict
 '''draw +- 10kb range of center off target averages with epigenetics markers'''
 def average_epi_around_center(merged_data,on_column,label_value,center_value_column,chrom_column,epigenetic_file):
@@ -109,7 +101,38 @@ def average_epi_around_center(merged_data,on_column,label_value,center_value_col
         sum_values += y_values
         count_values += 1
     average_values = sum_values / count_values
-    std = average_values.std()
-    return average_values,std
+    return average_values
+def draw_histogram_bigwig(file_manager):
+    epigenetics_object = file_manager.get_bigwig_files()
+    
+    fig, axs = plt.subplots(nrows=len(epigenetics_object), ncols=1, figsize=(8, 4 * len(epigenetics_object)))
+
+    for i, (epigenetic_mark, epigenetic_file) in enumerate(epigenetics_object):
+        chr_len = epigenetic_file.chroms("chr7")
+        big_wig_values = epigenetic_file.values("chr7",0,chr_len)
+        big_wig_values = np.array(big_wig_values)
+        big_wig_values[np.isnan(big_wig_values)] = 0.0
+        counts, bins = np.histogram(big_wig_values)
+        # Plot the histogram in the corresponding subplot
+        axs[i].stairs(counts, bins)
+        # Customize the subplot if needed (e.g., labels, title, etc.)
+        axs[i].set_xticks(bins)
+        axs[i].set_xticklabels([f'{bin_val:.2f}' for bin_val in bins])
+
+        axs[i].set_xlabel('Values')
+        axs[i].set_ylabel('Count')
+        axs[i].set_title(f'Histogram for {epigenetic_mark}')
+
+    # Adjust layout to prevent overlapping
+    plt.tight_layout()
+
+    # Save the entire figure to a file
+    plt.savefig('epigenetics_histograms.png')
+
+
+
 if __name__ == "__main__":
-    draw_averages_epigenetics()
+    file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
+
+    #draw_averages_epigenetics()
+    draw_histogram_bigwig(file_manager)
