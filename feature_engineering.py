@@ -413,8 +413,8 @@ def get_features(data, only_seq_info,target_column,off_target_column,manager):
     elif IF_SEPERATE_EPI: # for every OTS extract epigenetics separate by window_size
         epi_data = np.ones((data.shape[0],EPIGENETIC_WINDOW_SIZE)) # set empty np array with data points and epigenetics window size
         for index, (chrom, start) in enumerate(zip(data[CHROM], data[START])):
-            bw_file_list = [file[1] for file in manager.get_bigwig_files()]
-            epi_data[index] = get_epi_data(bw_files_list=bw_file_list,chrom=chrom,center_loc=start,window_size=EPIGENETIC_WINDOW_SIZE)
+            bw_epi_name, bw_epi_file = manager.get_bigwig_files()
+            epi_data[index] = get_epi_data(bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=EPIGENETIC_WINDOW_SIZE)
         epi_data = epi_data.astype(np.float32)
         x = np.append(seq_info,epi_data,axis=1) # append both togther - afterwards extracts them
         print(f'x: {x[0,:138]},\nseq: {seq_info[0]}')
@@ -424,28 +424,28 @@ def get_features(data, only_seq_info,target_column,off_target_column,manager):
         x = data[FEATURES_COLUMNS].values 
         x = np.append(seq_info,x, axis = 1)
     return x
-def get_epi_data(bw_files_list, chrom, center_loc, window_size):
+def get_epi_data(bw_file, chrom, center_loc, window_size):
     positive_step = negative_step = int(window_size / 2) # set steps to window/2
     if (window_size % 2): # not even
         positive_step += 1 # set pos step +1 (being rounded down before)
-    for epigenetic_file in bw_files_list:
-            
-        chrom_lim =  epigenetic_file.chroms(chrom)
-        indices = np.arange(center_loc - negative_step, center_loc + positive_step)
-        # Clip the indices to ensure they are within the valid range
-        indices = np.clip(indices, 0, chrom_lim - 1)
-        # Retrieve the values directly using array slicing
-        y_values = epigenetic_file.values(chrom, indices[0], indices[-1] + 1)
-        
-        min_val = epigenetic_file.stats(chrom,indices[0],indices[-1] + 1,type="min")[0]  
-        # Create pad_values using array slicing
-        pad_values_beginning = np.full(max(0, positive_step - center_loc), min_val)
-        pad_values_end = np.full(max(0, center_loc + negative_step - chrom_lim), min_val)
 
-        # Combine pad_values with y_values directly using array concatenation
-        y_values = np.concatenate([pad_values_beginning, y_values, pad_values_end])
-        y_values = y_values.astype(np.float32)
-        y_values[np.isnan(y_values)] = min_val # replace nan with min val
+        
+    chrom_lim =  bw_file.chroms(chrom)
+    indices = np.arange(center_loc - negative_step, center_loc + positive_step)
+    # Clip the indices to ensure they are within the valid range
+    indices = np.clip(indices, 0, chrom_lim - 1)
+    # Retrieve the values directly using array slicing
+    y_values = bw_file.values(chrom, indices[0], indices[-1] + 1)
+    
+    min_val = bw_file.stats(chrom,indices[0],indices[-1] + 1,type="min")[0]  
+    # Create pad_values using array slicing
+    pad_values_beginning = np.full(max(0, positive_step - center_loc), min_val)
+    pad_values_end = np.full(max(0, center_loc + negative_step - chrom_lim), min_val)
+
+    # Combine pad_values with y_values directly using array concatenation
+    y_values = np.concatenate([pad_values_beginning, y_values, pad_values_end])
+    y_values = y_values.astype(np.float32)
+    y_values[np.isnan(y_values)] = min_val # replace nan with min val
     return y_values
 
 def bws_to_one_hot(file_manager, chr, start, end):
