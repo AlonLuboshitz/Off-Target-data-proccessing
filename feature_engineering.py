@@ -2,7 +2,8 @@
 # x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary","Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"]
+# "Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"
+FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
 ONLY_SEQ_INFO = True #set as needed, if only seq then True.
 LABEL = ["Label"]
 ML_TYPE = "" # String inputed by user
@@ -19,9 +20,11 @@ IF_BP = False
 BIGWIG = 0
 IF_OS = False
 FORCE_USE_CPU = False
+IF_SEPERATE_EPI = False
+EPIGENETIC_WINDOW_SIZE = 0
 FIT_PARAMS = {
-    'epochs': 15,
-    'batch_size': 128,
+    'epochs': 5,
+    'batch_size': 1024,
     'verbose' : 2,
 
     # Add any other fit parameters you need
@@ -41,16 +44,17 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.metrics import roc_curve, auc, average_precision_score
 import logging
+import os
 if FORCE_USE_CPU:
-    os.environ["CUDA_VISIBLE_DEVICES"]="-1"    
+    os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
+#os.environ["CUDA_VISIBLE_DEVICES"]="1"  
 import tensorflow as tf
 logger = tf.get_logger()
 logger.setLevel(logging.ERROR)
-import tensorflow as tf
 from tensorflow import keras
 from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape, Dropout
 
-import os
+
 
 #NOTE: if path for files is changed for more features, FEATURES_COLUMNS need to be changed.
 
@@ -101,14 +105,25 @@ def create_file_name(ending,file_manager,sampler):
         features_columns = ["Only_Seq"]
     elif IF_BP:
         features_columns = [file_name[0] for file_name in file_manager.get_bigwig_files()]
+    elif IF_SEPERATE_EPI:
+        features_columns = [file_name[0] for file_name in file_manager.get_bigwig_files()]
+        features_columns.append(f'window_{EPIGENETIC_WINDOW_SIZE}')
+
     feature_str = ""
     for feature in features_columns:
       feature_str = feature_str + "_" + feature
     sampler_str = f'{get_sampler_type(sampler)}_'
     file_name = f'{ML_TYPE}_{sampler_str}{feature_str}_{ending}.csv'
     return file_name
+def create_data_frames_for_features(data_table,target_colmun):
+    data_table = pd.read_csv(data_table) # open data
+    guides = set(data_table[target_colmun]) # set unquie guide identifier
+     # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
+    df_dict = {grna: group for grna, group in data_table.groupby(target_colmun)}
+    # Create separate DataFrames for each gRNA in the set
+    result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
+    return (result_dataframes, guides)
 def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name,file_manager,sampler):
-    data_table = pd.read_csv(data_table)
     # Set the threshold and update the column
     # threshold = 1e-5
     # print('cleavage>treshold: ',sum(df_sql['cleavage_freq']>1e-5))
@@ -126,24 +141,21 @@ def crisprsql(data_table,target_colmun,off_target_column,y_column,file_name,file
     # print(before-after)
     #data_table = data_table[['target_sequence','grna_target_sequence','measured']]
     
-    guides = set(data_table[target_colmun]) # set unquie guide identifier
+    
 
-    # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
-    df_dict = {grna: group for grna, group in data_table.groupby(target_colmun)}
-
-    # Create separate DataFrames for each gRNA in the set
-    result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
-    x_feature,y_label = generate_features_labels_sql(result_dataframes,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column,manager=file_manager) # List of arrays
+    splited_data_frames, guides = create_data_frames_for_features(data_table,target_colmun)
+    x_feature,y_label = generate_features_labels_sql(splited_guide_data=splited_data_frames,target_column=target_colmun,off_target_column=off_target_column,y_column=y_column,manager=file_manager) # List of arrays
+    del splited_data_frames # free memory
     results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
     
     print("staring ml")
     file_name = create_file_name(file_name,file_manager,sampler)
-    for i,key in enumerate(result_dataframes.keys()):
+    for i,key in enumerate(guides):
         x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=SHUFFLE,if_print=False,sampler=sampler)
         auroc,auprc,y_score = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals=y_score,y_test=y_test,n=1000))
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
-        print(f"Ith: {i+1}\{len(result_dataframes)} split is done")
+        print(f"Ith: {i+1}\{len(guides)} split is done")
         results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=key,table=results_table,ML_type=ML_TYPE,Tpn_tuple=tps_tns,n_rank=n_rank_score)
         if auroc <= 0.5:
             write_scores(key,y_test,y_score,file_name,auroc)            
@@ -229,8 +241,10 @@ def get_ml_auroc_auprc(X_train, y_train, X_test, y_test): # to run timetest unfo
     FIT_PARAMS['class_weight'] = class_weight_dict
     classifier = get_classifier(ratio=inverse_ratio)
     if isinstance(classifier,keras.Model):
-        if not (ONLY_SEQ_INFO or IF_BP): #only-seq = bp = false -> only features
+
+        if IF_SEPERATE_EPI or (not (ONLY_SEQ_INFO or IF_BP)): #only-seq = bp = false -> only features
             # bp True != only-seq
+            # seperate
             X_train_seq,X_train_features = extract_features(X_train,ENCODED_LENGTH)
             X_train = [X_train_seq,X_train_features]
             X_test_seq,X_test_features = extract_features(X_test,ENCODED_LENGTH)
@@ -266,6 +280,8 @@ def get_tpr_by_n_expriments(predicted_vals,y_test,n):
         n = len(y_test)
     
     tp_amount = np.count_nonzero(y_test) # get tp amount
+    if predicted_vals.ndim > 1:
+        predicted_vals = predicted_vals.ravel()
     sorted_indices = np.argsort(predicted_vals)[::-1] # Get the indices that would sort the prediction values array in descending order    
     tp_amount_by_prediction = 0 # set tp amount by prediction
     tpr_array = np.empty(0) # array for tpr
@@ -300,14 +316,11 @@ def get_classifier(ratio):
     elif ML_TYPE == "XGBOOST_CW":
         return XGBClassifier(scale_pos_weight=ratio,random_state=42, objective='binary:logistic',n_jobs=-1)
     elif ML_TYPE == "CNN":
-        return create_convolution_model(sequence_length= GUIDE_LENGTH,bp_presenation= BP_PRESENTATION,only_seq_info=ONLY_SEQ_INFO,if_bp=IF_BP,num_of_additional_features=len(FEATURES_COLUMNS))
+        return create_convolution_model(sequence_length= GUIDE_LENGTH,bp_presenation= BP_PRESENTATION,only_seq_info=ONLY_SEQ_INFO,if_bp=IF_BP,num_of_additional_features=len(FEATURES_COLUMNS),epigenetic_window_size=EPIGENETIC_WINDOW_SIZE)
      
         
         
-
-    
-def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,num_of_additional_features):
-    seq_input = Input(shape=(sequence_length * bp_presenation))
+def create_conv_seq_layers(seq_input,sequence_length,bp_presenation):
     seq_input_reshaped = Reshape((sequence_length, bp_presenation)) (seq_input)
 
     seq_conv_1 = Conv1D(32, 3, kernel_initializer='random_uniform', activation=None,strides=1, padding="valid")(seq_input_reshaped)
@@ -329,13 +342,32 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
     seq_acti_5 = keras.layers.LeakyReLU(alpha=0.2)(seq_conv_5)
 
     seq_flatten = Flatten()(seq_acti_5) 
+    return seq_flatten
+def create_conv_epi_layer(epi_input,kernal_size,strides,epigenetic_window_size):
+    epi_input_reshaped = Reshape((epigenetic_window_size,1))(epi_input)
+    epi_conv_6 = Conv1D(2,kernel_size=kernal_size,kernel_initializer='random_uniform',strides=strides,padding='valid')(epi_input_reshaped)
+    epi_acti_6 = keras.layers.LeakyReLU(alpha=0.2)(epi_conv_6)
+    epi_max_pool_3 = MaxPooling1D(pool_size=2,strides=2, padding='same')(epi_acti_6) 
+    epi_seq_flatten = Flatten()(epi_max_pool_3)
+    return epi_seq_flatten
 
-    if (only_seq_info or if_bp):
-        seq_dense_1 = Dense(256, activation='relu')(seq_flatten)
+def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,num_of_additional_features,epigenetic_window_size):
+    # set seq conv layers
+    seq_input = Input(shape=(sequence_length * bp_presenation))
+    seq_flatten = create_conv_seq_layers(seq_input=seq_input,sequence_length=sequence_length,bp_presenation=bp_presenation)
+
+    if (only_seq_info or if_bp): # only seq information given
+        combined = seq_flatten
+    elif IF_SEPERATE_EPI: # epigenetics in diffrenet conv
+        epi_feature = Input(shape=(epigenetic_window_size))
+        epi_seq_flatten = create_conv_epi_layer(epi_input=epi_feature,kernal_size=(int(epigenetic_window_size/10)),strides=5,epigenetic_window_size=epigenetic_window_size)
+        combined = Concatenate()([seq_flatten, epi_seq_flatten])
+        
     else:
         feature_input = Input(shape=(num_of_additional_features))
         combined = Concatenate()([seq_flatten, feature_input])
-        seq_dense_1 = Dense(256, activation='relu')(combined)
+
+    seq_dense_1 = Dense(256, activation='relu')(combined)
     seq_drop_2 = keras.layers.Dropout(0.3)(seq_dense_1)
     seq_dense_2 = Dense(128, activation='relu')(seq_drop_2)
     seq_drop_3 = keras.layers.Dropout(0.2)(seq_dense_2)
@@ -347,6 +379,9 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
     output = Dense(1, activation='sigmoid')(seq_drop_5)
     if (only_seq_info or if_bp):
         model = keras.Model(inputs=seq_input, outputs=output)
+    elif IF_SEPERATE_EPI:
+        model = keras.Model(inputs=[seq_input,epi_feature], outputs=output)
+
     else:
         model = keras.Model(inputs=[seq_input, feature_input], outputs=output)
     model.compile(loss=keras.losses.BinaryCrossentropy(), optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3), metrics=['binary_accuracy'])
@@ -366,20 +401,53 @@ def get_features(data, only_seq_info,target_column,off_target_column,manager):
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
         seq_info[index] = seq_to_one_hot(otseq, grnaseq)
-    
-    if IF_BP:
+    seq_info =seq_info.astype(np.float32)
+    if IF_BP: # add epigenetic data to seq info
         bigwig_info = np.ones((data.shape[0],ENCODED_LENGTH))
         for index, (chrom, start, end) in enumerate(zip(data[CHROM], data[START], data[END])):
             if not (end - start) == 23:
                 end = start + 23
                 bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end)
+        bigwig_info = bigwig_info.astype(np.float32)
         x = seq_info + bigwig_info
+    elif IF_SEPERATE_EPI: # for every OTS extract epigenetics separate by window_size
+        epi_data = np.ones((data.shape[0],EPIGENETIC_WINDOW_SIZE)) # set empty np array with data points and epigenetics window size
+        for index, (chrom, start) in enumerate(zip(data[CHROM], data[START])):
+            bw_file_list = [file[1] for file in manager.get_bigwig_files()]
+            epi_data[index] = get_epi_data(bw_files_list=bw_file_list,chrom=chrom,center_loc=start,window_size=EPIGENETIC_WINDOW_SIZE)
+        epi_data = epi_data.astype(np.float32)
+        x = np.append(seq_info,epi_data,axis=1) # append both togther - afterwards extracts them
+        print(f'x: {x[0,:138]},\nseq: {seq_info[0]}')
     elif only_seq_info:
         x = seq_info
     else:
         x = data[FEATURES_COLUMNS].values 
         x = np.append(seq_info,x, axis = 1)
     return x
+def get_epi_data(bw_files_list, chrom, center_loc, window_size):
+    positive_step = negative_step = int(window_size / 2) # set steps to window/2
+    if (window_size % 2): # not even
+        positive_step += 1 # set pos step +1 (being rounded down before)
+    for epigenetic_file in bw_files_list:
+            
+        chrom_lim =  epigenetic_file.chroms(chrom)
+        indices = np.arange(center_loc - negative_step, center_loc + positive_step)
+        # Clip the indices to ensure they are within the valid range
+        indices = np.clip(indices, 0, chrom_lim - 1)
+        # Retrieve the values directly using array slicing
+        y_values = epigenetic_file.values(chrom, indices[0], indices[-1] + 1)
+        
+        min_val = epigenetic_file.stats(chrom,indices[0],indices[-1] + 1,type="min")[0]  
+        # Create pad_values using array slicing
+        pad_values_beginning = np.full(max(0, positive_step - center_loc), min_val)
+        pad_values_end = np.full(max(0, center_loc + negative_step - chrom_lim), min_val)
+
+        # Combine pad_values with y_values directly using array concatenation
+        y_values = np.concatenate([pad_values_beginning, y_values, pad_values_end])
+        y_values = y_values.astype(np.float32)
+        y_values[np.isnan(y_values)] = min_val # replace nan with min val
+    return y_values
+
 def bws_to_one_hot(file_manager, chr, start, end):
     # back to original bp presantation
     indexing = BP_PRESENTATION - file_manager.get_number_of_bigiwig()
@@ -593,15 +661,30 @@ def run_with_bp_represenation(params,manager):
     ENCODED_LENGTH = 23 * BP_PRESENTATION
     crisprsql(*params)
     # no need to close files will be closed by manager
+def run_with_epi_spacial(params,manager):
+    global ONLY_SEQ_INFO,IF_BP,IF_SEPERATE_EPI,EPIGENETIC_WINDOW_SIZE
+    ONLY_SEQ_INFO = IF_BP = False
+    IF_SEPERATE_EPI = True
+    EPIGENETIC_WINDOW_SIZE = 2000
+    bw_copy = manager.get_bigwig_files() # gets a copy of the list
+    for bw in bw_copy: # run each epi mark by file separtly
+        manager.set_bigwig_files([bw])
+        crisprsql(*params)
+    # run all epigentics mark togther
+    # manager.set_bigwig_files(bw_copy)
     
+    # crisprsql(*params)
+       
 def run_manualy(params,management):
-    answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n")
+    answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n4. epi seperate\n")
     if answer == "1":
         run_only_seq(params)
     elif answer == "2":
         run_with_epigenetic_features(params)
     elif answer == "3":
         run_with_bp_represenation(params,management)
+    elif answer == "4":
+        run_with_epi_spacial(params,management)
     else: 
         print("no good option, exiting.")
         exit(0)
@@ -610,11 +693,12 @@ def auto_run(params,management):
     run_only_seq(params)
     run_with_epigenetic_features(params)
     run_with_bp_represenation(params,management)
+    run_with_epi_spacial(params,management)
 
 def run(params):
     global ML_TYPE
     ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, XGBOOST_CW, RANDOMFOREST, CNN):\n") # ask for ML model
-    management = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
+    management = File_management("pos","neg","bed","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
     sampler = if_over_sample() 
     new_params = params + (management, sampler)
     answer = input("press:\n1. auto\n2. manual\n")
