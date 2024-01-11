@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from file_management import File_management
-
+from feature_engineering import get_epi_data
 
 '''given a x data and y data draws a auc curve.
 add marking lines to x_pinpoint and y_points - i.a y = 0.5 draw a line there to mark this value
@@ -94,7 +94,7 @@ def draw_pos_neg_bw_profiles(pos_data_points, neg_data_points, epigenetic_name,w
     fig.suptitle(f'Epigenetic Profiles - {epigenetic_name}')
     # Add any other details or customization as needed
     # For example, saving the figure or showing it
-    plt.savefig(f'{epigenetic_name}_profiles.jpg')
+    plt.savefig(f'{epigenetic_name}_{window_size}_profiles.jpg')
 def extract_data_points(data, epigenetic_file, chrom_column, label_column, center_value_column, data_amount,window_size):
     pos_data_sampling = data[data[label_column]==1].sample(data_amount)
     neg_data_sampling = data[data[label_column]==0].sample(data_amount)
@@ -138,28 +138,6 @@ def average_epi_around_center(merged_data,on_column,label_value,center_value_col
         count_values += 1
     average_values = sum_values / count_values
     return average_values
-def get_epi_data(epigentic_bw_file, chrom, center_loc, window_size):
-    positive_step = negative_step = int(window_size / 2) # set steps to window/2
-    if (window_size % 2): # not even
-        positive_step += 1 # set pos step +1 (being rounded down before)
-
-    chrom_lim =  epigentic_bw_file.chroms(chrom)
-    indices = np.arange(center_loc - negative_step, center_loc + positive_step)
-    # Clip the indices to ensure they are within the valid range
-    indices = np.clip(indices, 0, chrom_lim - 1)
-    # Retrieve the values directly using array slicing
-    y_values = epigentic_bw_file.values(chrom, indices[0], indices[-1] + 1)
-    
-    min_val = epigentic_bw_file.stats(chrom,indices[0],indices[-1] + 1,type="min")[0]  
-    # Create pad_values using array slicing
-    pad_values_beginning = np.full(max(0, positive_step - center_loc), min_val)
-    pad_values_end = np.full(max(0, center_loc + negative_step - chrom_lim), min_val)
-
-    # Combine pad_values with y_values directly using array concatenation
-    y_values = np.concatenate([pad_values_beginning, y_values, pad_values_end])
-    y_values = y_values.astype(np.float32)
-    y_values[np.isnan(y_values)] = min_val # replace nan with min val
-    return y_values
 
 def draw_histogram_bigwig(file_manager):
     epigenetics_object = file_manager.get_bigwig_files()
