@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from file_management import File_management
-from feature_engineering import get_epi_data
+from feature_engineering import get_epi_data_bw,get_epi_data_bed
 
 '''given a x data and y data draws a auc curve.
 add marking lines to x_pinpoint and y_points - i.a y = 0.5 draw a line there to mark this value
@@ -59,61 +59,85 @@ def draw_averages_epigenetics():
         plt.grid(True)
 
         # Save the plot
-        plt.savefig(f'plot_{key}.png')
+        plt.savefig(f'averages_plot_{key}.png')
 
         # Close the current figure to start a new one for the next key
         plt.close()
 '''function to draw some profiles of bw data for positive lables and negative labels'''
 def draw_pos_neg_bw_profiles(pos_data_points, neg_data_points, epigenetic_name,window_size):
     # Find the maximum value in all datasets (positive and negative)
-    max_value = max(np.max(np.concatenate(pos_data_points)), np.max(np.concatenate(neg_data_points)))
+    max_value = max(np.max(np.concatenate(pos_data_points)), np.max(np.concatenate(neg_data_points))) + 0.2
     # Determine the number of sets in positive and negative data
-    num_pos_sets = len(pos_data_points)
-    num_neg_sets = len(neg_data_points)
-    # Create subplots based on the number of sets
-    fig, axs = plt.subplots(nrows=num_pos_sets + num_neg_sets, ncols=1, figsize=(8, 8))
-    # Plot positive data sets
-    # Set x coords by windows size
     x_coords = np.arange(start=0,stop=window_size,step=1)
-    for i in range(num_pos_sets):
-        axs[i].plot(x_coords, pos_data_points[i], label=f'Positive Set {i + 1}', color='blue')
-        axs[i].set_title(f'Positive Set {i + 1} Profile')
-        axs[i].set_xlabel('BP')
-        axs[i].set_ylabel('Values')
-        axs[i].set_ylim([0, max_value])  # Set y-axis limits
-        axs[i].legend()
-    # Plot negative data sets
-    for j in range(num_neg_sets):
-        axs[num_pos_sets + j].plot(x_coords,neg_data_points[j], label=f'Negative Set {j + 1}', color='red')
-        axs[num_pos_sets + j].set_title(f'Negative Set {j + 1} Profile')
-        axs[num_pos_sets + j].set_xlabel('BP')
-        axs[num_pos_sets + j].set_ylabel('Values')
-        axs[num_pos_sets + j].set_ylim([0, max_value])  # Set y-axis limits
-        axs[num_pos_sets + j].legend()
+
+    # Create subplots based on the number of sets
+    # Determine the total number of data point sets
+    total_sets = len(pos_data_points)
+
+    # Create subplots with a layout determined by the total number of data point sets
+    fig, axs = plt.subplots(nrows=total_sets, ncols=2, figsize=(12, 4 * 8))
+
+    # Plot positive data sets in the first column
+    for i in range(total_sets):
+        axs[i, 0].plot(x_coords, pos_data_points[i], label=f'Positive Set {i + 1}', color='blue')
+        axs[i, 0].set_title(f'Positive Set {i + 1} Profile')
+        axs[i, 0].set_xlabel('BP')
+        axs[i, 0].set_ylabel('Values')
+        axs[i, 0].legend()
+        axs[i, 0].set_ylim([0, max_value])  # Set y-axis limits
+
+    # Plot negative data sets in the second column
+    for j in range(total_sets):
+        axs[j, 1].plot(x_coords, neg_data_points[j], label=f'Negative Set {j + 1}', color='red')
+        axs[j, 1].set_title(f'Negative Set {j + 1} Profile')
+        axs[j, 1].set_xlabel('BP')
+        axs[j, 1].set_ylabel('Values')
+        axs[j, 1].legend()
+        axs[j, 1].set_ylim([0, max_value])  # Set y-axis limits
+
     # Add a common title for the entire figure
     fig.suptitle(f'Epigenetic Profiles - {epigenetic_name}')
+
+# Adjust layout to prevent overlap
+    plt.tight_layout()
     # Add any other details or customization as needed
     # For example, saving the figure or showing it
     plt.savefig(f'{epigenetic_name}_{window_size}_profiles.jpg')
-def extract_data_points(data, epigenetic_file, chrom_column, label_column, center_value_column, data_amount,window_size):
+def extract_data_points_bw(data, epigenetic_file, chrom_column, label_column, center_value_column, data_amount,window_size):
     pos_data_sampling = data[data[label_column]==1].sample(data_amount)
     neg_data_sampling = data[data[label_column]==0].sample(data_amount)
     print(f'pos:\n{pos_data_sampling[label_column]}\nneg:\n{neg_data_sampling[label_column]}')
     pos_coords = []
     neg_coords = []
     for center_loc,chrom in zip(pos_data_sampling[center_value_column], pos_data_sampling[chrom_column]): # retive center location, chr
-        y_values = get_epi_data(epigentic_bw_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
+        y_values = get_epi_data_bw(epigenetic_bw_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
         pos_coords.append(y_values)
     for center_loc,chrom in zip(neg_data_sampling[center_value_column], neg_data_sampling[chrom_column]): # retive center location, chr
-        y_values = get_epi_data(epigentic_bw_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
+        y_values = get_epi_data_bw(epigenetic_bw_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
+        neg_coords.append(y_values)
+    return (pos_coords,neg_coords)
+def extract_data_points_bed(data, epigenetic_file, chrom_column, label_column, center_value_column, data_amount,window_size):
+    pos_data_sampling = data[data[label_column]==1].sample(data_amount)
+    neg_data_sampling = data[data[label_column]==0].sample(data_amount)
+    print(f'pos:\n{pos_data_sampling[label_column]}\nneg:\n{neg_data_sampling[label_column]}')
+    pos_coords = []
+    neg_coords = []
+    for center_loc,chrom in zip(pos_data_sampling[center_value_column], pos_data_sampling[chrom_column]): # retive center location, chr
+        y_values = get_epi_data_bed(epigenetic_bed_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
+        pos_coords.append(y_values)
+    for center_loc,chrom in zip(neg_data_sampling[center_value_column], neg_data_sampling[chrom_column]): # retive center location, chr
+        y_values = get_epi_data_bed(epigenetic_bed_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
         neg_coords.append(y_values)
     return (pos_coords,neg_coords)
 def run_pos_neg_profiles(data,file_manager):
     data = pd.read_csv(data)
-    for epi_name,epi_file in file_manager.get_bigwig_files():
-        pos_coords,neg_coords = extract_data_points(data=data,epigenetic_file=epi_file,chrom_column="chrom",label_column="Label",center_value_column="chromStart",data_amount=5,window_size=2000)
-        draw_pos_neg_bw_profiles(pos_coords, neg_coords,epigenetic_name=epi_name,window_size=2000)
-
+    window_size = 10000
+    #for epi_name,epi_file in file_manager.get_bigwig_files():
+       # pos_coords,neg_coords = extract_data_points_bw(data=data,epigenetic_file=epi_file,chrom_column="chrom",label_column="Label",center_value_column="chromStart",data_amount=10,window_size=window_size)
+        #draw_pos_neg_bw_profiles(pos_coords, neg_coords,epigenetic_name=epi_name,window_size=window_size)
+    for epi_name,epi_file in file_manager.get_bed_files():
+        pos_coords,neg_coords = extract_data_points_bed(data=data,epigenetic_file=epi_file,chrom_column="chrom",label_column="Label",center_value_column="chromStart",data_amount=10,window_size=window_size)
+        draw_pos_neg_bw_profiles(pos_coords, neg_coords,epigenetic_name=epi_name,window_size=window_size)
 
 
 def get_epigentics_around_center(merged_data,on_column,label_value_list,center_value_column,chrom_column,file_manager,window_size):
@@ -133,7 +157,7 @@ def average_epi_around_center(merged_data,on_column,label_value,center_value_col
     sum_values = np.zeros(window_size)
     count_values = np.zeros(window_size)
     for center_loc,chrom in zip(data_points[center_value_column], data_points[chrom_column]): # retive center location, chr
-        y_values = get_epi_data(epigentic_bw_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
+        y_values = get_epi_data_bw(epigenetic_bw_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
         sum_values += y_values
         count_values += 1
     average_values = sum_values / count_values
@@ -169,7 +193,7 @@ def draw_histogram_bigwig(file_manager):
 
 
 if __name__ == "__main__":
-    file_manager = File_management("pos","neg","bed","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
+    file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
     run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
     #draw_averages_epigenetics()
     #draw_histogram_bigwig(file_manager)

@@ -1,5 +1,6 @@
 import os
 import pyBigWig
+import pybedtools
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
@@ -9,6 +10,7 @@ class File_management:
         self.epigenetics_folder_path = epigenetics_bed
         self.bigwig_folder_path = bigwig
         self.create_bigwig_files_objects()
+        self.create_bed_files_objects()
     ## Getters:
     def get_positive_path(self):
         return self.positive_path
@@ -20,11 +22,16 @@ class File_management:
         return self.bigwig_folder_path
     def get_number_of_bigiwig(self):
         return self.bigwig_amount
-   
+    def get_number_of_bed_files(self):
+        return self.bed_files_amount
     def get_bigwig_files(self):
-        if len(self.bigwig_files) > 0 :
+        if self.bigwig_amount > 0 :
             return self.bigwig_files.copy() # keep original list
-        else: raise ValueError("No bigwig files")
+        else: raise RuntimeError("No bigwig files")
+    def get_bed_files(self):
+        if self.bed_files_amount > 0 :
+            return self.bed_files.copy()
+        else: raise RuntimeError("No bedfiles setted")
     def set_bigwig_files(self,bw_list):
         flag = False
         if bw_list: #bw list isnt empty
@@ -34,7 +41,7 @@ class File_management:
                 if not file_object.isBigWig():
                     # not bigwig throw error
                     flag = False
-                    raise Exception(f'trying to set bigwig files with other type of file\n{bw}, is not bw file')
+                    raise Exception(f'trying to set bigwig files with other type of file\n{file_name}, is not bw file')
                 else : 
                     continue # check next file
         if flag: # not empty list + all files are big wig
@@ -58,10 +65,23 @@ class File_management:
         self.bigwig_files = []
         for path in self.create_paths(self.bigwig_folder_path):
             name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
-            name_object_tpl = (name,pyBigWig.open(path))
-            self.bigwig_files.append(name_object_tpl)
+            try:
+                name_object_tpl = (name,pyBigWig.open(path))
+                self.bigwig_files.append(name_object_tpl)
+            except Exception as e:
+                print(e)
         self.bigwig_amount = len(self.bigwig_files) # set amount
-        return self.bigwig_files
+        
+    def create_bed_files_objects(self):
+        self.bed_files = []
+        for path in self.create_paths(self.epigenetics_folder_path):
+            name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
+            try:
+                name_object_tpl = (name,pybedtools.BedTool(path))
+                self.bed_files.append(name_object_tpl)
+            except Exception as e:
+                print(e)
+        self.bed_files_amount = len(self.bed_files) # set amount
     '''Function to close all bigwig objects'''
     def close_big_wig(self,new_bw_object_list):
         if self.bigwig_files: # not empty
@@ -73,7 +93,13 @@ class File_management:
                         file_object.close()
                     except Exception as e:
                         print(e)
+    def close_bed_files(self):
+        if self.bed_files:
+            pybedtools.cleanup(remove_all=True)
+    
+        
     '''dtor'''
     def __del__(self):
         self.close_big_wig([])
+        self.close_bed_files()
         # call more closing

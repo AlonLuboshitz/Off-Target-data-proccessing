@@ -35,6 +35,7 @@ import pandas as pd
 import numpy as np
 import sys
 import time
+from pybedtools import BedTool
 from xgboost import XGBClassifier
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 from sklearn.utils import shuffle
@@ -414,7 +415,7 @@ def get_features(data, only_seq_info,target_column,off_target_column,manager):
         epi_data = np.ones((data.shape[0],EPIGENETIC_WINDOW_SIZE)) # set empty np array with data points and epigenetics window size
         for index, (chrom, start) in enumerate(zip(data[CHROM], data[START])):
             bw_epi_name, bw_epi_file = manager.get_bigwig_files()
-            epi_data[index] = get_epi_data(bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=EPIGENETIC_WINDOW_SIZE)
+            epi_data[index] = get_epi_data_bw(epigenetic_bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=EPIGENETIC_WINDOW_SIZE)
         epi_data = epi_data.astype(np.float32)
         x = np.append(seq_info,epi_data,axis=1) # append both togther - afterwards extracts them
         print(f'x: {x[0,:138]},\nseq: {seq_info[0]}')
@@ -424,20 +425,52 @@ def get_features(data, only_seq_info,target_column,off_target_column,manager):
         x = data[FEATURES_COLUMNS].values 
         x = np.append(seq_info,x, axis = 1)
     return x
-def get_epi_data(bw_file, chrom, center_loc, window_size):
+def get_epi_data_bed(epigenetic_bed_file, chrom, center_loc,window_size):
+    positive_step = negative_step = int(window_size / 2) # set steps to window/2
+    if (window_size % 2): # not even
+        positive_step += 1 # set pos step +1 (being rounded down before)
+    start = center_loc - negative_step # set start point
+    end = center_loc + positive_step # set end point
+    string_info = f'{chrom} {start} {end}' # create string for chrom,start,end
+    ots_bed = BedTool(string_info,from_string=True) # create bed temp for OTS
+    intersection = ots_bed.intersect(epigenetic_bed_file) 
+    if not len(intersection) == 0: # not empty
+        y = update_y_values_by_intersect(intersection, start, end, window_size)
+    else : 
+        y = np.zeros(window_size,dtype=np.int8)
+    os.remove(intersection.fn)
+    os.remove(ots_bed.fn)
+    return y
+    
+def update_y_values_by_intersect(intersect_tmp, start, end, window_size):
+    print(intersect_tmp.head())
+    y_values = np.zeros(window_size,dtype=np.int8) # set array with zeros as window size i.e 2000
+    for entry in intersect_tmp:
+        intersect_start = entry.start # second field (0-based) is start
+        intersect_end = entry.end # 3rd fiels is end
+    # get index for array values allways between 0 and window size
+        if intersect_start == start:
+            start_index = 0
+        else : start_index = intersect_start - start - 1
+        end_index = intersect_end - start - 1
+    
+        y_values[start_index:end_index] = 1 # set one for intersectino range
+    y_values[0] = 0 # for better respresnation - setting 0,0
+    return y_values
+def get_epi_data_bw(epigenetic_bw_file, chrom, center_loc, window_size):
     positive_step = negative_step = int(window_size / 2) # set steps to window/2
     if (window_size % 2): # not even
         positive_step += 1 # set pos step +1 (being rounded down before)
 
         
-    chrom_lim =  bw_file.chroms(chrom)
+    chrom_lim =  epigenetic_bw_file.chroms(chrom)
     indices = np.arange(center_loc - negative_step, center_loc + positive_step)
     # Clip the indices to ensure they are within the valid range
     indices = np.clip(indices, 0, chrom_lim - 1)
     # Retrieve the values directly using array slicing
-    y_values = bw_file.values(chrom, indices[0], indices[-1] + 1)
+    y_values = epigenetic_bw_file.values(chrom, indices[0], indices[-1] + 1)
     
-    min_val = bw_file.stats(chrom,indices[0],indices[-1] + 1,type="min")[0]  
+    min_val = epigenetic_bw_file.stats(chrom,indices[0],indices[-1] + 1,type="min")[0]  
     # Create pad_values using array slicing
     pad_values_beginning = np.full(max(0, positive_step - center_loc), min_val)
     pad_values_end = np.full(max(0, center_loc + negative_step - chrom_lim), min_val)
