@@ -1,12 +1,15 @@
 # script for getting a bed file with chromatin info and cas-offinder output.csv
 # creating a label for the bed file expriment with 1 if intersects with the cas-offinder or 0 if not.
+
 import os
 import pandas as pd
 import pybedtools
 import sys
 import subprocess
 import re
+import matplotlib.pyplot as plt
 from correlation_analysis import merge_files
+
 '''function args: 1 - bed folder path
 2 - path for guideseq folder, inside combined files needs chrom labeling
 
@@ -219,32 +222,63 @@ def list_of_bed_columns(chrom_type,data_path):
     bed_names = [item.split('_', 1)[1] for item in bed_names_and_exp]
     # return the bed names by column
     return bed_names
-def pie_plot_intersection(guideseq40,guideseq50,genome_folder):
+def pie_plot_intersection(guideseq40,guideseq50,merged,genome_folder):
     # merge all data into one data frame- get a list of one 40\50 guideseq
-    file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)
-    list_of_colums = [("Strand",1),('Label_negative',2)] # merge_files get list of tuples
-    merge_data = merge_files(file_paths,list_of_colums)
-    mergedata_bed_df = create_from_combined_data_bed_data_frame(merge_data,False) # create bed file data
-    mergedata_bed = pybedtools.BedTool.from_dataframe(mergedata_bed_df)
-    total_intervals = len(mergedata_bed_df) + 1 # include raw 0 
+    # file_paths = create_path_list(guideseq40) + create_path_list(guideseq50)
+    # list_of_colums = [("Strand",1),('Label_negative',2)] # merge_files get list of tuples
+    # merge_data = merge_files(file_paths,list_of_colums)
+    merge_data = pd.read_csv(merged)
+    positive_bed, negative_bed = split_to_pos_neg(merge_data,'Label') # create bed data for pos and neg
+    bed_path_list = get_bed_files(genome_folder) # list of path for bed file
+     # fractions of intersection
+    positive_frac = run_fractions(positive_bed,bed_path_list)
+    negative_frac = run_fractions(negative_bed,bed_path_list)
+    pie_ploting(positive_frac,"change-GUIDE-seq")
+    pie_ploting(negative_frac,"change-Change")
+
+    
+def pie_ploting(fraction_list,title):
+    labels = [frac[0] for frac in fraction_list] 
+    amounts = [frac[1]*100 for frac in fraction_list]
+    fig, ax = plt.subplots(figsize=(10,10))
+    
+    ax.pie(amounts, labels=labels, autopct='%1.1f%%',pctdistance=0.9)
+    ax.legend(labels, title='Labels', loc='center left', bbox_to_anchor=(1, 0.5))
+
+    ax.set_title(title)
+    plt.savefig(title+'.png', bbox_inches='tight')
+    
+
+'''split merged data into positive data and negative data'''
+def split_to_pos_neg(merge_data,on_column):
+    positive_data = merge_data[merge_data[on_column]>=1] # df for active spots
+    negative_data = merge_data[merge_data[on_column]==0] # df for in active spots
+    #positive_data_df = create_from_combined_data_bed_data_frame(positive_data,True) # create bed file data
+    #negative_data_df =  create_from_combined_data_bed_data_frame(negative_data,True) # create bed file data
+    positive_bed = pybedtools.BedTool.from_dataframe(positive_data)
+    negative_bed = pybedtools.BedTool.from_dataframe(negative_data)
+    return (positive_bed,negative_bed) 
+''' run genome alignemt of data with bed files annotatios and return fractions'''
+def run_fractions(chrom_cords,bed_path_list):
+    total_intervals = count_intervals_bed_file(chrom_cords.fn) #  
     # create empty list for tuples : (genome_category,intersection_fraction)
     fraction_list = []
-    # create genome bed file list
-    bed_path_list = get_bed_files(genome_folder)
+    intergenic = 1 # set intergenic for 1 
     # run intersection on each file:
     for path in bed_path_list:
         #check_intervals(path)
-        genome_data = pybedtools.BedTool(path) # bed information
-        intersection = mergedata_bed.intersect(genome_data,s=False) 
-        intersection_amount = count_intervals_bed_file(intersection.fn) # get intersection amount
-        fraction = intersection_amount / total_intervals
+        strand=True
         genome_category = os.path.basename(path).rstrip('.bed') # exons\introns\etc..
+        tts_amount=0
+        genome_data = pybedtools.BedTool(path) # bed information
+        intersection = chrom_cords.intersect(genome_data,s=strand) 
+        intersection_amount = count_intervals_bed_file(intersection.fn) - tts_amount# get intersection amount
+        fraction = intersection_amount / total_intervals
+        intergenic = intergenic - fraction   # intergenic is 1 - everything else     
         fraction_list.append((genome_category,fraction))
-    sum = 0
-    for cat,frac in fraction_list:
-        sum = sum + frac
-    print(sum)
-
+    
+    fraction_list.append(("intergenic",intergenic))
+    return fraction_list
 '''function check for overlaps in off targets locations via data'''
 def nagative_intersection(guideseq40,guideseq50):
     # merge all data into one data frame- get a list of one 40\50 guideseq
@@ -290,7 +324,7 @@ def count_intervals_bed_file(file_path):
     command = f"wc -l < {file_path}"
     result = subprocess.run(command, shell=True, text=True, capture_output=True)
     return int(result.stdout.strip()) 
-   
+  
 '''args: 1 path to bedfiles
 2 path to guideseq folder'''
 if __name__ == "__main__":
@@ -300,6 +334,8 @@ if __name__ == "__main__":
     #     update_info("/home/alon/masterfiles/guideseq50files/guideseq/0915/chrom_info_tag","/home/alon/masterfiles/guideseq40files/bedfiles/Openchrom")
     #     exit(0)
     #run_chrom_labeling(sys.argv[1],sys.argv[2])
-    #pie_plot_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/bedfiles/Genome_info")
+
+    pie_plot_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output","/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv","/home/alon/masterfiles/guideseq40files/bedfiles/Genome_info")
     #nagative_intersection("/home/alon/masterfiles/guideseq50files/guideseq/0915params/combined_output","/home/alon/masterfiles/guideseq40files/guideseq/0915params/combined_output")
     pass
+# %%
