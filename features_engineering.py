@@ -27,7 +27,7 @@ Based on gRNA
 Outputs: 1. Dictionray - {gRNA : Data frame} 2. unique gRNA set
 '''
 def create_data_frames_for_features(data):
-    data_table = pd.read_csv(data_table) # open data
+    data_table = pd.read_csv(data) # open data
    
     guides = set(data_table[TARGET_COLUMN]) # set unquie guide identifier
      # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
@@ -37,10 +37,11 @@ def create_data_frames_for_features(data):
     return (result_dataframes, guides)
 
 '''Args:
-1. Dict - {gRNA : Data frame},  2. File manager instaces to get files and thier data 3. common variables instance for columns and values
+1. Dict - {gRNA : Data frame},  2. File manager instaces to get files and thier data 3. booleans for type of feature enconding
 Function: Store x and y lists with x features after encoding, and coresponding y values (1/0/log(1+ read count))
 Iterate on each gRNA : Data frame and extract the Data
-Outputs --> x & y lists with N nd.arrays each of them is for gRNA (N - total number of gRNAs)'''
+Outputs --> x & y lists with N nd.arrays each of them is for gRNA (N - total number of gRNAs)
+Uses - internal functions for seq encoding, epigentic encoding, and bp intersection of epigenetics with seq'''
 def generate_features_and_labels(data_table, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns):
     splited_guide_data,guides = create_data_frames_for_features(data_table)
     x_data_all = []  # List to store all x_data
@@ -65,68 +66,27 @@ def generate_features_and_labels(data_table, manager, encoded_length, bp_presena
             x_data = np.append(seq_info, x_data, axis = 1)
         
         x_data_all.append(x_data)
+        print (x_data_all[0][0])
         y_labels_all.append(guide_data_frame[[BINARY_LABEL_COLUMN]].values) # add label values by extracting from the df by series values.
     del splited_guide_data # free memory
     return (x_data_all,y_labels_all,guides)
 
-'''Args:
-1. Data frame for gRNA, 2. file manager for data 3. common variables instance for columns and variables
-Function: 
-1. Transform every (gRNA seq, OTS seq) --> one-hot encoding using seq_to_one_hot()
-2. if_bp is True: adds to the one-hot-enconding epigenetic basepair encoding using bws_to_one_hot()
-1+2 --> one-hot size [encoded_length] with or without epigenetic.
-3. if seperate is True: windows_size vector is created for epigenetic mark using get_epi_data_bw()
-4. if only seq is True --> return one-hot from 1.
-5. if nothing is True --> return one-hot from 1 + epigenetic scalar value concatenated
-'''
-def get_x_features(data, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size):
-    
-    # gRNA,OTS one hot
-    seq_info = np.ones((data.shape[0], encoded_length))
-    for index, (otseq, grnaseq) in enumerate(zip(data[OFFTARGET_COLUMN], data[TARGET_COLUMN])):
-        otseq = enforce_seq_length(otseq, 23)
-        grnaseq = enforce_seq_length(grnaseq, 23)
-        otseq = otseq.upper()
-        seq_info[index] = seq_to_one_hot(otseq, grnaseq,encoded_length,bp_presenation)
-    if if_only_seq:
-        x = seq_info
-    elif if_bp: # add epigenetic data to seq info
-        bigwig_info = np.ones((data.shape[0],encoded_length))
-        for index, (chrom, start, end) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN], data[END_COLUMN])):
-            if not (end - start) == 23:
-                end = start + 23
-                bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end,encoded_length=encoded_length,bp_presenation=bp_presenation)
-        bigwig_info = bigwig_info.astype(np.float32)
-        seq_info =seq_info.astype(np.float32)
-        x = seq_info + bigwig_info
-    
-    # seperate epigenetic vector
-    elif if_seperate_epi: # for every OTS extract epigenetics separate by window_size
-        
-        epi_data = np.ones((data.shape[0],epigenetic_window_size)) # set empty np array with data points and epigenetics window size
-        bw_epi_name, bw_epi_file = manager.get_bigwig_files()[0]
-        glb_max = manager.get_global_max_bw[bw_epi_name] # get global max all over bigwig
-        for index, (chrom, start) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN])):
-            
-            epi_data[index] = get_epi_data_bw(epigenetic_bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=epigenetic_window_size,max_type = glb_max)
-        epi_data = epi_data.astype(np.float32)
-        seq_info = seq_info.astype(np.float32)
-        x = np.append(seq_info,epi_data,axis=1) # append both togther - afterwards extracts them
-        
-    
-    else:
-        features_columns = common_variables_ins.get_features_columns()
-        x = data[features_columns].values 
-        x = np.append(seq_info,x, axis = 1)
-    return x
+
+'''Args: 1. gRNA : data frame, 2. encoded length, 3. the vector size for each base pair as bp_repsentation
+Function: init ones vector with amount of data points each encoded length size
+Each data point sent to one hot encoding with (OTS seq, gRNA seq)'''
 def get_seq_one_hot(data, encoded_length, bp_presenation):
-    seq_info = np.ones((data.shape[0], encoded_length))
+    seq_info = np.ones((data.shape[0], encoded_length),dtype=np.int8)
     for index, (otseq, grnaseq) in enumerate(zip(data[OFFTARGET_COLUMN], data[TARGET_COLUMN])):
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
         seq_info[index] = seq_to_one_hot(otseq, grnaseq,encoded_length,bp_presenation)
     return seq_info
+'''Args: 1. gRNA : data frame, 2. encoded length, 3. file manager with epigenetic files
+ 4. the vector size for each base pair as bp_repsentation
+Function: init ones vector with amount of data points each encoded length size
+Each data point sent to epigenetic encoding (add peak values for every base pair in grna location)'''
 def get_bp_for_one_hot_enconded(data, encoded_length, manager, bp_presenation):
     bigwig_info = np.ones((data.shape[0],encoded_length))
     for index, (chrom, start, end) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN], data[END_COLUMN])):
@@ -135,9 +95,12 @@ def get_bp_for_one_hot_enconded(data, encoded_length, manager, bp_presenation):
             bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end,encoded_length=encoded_length,bp_presenation=bp_presenation)
     bigwig_info = bigwig_info.astype(np.float32)
     return bigwig_info
-def get_seperate_epi_by_window(data, epigenetic_window_size, manager, ):
+'''Args: 1. gRNA : data frame, 2. encoded length - as epi window size , 3. file manager with epigenetic files
+Function: init ones vector with amount of data points each encoded length size
+Each data point sent to epigenetic encoding (add peak values for every base pair) where window size/2 added from ots location'''
+def get_seperate_epi_by_window(data, epigenetic_window_size, manager):
     epi_data = np.ones((data.shape[0],epigenetic_window_size)) # set empty np array with data points and epigenetics window size
-    bw_epi_name, bw_epi_file = manager.get_bigwig_files()[0]
+    bw_epi_name, bw_epi_file = manager.get_bigwig_files()[0] # get one file (should iterate on all)
     glb_max = manager.get_global_max_bw[bw_epi_name] # get global max all over bigwig
     for index, (chrom, start) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN])):
         
@@ -334,7 +297,7 @@ def over_sample(X_train, y_train, over_sampler):
 def extract_features(X_train,encoded_length):
     seq_only = X_train[:, :encoded_length]
     features = X_train[:, encoded_length:]
-    return seq_only,features
+    return [seq_only,features]
 
 
 

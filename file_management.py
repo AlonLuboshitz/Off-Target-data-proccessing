@@ -1,21 +1,25 @@
 import os
 import pyBigWig
-import pybedtools
+#import pybedtools
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
-    def __init__(self, positives, negatives, epigenetics_bed , bigwig) -> None: 
+    def __init__(self, positives, negatives, epigenetics_bed , bigwig, merged_data) -> None: 
         self.positive_path = positives
         self.negative_path = negatives
         self.epigenetics_folder_path = epigenetics_bed
         self.bigwig_folder_path = bigwig
+        self.merged_data_path = merged_data
         self.create_bigwig_files_objects()
-        self.create_bed_files_objects()
+        self.set_global_bw_max()
+        #self.create_bed_files_objects()
     ## Getters:
     def get_positive_path(self):
         return self.positive_path
     def get_negative_path(self):
         return self.negative_path
+    def get_merged_data_path(self):
+        return self.merged_data_path
     def get_epigenetics_folder(self):
         return self.epigenetics_folder_path
     def get_bigwig_folder(self):
@@ -32,6 +36,11 @@ class File_management:
         if self.bed_files_amount > 0 :
             return self.bed_files.copy()
         else: raise RuntimeError("No bedfiles setted")
+    def get_global_max_bw(self):
+        if len(self.glb_max_dict) > 0 :
+            return self.glb_max_dict
+        else : raise RuntimeError("No max values setted for bigwig files")
+    
     def set_bigwig_files(self,bw_list):
         flag = False
         if bw_list: #bw list isnt empty
@@ -72,16 +81,16 @@ class File_management:
                 print(e)
         self.bigwig_amount = len(self.bigwig_files) # set amount
         
-    def create_bed_files_objects(self):
-        self.bed_files = []
-        for path in self.create_paths(self.epigenetics_folder_path):
-            name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
-            try:
-                name_object_tpl = (name,pybedtools.BedTool(path))
-                self.bed_files.append(name_object_tpl)
-            except Exception as e:
-                print(e)
-        self.bed_files_amount = len(self.bed_files) # set amount
+    # def create_bed_files_objects(self):
+    #     self.bed_files = []
+    #     for path in self.create_paths(self.epigenetics_folder_path):
+    #         name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
+    #         try:
+    #             name_object_tpl = (name,pybedtools.BedTool(path))
+    #             self.bed_files.append(name_object_tpl)
+    #         except Exception as e:
+    #             print(e)
+    #     self.bed_files_amount = len(self.bed_files) # set amount
     '''Function to close all bigwig objects'''
     def close_big_wig(self,new_bw_object_list):
         if self.bigwig_files: # not empty
@@ -93,13 +102,23 @@ class File_management:
                         file_object.close()
                     except Exception as e:
                         print(e)
-    def close_bed_files(self):
-        if self.bed_files:
-            pybedtools.cleanup(remove_all=True)
-    
+    # def close_bed_files(self):
+    #     if self.bed_files:
+    #         pybedtools.cleanup(remove_all=True)
+    def set_global_bw_max(self):
+        self.glb_max_dict = {}
+        for bw_name,bw_file in self.bigwig_files:
+            # get chroms
+            chroms = bw_file.chroms()
+            max_list = []
+            for chrom,length in chroms.items():
+                # get max
+                max_val = bw_file.stats(chrom,0,length,type='max')[0]
+                max_list.append(max_val)
+            self.glb_max_dict[bw_name] = max(max_list)
         
     '''dtor'''
     def __del__(self):
         self.close_big_wig([])
-        self.close_bed_files()
+        #self.close_bed_files()
         # call more closing

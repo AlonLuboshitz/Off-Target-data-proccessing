@@ -3,34 +3,24 @@
 # y - label (1 - active off target), (0 - inactive off target)
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
 # "Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"
-FEATURES_COLUMNS = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
-ML_TYPE = "" # String inputed by user
-SHUFFLE = True
-IF_OS = False
-BP_PRESENTATION = 6
-GUIDE_LENGTH = 23
-ENCODED_LENGTH =  GUIDE_LENGTH * BP_PRESENTATION
-IF_SEPERATE_EPI = False
+
 FORCE_USE_CPU = False
-EPIGENETIC_WINDOW_SIZE = 0
 
-FIT_PARAMS = {
-    'epochs': 5,
-    'batch_size': 1024,
-    'verbose' : 2,
 
-    # Add any other fit parameters you need
-}
 
+from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST
 from file_management import File_management
-from common_variables import common_variables
-from features_engineering import generate_features_and_labels, order_data, get_tp_tn
+from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
+from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
+
+from sklearn.utils.class_weight import compute_class_weight
+from imblearn.over_sampling import RandomOverSampler, SMOTE
+
 import pandas as pd
 import numpy as np
 import sys
 import time
-from imblearn.over_sampling import RandomOverSampler, SMOTE
 import logging
 import os
 if FORCE_USE_CPU:
@@ -42,88 +32,335 @@ logger.setLevel(logging.ERROR)
 
 
 
-
-
-
-
-'''function write to table by columsn:
-ML type, auroc, auprc from log_reg, unpacks 4 element tuple - tp,tn test, tp,tn train.
-features included for training the model
-what file was left out.'''
-def write_to_table(auroc,auprc,file_left_out,table,ML_type,Tpn_tuple,n_rank):
-    global FEATURES_COLUMNS
-    features_columns = FEATURES_COLUMNS.copy()
-    if ONLY_SEQ_INFO:
-        features_columns = ["Only_Seq"]
-    try:
-        new_row_index = len(table)  # Get the index for the new row
-        table.loc[new_row_index] = [ML_type, auroc, auprc,*n_rank,*Tpn_tuple, features_columns, file_left_out]  # Add data to the new row
-    except: # empty data frame
-        table.loc[0] = [ML_type, auroc, auprc,*Tpn_tuple , features_columns, file_left_out]
-    return table
-def create_file_name(ending,file_manager,sampler,common_variables_ins):
-    features_columns = common_variables_ins.get_features_columns()
-    if common_variables_ins.get_if_only_seq():
-        features_columns = ["Only_Seq"]
-    elif common_variables_ins.get_if_bp():
-        features_columns = [file_name[0] for file_name in file_manager.get_bigwig_files()]
-    elif common_variables_ins.get_if_seperate_epi():
-        features_columns = [file_name[0] for file_name in file_manager.get_bigwig_files()]
-        features_columns.append(f'window_{common_variables_ins.get_window_size()}')
-
-    feature_str = ""
-    for feature in features_columns:
-      feature_str = feature_str + "_" + feature
-    sampler_str = f'{get_sampler_type(sampler)}_'
-    file_name = f'{ML_TYPE}_{sampler_str}{feature_str}_{ending}.csv'
-    return file_name
-
-def crisprsql(data_table,file_name,file_manager,sampler,common_variables_ins):
-    x_feature,y_label,guides = generate_features_and_labels(data_table=data_table, manager=file_manager,common_variables=common_variables_ins) # List of arrays
-    results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
-    print("staring ml")
-    file_name = create_file_name(file_name,file_manager,sampler,common_variables_ins)
-    for i,key in enumerate(guides):
-        x_train,y_train,x_test,y_test = order_data(x_feature,y_label,i,if_shuffle=True,if_print=False,sampler=sampler,if_over_sample=common_variables_ins.get_if_over_sample())
-        auroc,auprc,y_score = get_ml_auroc_auprc(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
-        n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals=y_score,y_test=y_test,n=1000))
-        tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
-        print(f"Ith: {i+1}\{len(guides)} split is done")
-        results_table = write_to_table(auroc=auroc,auprc=auprc,file_left_out=key,table=results_table,ML_type=ML_TYPE,Tpn_tuple=tps_tns,n_rank=n_rank_score)
-        if auroc <= 0.5:
-            write_scores(key,y_test,y_score,file_name,auroc)            
-    results_table = results_table.sort_values(by="File_out")
-    results_table.to_csv(file_name)
-    
-'''write score vs test if auc<0.5'''
-def write_scores(seq,y_test,y_score,file_name,auroc):
-    folder_name = 'y_scores_output'
-    if not os.path.exists(folder_name): # create folder for auc < 0.5
-        os.makedirs(folder_name)
-    basepath = os.getcwd()
-    path = os.path.join(basepath,folder_name,file_name) # path for spesific ml
-    data_information = (seq,y_test,y_score,auroc)  # form a tuple
-    if os.path.exists(path): 
-        auc_table = pd.read_csv(path)
-        new_row_index = len(auc_table)
-        auc_table.loc[new_row_index] = [*data_information]
+class run_models:
+    def __init__(self, file_manager) -> None:
+        self.ml_type = "" # String inputed by user
+        self.ml_name = ""
+        self.ml_task = "" # class/reg
+        self.shuffle = True
+        self.if_os = False
+        self.bp_presntation = 6
+        self.guide_length = 23
+        self.encoded_length =  self.guide_length * self.bp_presntation
+        self.init_booleans()
+        self.init_deep_hyper_params()
+        self.epigenetic_window_size = 0
+        if file_manager: # Not None
+            self.file_manager = file_manager
         
-    else: 
-        auc_table = create_low_auc_table()
-        auc_table.loc[0] = [*data_information]
-    auc_table.to_csv(path,index=False)
+        self.features_columns = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
+    ## initairs
+    def init_booleans(self):
+        self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_epi_features = False  
+    def init_deep_hyper_params(self):
+        self.hyper_params = {'epochs': 5, 'batch_size': 1024, 'verbose' : 2}# Add any other fit parameters you need
     
-def create_low_auc_table():
-    columns = ["Seq","y_test","y_predict","auroc"]
-    auc_table = pd.DataFrame(columns=columns)
-    return auc_table
 
 
+    ## Features booleans setters
+    def set_only_seq_booleans(self):
+        self.if_bp = False
+        self.if_only_seq = True
+    
+    def set_bp_in_seq_booleans(self):
+        self.if_only_seq = False
+        self.if_bp = True
+        
+    def set_epi_window_booleans(self):
+        self.if_only_seq = self.if_bp = self.if_epi_features= False
+        self.if_seperate_epi = True
+    
+    def set_epigenetic_feature_booleans(self):
+        self.if_only_seq = self.if_bp = self.if_seperate_epi = False
+        self.if_epi_features = True
+    ## Model setters
+    def set_hyper_params_class_wieghting(self, y_train):
+        class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
+        class_weight_dict = dict(enumerate(class_weights))
+        self.hyper_params['class_weight'] = class_weight_dict
+
+    def set_cross_validation(self):
+        self.cross_validation_method = "Leave_one_out"
+
+    def set_model_name(self):
+        answer = input("Please enter ML type: (LOGREG, XGBOOST, XGBOOST_CW, CNN):\n") # ask for ML model
+        self.ml_name = answer
+    ## Over sampling setter
+    def set_over_sampling(self):
+        if_os = input("press y/Y to oversample, any other for more\n")
+        if if_os.lower() == "y":
+            self.sampler = self.get_sampler('auto')
+            self.if_os = True
+        else: 
+            self.sampler_type = ""
+            self.sampler = None
+    '''Tp are minority class, set the inverase ratio for xgb_cw
+        args are 5 element tuple from get_tp_tn()'''
+    def set_inverase_ratio(self, tps_tns):
+        tprr, tp_test, tn_test, tp_train, tn_train = tps_tns # unpack tuple
+        self.inverse_ratio = tn_train / tp_train
+
+    ## Output setters
+    '''1. File description based on booleans.
+    Create a feature description list'''
+    def set_features_output_description(self):
+        if self.if_only_seq: # only seq
+            self.features_description  = ["Only_Seq"]
+        elif self.if_bp: # with base pair to gRNA bases or epigenetic window
+            self.features_description = [file_name[0] for file_name in self.file_manager.get_bigwig_files()]
+        elif self.if_seperate_epi: # window size epenetics
+            self.features_description = [file_name[0] for file_name in self.file_manager.get_bigwig_files()]
+            self.features_description.append(f'window_{self.epigenetic_window_size}')
+        else : self.features_description = self.features_columns.copy() # features are added separtley
+    '''2. Create file output name with .csv from:
+    self: task - reg\clas, ml- cnn,rnn,etc.., sampler - ros,syntetic, features, ending - type of data'''
+    def set_file_output_name(self, ending):
+        self.set_features_output_description()
+        # create feature f1_f2_f3...
+        feature_str = "_".join(self.features_description)
+        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.sampler_type}_{feature_str}_{ending}.csv'
+
+    '''3. Write results to output table:
+    includes: ml type, auroc, auprc, unpacks 4 element tuple - tp,tn test, tp,tn train.
+    features included for training the model
+    what file/gRNA was left out.'''
+    def write_to_table(self,auroc,auprc,file_left_out,table,Tpn_tuple,n_rank):
+        try:
+            new_row_index = len(table)  # Get the index for the new row
+            table.loc[new_row_index] = [self.ml_name, auroc, auprc,*n_rank,*Tpn_tuple, self.features_description, file_left_out]  # Add data to the new row
+        except: # empty data frame
+            table.loc[0] = [self.ml_name , auroc, auprc,*Tpn_tuple , self.features_description , file_left_out]
+        return table
+    
+    ### need to pass this function to file manager  
+    '''write score vs test if auc<0.5'''
+    def write_scores(self, seq,y_test,y_score,auroc):
+        folder_name = 'y_scores_output'
+        if not os.path.exists(folder_name): # create folder for auc < 0.5
+            os.makedirs(folder_name)
+        basepath = os.getcwd()
+        path = os.path.join(basepath,folder_name,self.file_name) # path for spesific ml
+        data_information = (seq,y_test,y_score,auroc)  # form a tuple
+        if os.path.exists(path): 
+            auc_table = pd.read_csv(path)
+            new_row_index = len(auc_table)
+            auc_table.loc[new_row_index] = [*data_information]
+            
+        else: 
+            auc_table = self.create_low_auc_table()
+            auc_table.loc[0] = [*data_information]
+        auc_table.to_csv(path,index=False)
+        
+    def create_low_auc_table(self):
+        columns = ["Seq","y_test","y_predict","auroc"]
+        auc_table = pd.DataFrame(columns=columns)
+        return auc_table
+        
+    ## Assistant RUN FUNCTIONS: DATA, MODEL, REGRESSION, CLASSIFICATION, 
+        
+    ## DATA:
+    '''1. CREATE FEATURES VIA feature_engineering.py
+    Use generate_features_and_lables from feature_engineering.py
+    returns x_features, y_features, guide set'''
+    def get_features(self): 
+        return  generate_features_and_labels(self.file_manager.get_merged_data_path() , self.file_manager, self.encoded_length, self.bp_presntation, 
+                                                                        self.if_bp, self.if_only_seq,self.if_seperate_epi,
+                                                                        self.epigenetic_window_size,self.features_columns)
+    # OVER SAMPLING:
+    '''1. Get the sampler instace with ratio and set the sampler string'''
+    def get_sampler(self,balanced_ratio):
+        sampler_type = input("1. over sampeling\n2. synthetic sampling\n")
+        if sampler_type == "1": # over sampling
+            self.sampler_type = "ROS"
+            return RandomOverSampler(sampling_strategy=balanced_ratio, random_state=42)
+        else : 
+            self.sampler_type = "SMOTE"
+            return SMOTE(sampling_strategy=balanced_ratio,random_state=42)
+
+    
+    ## MODELS:
+    '''1. GET MODEL'''
+    def get_model(self):
+        if self.ml_name == "LOGREG":
+            self.ml_type = "ML"
+            return get_logreg()
+        elif self.ml_name == "XGBOOST":
+            self.ml_type = "ML"
+            return get_xgboost()
+        elif self.ml_name == "XGBOOST_CW":
+            self.ml_type = "ML"
+            return get_xgboost_cw(self.inverse_ratio)
+        elif self.ml_name == "CNN":
+            self.ml_type = "DEEP"
+            return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
+                           self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size)
+
+    '''2. PREDICT'''
+    def predict_with_model(self,X_train, y_train, X_test, y_test): # to run timetest unfold "#"
+        # time_test(X_train,y_train)
+        # exit(0)
+        # train
+        classifier = self.get_model()
+        if self.ml_type == "DEEP":
+            self.set_hyper_params_class_wieghting(y_train= y_train)
+            if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)): 
+                # if seperate epi/ only_seq=bp=false --> features added to seq encoding
+                # extract featuers/epi window from sequence enconding 
+                X_train = extract_features(X_train, self.encoded_length)
+                X_test = extract_features(X_test,self.encoded_length)
+            
+            classifier.fit(X_train,y_train,**self.hyper_params)
+            y_pos_scores_probs = classifier.predict(X_test,verbose = 2)
+        else :
+            classifier.fit(X_train,y_train)
+            y_scores_probs = classifier.predict_proba(X_test)
+            y_pos_scores_probs = y_scores_probs[:,1] # probalities for positive label (1 column for positive)
+        return y_pos_scores_probs
+    
+
+    ## RUNNERS:
+    # LEAVE OUT OUT
+    def leave_one_out(self):
+        # Set File output name
+        self.set_file_output_name(self.out_put_name)
+        # Set result table 
+        results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+        # Get data
+        x_features, y_labels, guides = self.get_features()
+        print("Starting Leave-One-Out")
+        for i,key in enumerate(guides):
+            # split data to i and ~ i
+            x_train,y_train,x_test,y_test = order_data(x_features,y_labels,i,if_shuffle=True,if_print=False,sampler=self.sampler,if_over_sample=self.if_os)
+            # get tps, tns and set inverse ratio
+            tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
+            self.set_inverase_ratio(tps_tns)
+            # predict and evaluate model
+            y_scores_probs = self.predict_with_model(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+            auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
+            n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
+            print(f"Ith: {i+1}\{len(guides)} split is done")
+            # write scores
+            results_table = self.write_to_table(auroc=auroc,auprc=auprc,file_left_out=key,table=results_table,Tpn_tuple=tps_tns,n_rank=n_rank_score)
+            if auroc <= 0.5:
+                self.write_scores(key,y_test,y_scores_probs,auroc)            
+        
+        results_table = results_table.sort_values(by="File_out")
+        results_table.to_csv(self.file_name)
+    
+    ## K-CROSS VALIDATION
+        
+    
+    ## RUN TYPES:
+        
+    # only seq
+        
+    def run_only_seq(self):
+        # 1. set booleans:
+        self.set_only_seq_booleans()
+        self.run_by_validation_type()
+
+        
+    def run_with_epigenetic_features(self):
+        # 1. set booleans
+        self.set_epigenetic_feature_booleans()
+        # run for each feature by its own and by group of features
+        features_dict = split_epigenetic_features_into_groups(self.features_columns) # dict of feature by type (score, binary, fold)
+        for feature_group in features_dict.values():
+            for feature in feature_group: # run single feature
+                self.features_columns = [feature]
+                self.run_by_validation_type()
+            if len(feature_group) == 1: # group containing one feature already been run with previous for loop
+                continue
+            self.features_columns = feature_group
+            self.run_by_validation_type()
+        
+    def run_with_bp_represenation(self):
+        self.set_bp_in_seq_booleans()
+        bw_copy = self.file_manager.get_bigwig_files() # gets a copy of the list
+        for bw in bw_copy: # run each epi mark by file separtly
+            self.file_manager.set_bigwig_files([bw])
+            self.bp_presntation = 6 +  self.file_manager.get_number_of_bigiwig() # should be 1
+            self.encoded_length = 23 * self.bp_presntation
+            self.run_by_validation_type()
+        # run all epigentics mark togther
+        self.file_manager.set_bigwig_files(bw_copy)
+        self.bp_presntation = 6 +  self.file_manager.get_number_of_bigiwig() # should be 1
+        self.encoded_length = 23 * self.bp_presntation
+        self.run_by_validation_type()
+        # no need to close files will be closed by manager
+
+        
+    def run_with_epi_spacial(self):
+        # 1. set booleans
+        self.set_epi_window_booleans()
+        self.epigenetic_window_size = 2000
+        bw_copy = self.file_manager.get_bigwig_files() # gets a copy of the list
+        for bw in bw_copy: # run each epi mark by file separtly
+            self.file_manager.set_bigwig_files([bw])
+            self.run_by_validation_type()
+        # run all epigentics mark togther
+        # manager.set_bigwig_files(bw_copy)
+        
+        # crisprsql(*params)
+    def run_by_validation_type(self):
+        validation_functions = {
+            'Leave_one_out': self.leave_one_out,
+            'K_cross': "",
+        }
+        validation_function = validation_functions.get(self.cross_validation_method)
+        if validation_function:
+            validation_function()
+        else:
+            print("Invalid cross-validation method")
+        
+    def run_manualy(self):
+        answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n4. epi seperate\n")
+        if answer == "1":
+            self.run_only_seq()
+        elif answer == "2":
+            self.run_with_epigenetic_features()
+        elif answer == "3":
+            self.run_with_bp_represenation()
+        elif answer == "4":
+            self.run_with_epi_spacial()
+        else: 
+            print("no good option, exiting.")
+            exit(0)
+    '''function runs automation of all epigenetics combinations, onyl seq, and bp epigeneitcs represantion.'''
+    def auto_run(self):
+        self.run_only_seq()
+        self.run_with_epigenetic_features()
+        self.run_with_bp_represenation()
+        self.run_with_epi_spacial()
+
+    def run(self, output_name):
+        # set model (xgb, cnn, rnn)
+        self.set_model_name()
+        # file manager is on already
+        # set sampler
+        self.set_over_sampling()
+        # set method
+        self.set_cross_validation()
+        self.out_put_name = output_name
+        answer = input("press:\n1. auto\n2. manual\n")
+        if answer == "1":
+            self.auto_run()
+        elif answer == "2":
+            self.run_manualy()
+        else:
+            print("no good option, exiting.")
+            exit(0)
 
 
-
-
-
+## Epigenetic features helper
+def split_epigenetic_features_into_groups(features_columns):
+    # Create a dictionary to store groups based on endings
+    groups = {}
+    # Group strings based on their endings
+    for feature in features_columns:
+        ending = feature.split("_")[-1]  # last part after _ "can be score, enrichment, etc.."
+        groups.setdefault(ending, []).append(feature)
+    return groups
     
 
 
@@ -133,12 +370,12 @@ def time_test(x_train,y_train):
     points = [100,1000,10000,100000] # Amount of data points to check
     for n in points:
         X_train_subset, y_train_subset = balance_data(x_train,y_train,n) # Balance data hopefully with n//2 for each label
-        clf = get_classifier()
-        start_time = time.time()
-        clf.fit(X_train_subset,y_train_subset)
-        end_time = time.time()
-        training_time = end_time - start_time
-        print(f"Training {ML_TYPE} with {n} data points took {training_time:.4f} seconds.")
+        # clf = get_classifier()
+        # start_time = time.time()
+        # clf.fit(X_train_subset,y_train_subset)
+        # end_time = time.time()
+        # training_time = end_time - start_time
+        # print(f"Training {ML_TYPE} with {n} data points took {training_time:.4f} seconds.")
 
 '''function to balance amount of y labels- e.a same amount of 1,0
 agiasnt x features.
@@ -169,138 +406,13 @@ def balance_data(x_train,y_train,data_points) -> tuple:
     return (x_train,y_train) 
 
 
-def get_sampler(balanced_ratio):
-    sampler_type = input("1. over sampeling\n2. synthetic sampling\n")
-    if sampler_type == "1": # over sampling
-        return RandomOverSampler(sampling_strategy=balanced_ratio, random_state=42)
-    else : return SMOTE(sampling_strategy=balanced_ratio,random_state=42)
 
-def if_over_sample():
-    global IF_OS 
-    if_os = input("press y/Y to oversample, any other for more\n")
-    if if_os.lower() == "y":
-        sampler = get_sampler('auto')
-        IF_OS = True
-        
-        return sampler
-    else : return None
-def get_sampler_type(sampler):
-    if isinstance(sampler, RandomOverSampler):
-        return "ROS"
-    elif isinstance(sampler, SMOTE):
-        return "SMOTE"
-    else:
-        return ""
 
-def create_path_list(combined_folder):
-    path_list = []
-    for combined_file in os.listdir(combined_folder):
-        combined_path = os.path.join(combined_folder,combined_file)
-        path_list.append(combined_path)
-    return path_list  
-'''''' 
-def create_feature_list(features_column):
-    # Create a dictionary to store groups based on endings
-    groups = {}
-
-    # Group strings based on their endings
-    for feature in features_column:
-        ending = feature.split("_")[-1]  # last part after _ "can be score, enrichment, etc.."
-        groups.setdefault(ending, []).append(feature)
-    return groups
-
-def run_only_seq(params,common_variables_ins):
-    # 1. set variables:
-    global ONLY_SEQ_INFO,IF_BP
-    ONLY_SEQ_INFO = True
-    IF_BP = False
-    # 2. get data
-    
-    boolean_dict = {"if_bp" : False, "only_seq" : True}
-    common_variables_ins.set_feature_booleans(boolean_dict)
-    crisprsql(*params)
-def run_with_epigenetic_features(params):
-    global ONLY_SEQ_INFO,IF_BP,FEATURES_COLUMNS
-    ONLY_SEQ_INFO = IF_BP = False
-    # run corresponding features
-    features_dict = create_feature_list(FEATURES_COLUMNS) # dict of feature by type (score, binary, fold)
-    for feature_group in features_dict.values():
-        for feature in feature_group: # run single feature
-            FEATURES_COLUMNS = [feature]
-            crisprsql(*params)
-        if len(feature_group) == 1: # group containing one feature already been run with previous for loop
-            continue
-        FEATURES_COLUMNS = feature_group
-        crisprsql(*params)
-def run_with_bp_represenation(params,manager):
-    global ONLY_SEQ_INFO,IF_BP,BP_PRESENTATION,ENCODED_LENGTH
-    ONLY_SEQ_INFO = False
-    IF_BP = True
-    bw_copy = manager.get_bigwig_files() # gets a copy of the list
-    for bw in bw_copy: # run each epi mark by file separtly
-        manager.set_bigwig_files([bw])
-        BP_PRESENTATION = 6 + manager.get_number_of_bigiwig() # should be 1
-        ENCODED_LENGTH = 23 * BP_PRESENTATION
-        crisprsql(*params)
-    # run all epigentics mark togther
-    manager.set_bigwig_files(bw_copy)
-    BP_PRESENTATION = 6 + manager.get_number_of_bigiwig() # should be >= 1
-    ENCODED_LENGTH = 23 * BP_PRESENTATION
-    crisprsql(*params)
-    # no need to close files will be closed by manager
-def run_with_epi_spacial(params,manager):
-    global ONLY_SEQ_INFO,IF_BP,IF_SEPERATE_EPI,EPIGENETIC_WINDOW_SIZE
-    ONLY_SEQ_INFO = IF_BP = False
-    IF_SEPERATE_EPI = True
-    EPIGENETIC_WINDOW_SIZE = 2000
-    bw_copy = manager.get_bigwig_files() # gets a copy of the list
-    for bw in bw_copy: # run each epi mark by file separtly
-        manager.set_bigwig_files([bw])
-        crisprsql(*params)
-    # run all epigentics mark togther
-    # manager.set_bigwig_files(bw_copy)
-    
-    # crisprsql(*params)
-       
-def run_manualy(params,management):
-    answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n4. epi seperate\n")
-    if answer == "1":
-        run_only_seq(params)
-    elif answer == "2":
-        run_with_epigenetic_features(params)
-    elif answer == "3":
-        run_with_bp_represenation(params,management)
-    elif answer == "4":
-        run_with_epi_spacial(params,management)
-    else: 
-        print("no good option, exiting.")
-        exit(0)
-'''function runs automation of all epigenetics combinations, onyl seq, and bp epigeneitcs represantion.'''
-def auto_run(params,management,common_variables_ins):
-    run_only_seq(params,common_variables_ins)
-    run_with_epigenetic_features(params)
-    run_with_bp_represenation(params,management)
-    run_with_epi_spacial(params,management)
-
-def run(params):
-    global ML_TYPE
-    ML_TYPE = input("Please enter ML type: (LOGREG, SVM, XGBOOST, XGBOOST_CW, RANDOMFOREST, CNN):\n") # ask for ML model
-    management = File_management("pos","neg","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Chromstate","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
-    common_variables_ins = common_variables()
-    sampler = if_over_sample() 
-    
-    new_params = params + (management, sampler,common_variables_ins)
-    answer = input("press:\n1. auto\n2. manual\n")
-    if answer == "1":
-        auto_run(new_params,management,common_variables_ins)
-    elif answer == "2":
-        run_manualy(new_params,management,common_variables_ins)
-    else:
-        print("no good option, exiting.")
-        exit(0)
 
 
 if __name__ == "__main__":
-     run((sys.argv[1],"change_csgs_globmax"))
+    file_manger = File_management("","",BED_FILES_FOLDER,BIG_WIG_FOLDER,MERGED_TEST)
+    runner_models = run_models(file_manager = file_manger) 
+    runner_models.run("Test")
      
     
