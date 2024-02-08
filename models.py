@@ -55,7 +55,7 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
     if (only_seq_info or if_bp): # only seq information given
         combined = seq_flatten
     elif if_seperate_epi: # epigenetics in diffrenet conv
-        epi_feature = Input(shape=(epigenetic_window_size))
+        epi_feature = Input(shape=(epigenetic_window_size * epigenetic_number))
         epi_seq_flatten = create_conv_epi_layer(epi_input=epi_feature,kernal_size=(int(epigenetic_window_size/10)),strides=5,epigenetic_window_size=epigenetic_window_size,epigenetic_number=epigenetic_number)
         combined = Concatenate()([seq_flatten, epi_seq_flatten])
         

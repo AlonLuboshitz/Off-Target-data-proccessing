@@ -96,15 +96,19 @@ def get_bp_for_one_hot_enconded(data, encoded_length, manager, bp_presenation):
     bigwig_info = bigwig_info.astype(np.float32)
     return bigwig_info
 '''Args: 1. gRNA : data frame, 2. encoded length - as epi window size , 3. file manager with epigenetic files
-Function: init ones vector with amount of data points each encoded length size
+Function: init ones vector with amount of data points each encoded length size times the amount of epigenetic files
+i.e. (N_points, window_size + window_size) for 2 files.
 Each data point sent to epigenetic encoding (add peak values for every base pair) where window size/2 added from ots location'''
 def get_seperate_epi_by_window(data, epigenetic_window_size, manager):
-    epi_data = np.ones((data.shape[0],epigenetic_window_size)) # set empty np array with data points and epigenetics window size
-    bw_epi_name, bw_epi_file = manager.get_bigwig_files()[0] # get one file (should iterate on all)
-    glb_max = manager.get_global_max_bw()[bw_epi_name] # get global max all over bigwig
-    for index, (chrom, start) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN])):
+    epi_data = np.ones((data.shape[0],epigenetic_window_size * manager.get_number_of_bigiwig())) # set empty np array with data points and epigenetics window size
+    for file_index, (bw_epi_name, bw_epi_file) in enumerate(manager.get_bigwig_files()): # get one or more files 
+        #glb_max = manager.get_global_max_bw()[bw_epi_name] # get global max all over bigwig
+        filler_start = file_index * epigenetic_window_size
+        filler_end = (file_index + 1) * epigenetic_window_size
+        for index, (chrom, start) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN])):
         
-        epi_data[index] = get_epi_data_bw(epigenetic_bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=epigenetic_window_size,max_type = glb_max)
+            epi_data[index,filler_start:filler_end] = get_epi_data_bw(epigenetic_bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=epigenetic_window_size,max_type = 1)
+        print(epi_data[0])
     epi_data = epi_data.astype(np.float32)
     return epi_data
 ## ONE HOT ENCONDINGS:
