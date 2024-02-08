@@ -8,8 +8,8 @@ from tensorflow import keras
 from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape
 
 
-def get_cnn(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size):
-        return create_convolution_model(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size)   
+def get_cnn(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number):
+        return create_convolution_model(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number)   
 def get_xgboost_cw(scale_pos_weight):
         return XGBClassifier(scale_pos_weight=scale_pos_weight,random_state=42, objective='binary:logistic',n_jobs=-1) 
 def get_xgboost():
@@ -39,15 +39,15 @@ def create_conv_seq_layers(seq_input,sequence_length,bp_presenation):
 
     seq_flatten = Flatten()(seq_acti_5) 
     return seq_flatten
-def create_conv_epi_layer(epi_input,kernal_size,strides,epigenetic_window_size):
-    epi_input_reshaped = Reshape((epigenetic_window_size,1))(epi_input)
+def create_conv_epi_layer(epi_input,kernal_size,strides,epigenetic_window_size,epigenetic_number):
+    epi_input_reshaped = Reshape((epigenetic_window_size,epigenetic_number))(epi_input)
     epi_conv_6 = Conv1D(2,kernel_size=kernal_size,kernel_initializer='random_uniform',strides=strides,padding='valid')(epi_input_reshaped)
     epi_acti_6 = keras.layers.LeakyReLU(alpha=0.2)(epi_conv_6)
     epi_max_pool_3 = MaxPooling1D(pool_size=2,strides=2, padding='same')(epi_acti_6) 
     epi_seq_flatten = Flatten()(epi_max_pool_3)
     return epi_seq_flatten
 
-def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,if_seperate_epi,num_of_additional_features,epigenetic_window_size):
+def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,if_seperate_epi,num_of_additional_features,epigenetic_window_size,epigenetic_number):
     # set seq conv layers
     seq_input = Input(shape=(sequence_length * bp_presenation))
     seq_flatten = create_conv_seq_layers(seq_input=seq_input,sequence_length=sequence_length,bp_presenation=bp_presenation)
@@ -56,7 +56,7 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
         combined = seq_flatten
     elif if_seperate_epi: # epigenetics in diffrenet conv
         epi_feature = Input(shape=(epigenetic_window_size))
-        epi_seq_flatten = create_conv_epi_layer(epi_input=epi_feature,kernal_size=(int(epigenetic_window_size/10)),strides=5,epigenetic_window_size=epigenetic_window_size)
+        epi_seq_flatten = create_conv_epi_layer(epi_input=epi_feature,kernal_size=(int(epigenetic_window_size/10)),strides=5,epigenetic_window_size=epigenetic_window_size,epigenetic_number=epigenetic_number)
         combined = Concatenate()([seq_flatten, epi_seq_flatten])
         
     else:

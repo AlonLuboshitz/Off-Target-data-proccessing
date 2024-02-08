@@ -66,7 +66,7 @@ def generate_features_and_labels(data_table, manager, encoded_length, bp_presena
             x_data = np.append(seq_info, x_data, axis = 1)
         
         x_data_all.append(x_data)
-        print (x_data_all[0][0])
+        
         y_labels_all.append(guide_data_frame[[BINARY_LABEL_COLUMN]].values) # add label values by extracting from the df by series values.
     del splited_guide_data # free memory
     return (x_data_all,y_labels_all,guides)
@@ -101,7 +101,7 @@ Each data point sent to epigenetic encoding (add peak values for every base pair
 def get_seperate_epi_by_window(data, epigenetic_window_size, manager):
     epi_data = np.ones((data.shape[0],epigenetic_window_size)) # set empty np array with data points and epigenetics window size
     bw_epi_name, bw_epi_file = manager.get_bigwig_files()[0] # get one file (should iterate on all)
-    glb_max = manager.get_global_max_bw[bw_epi_name] # get global max all over bigwig
+    glb_max = manager.get_global_max_bw()[bw_epi_name] # get global max all over bigwig
     for index, (chrom, start) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN])):
         
         epi_data[index] = get_epi_data_bw(epigenetic_bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=epigenetic_window_size,max_type = glb_max)

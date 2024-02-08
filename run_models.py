@@ -7,8 +7,8 @@
 FORCE_USE_CPU = False
 
 
-
-from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST
+#from Server_constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_GS_EPI
+from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST, MERGED_CSGS_EPI 
 from file_management import File_management
 from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
@@ -80,8 +80,12 @@ class run_models:
         self.hyper_params['class_weight'] = class_weight_dict
 
     def set_cross_validation(self):
-        self.cross_validation_method = "Leave_one_out"
-
+        answer = input("Set cross validation method:\n1. Leave one out\n2. K cross validation\n")
+        if answer == "1":
+            self.cross_validation_method = "Leave_one_out"
+        elif answer == "2":
+            self.cross_validation_method = "K_cross"
+            self.k = int(input("Set K (int): "))
     def set_model_name(self):
         answer = input("Please enter ML type: (LOGREG, XGBOOST, XGBOOST_CW, CNN):\n") # ask for ML model
         self.ml_name = answer
@@ -118,7 +122,7 @@ class run_models:
         self.set_features_output_description()
         # create feature f1_f2_f3...
         feature_str = "_".join(self.features_description)
-        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.sampler_type}_{feature_str}_{ending}.csv'
+        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.cross_validation_method}_{self.sampler_type}_{feature_str}_{ending}.csv'
 
     '''3. Write results to output table:
     includes: ml type, auroc, auprc, unpacks 4 element tuple - tp,tn test, tp,tn train.
@@ -193,7 +197,7 @@ class run_models:
         elif self.ml_name == "CNN":
             self.ml_type = "DEEP"
             return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
-                           self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size)
+                           self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.file_manager.get_number_of_bigiwig())
 
     '''2. PREDICT'''
     def predict_with_model(self,X_train, y_train, X_test, y_test): # to run timetest unfold "#"
@@ -228,30 +232,94 @@ class run_models:
         # Get data
         x_features, y_labels, guides = self.get_features()
         print("Starting Leave-One-Out")
-        for i,key in enumerate(guides):
+        for i,gRNA in enumerate(guides):
             # split data to i and ~ i
-            x_train,y_train,x_test,y_test = order_data(x_features,y_labels,i,if_shuffle=True,if_print=False,sampler=self.sampler,if_over_sample=self.if_os)
+            x_train,y_train,x_test,y_test = order_data(x_features,y_labels,i+1,if_shuffle=True,if_print=False,sampler=self.sampler,if_over_sample=self.if_os)
             # get tps, tns and set inverse ratio
-            tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
-            self.set_inverase_ratio(tps_tns)
-            # predict and evaluate model
-            y_scores_probs = self.predict_with_model(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
-            auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
-            n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
-            print(f"Ith: {i+1}\{len(guides)} split is done")
-            # write scores
-            results_table = self.write_to_table(auroc=auroc,auprc=auprc,file_left_out=key,table=results_table,Tpn_tuple=tps_tns,n_rank=n_rank_score)
-            if auroc <= 0.5:
-                self.write_scores(key,y_test,y_scores_probs,auroc)            
+            self.pipe_line_model(x_train= x_train, y_train= y_train, x_test= x_test, y_test= y_test,
+                                 iterations= len(guides), i_iter= i, key= gRNA, results_table= results_table)        
         
         results_table = results_table.sort_values(by="File_out")
         results_table.to_csv(self.file_name)
     
     ## K-CROSS VALIDATION
+    '''Given k value split the data into K groups where the amount of intreset value is similar
+    i.e. interest - positive amount, buldges amount, mismatch amount'''
+    def k_cross_validation(self):
+        # get data each x_feature has correspoding y_label
+        x_features, y_labels, guides = self.get_features()
+        # sum the y_labels > 0 for each array i in y_labels
+        sum_labels = [np.sum(array > 0) for array in y_labels]        # sort the sum labels in Desc and get the sorted indices
+        sorted_indices = np.argsort(sum_labels)[::-1]
+        # init K groups and fill them with features by the sorted indices
+        k_groups = self.fill_k_groups_indices(self.k, sum_labels = sum_labels, sorted_indices = sorted_indices)
+        # Set File output name
+        self.set_file_output_name(self.out_put_name)
+        # Set result table 
+        results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+        print("Starting K cross validation")
+        for i in range(self.k): # iterate over the k groups, split to test/train by indices in I group
+            x_train, y_train, x_test, y_test, test_guides = self.split_by_group(x_features, y_labels, k_groups, i, guides) 
+            self.pipe_line_model(x_train, y_train, x_test, y_test, self.k, i+1 , test_guides, results_table)
+        results_table = results_table.sort_values(by="File_out")
+        results_table.to_csv(self.file_name)
+
+    
+    '''3. Split to x_test y_test by indices given in the k_group, rest of indices will be the training set'''
+    def split_by_group(self,x_features, y_labels, k_groups, i, guides):
+        # split to test indices and train indices
+        test_indices = np.array(k_groups[i])
+        # Concatenate arrays excluding k_groups[i]
+        train_indices = np.concatenate(k_groups[:i] + k_groups[i+1:])
+        x_test,y_test,x_train,y_train, test_guides = [], [], [], [], [] # init arrays for data type
+        guides = list(guides)
+        # Iterate on indices for test/train and fill arrays
+        for idx in test_indices:
+            x_test.append(x_features[idx])
+            y_test.append(y_labels[idx])
+            test_guides.append(guides[idx]) # Fill guides by test indices
+        for idx in train_indices:
+            x_train.append(x_features[idx])
+            y_train.append(y_labels[idx])
+        # Concatenate into np array and flatten the y arrays
+        x_test = np.concatenate(x_test, axis= 0)
+        x_train = np.concatenate(x_train, axis= 0)
+        y_test = np.concatenate(y_test, axis= 0).ravel()
+        y_train = np.concatenate(y_train, axis= 0).ravel()
+        return x_train, y_train, x_test, y_test, test_guides
+
+    '''2. Greedy approch to fill k groups with ~ equal amount of labels
+        Getting sum of labels for each indice and sorted indices by sum filling the groups
+        from the biggest amount to smallest adding to the minimum group'''
+    def fill_k_groups_indices(self, k, sum_labels, sorted_indices):
+        # Create k groups with 1 indice each from the sorted indices in descending order
+        groups = [[sorted_indices[i]] for i in range(k)]
         
+        
+        for index in sorted_indices[k:]: # Notice [K:] to itreate over the remaining indices
+        # Find the group with the smallest current sum
+            min_sum_group = min(groups, key=lambda group: sum(sum_labels[i] for i in group), default=groups[0])
+            # Add the series to the group with the smallest current sum
+            min_sum_group.append(index)
+        return groups
+    
+    
+    
+    def pipe_line_model(self, x_train, y_train, x_test, y_test, iterations, i_iter, key, results_table):
+    # get tps, tns and set inverse ratio
+        tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
+        self.set_inverase_ratio(tps_tns)
+        # predict and evaluate model
+        y_scores_probs = self.predict_with_model(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+        auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
+        n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
+        print(f"Ith: {i_iter}\{iterations} split is done")
+        # write scores
+        results_table = self.write_to_table(auroc=auroc,auprc=auprc,file_left_out=key,table=results_table,Tpn_tuple=tps_tns,n_rank=n_rank_score)
+        if auroc <= 0.5:
+            self.write_scores(key,y_test,y_scores_probs,auroc)  
     
     ## RUN TYPES:
-        
     # only seq
         
     def run_only_seq(self):
@@ -299,13 +367,12 @@ class run_models:
             self.file_manager.set_bigwig_files([bw])
             self.run_by_validation_type()
         # run all epigentics mark togther
-        # manager.set_bigwig_files(bw_copy)
-        
-        # crisprsql(*params)
+        self.file_manager.set_bigwig_files(bw_copy)
+        self.run_by_validation_type()
     def run_by_validation_type(self):
         validation_functions = {
             'Leave_one_out': self.leave_one_out,
-            'K_cross': "",
+            'K_cross': self.k_cross_validation,
         }
         validation_function = validation_functions.get(self.cross_validation_method)
         if validation_function:
@@ -411,7 +478,7 @@ def balance_data(x_train,y_train,data_points) -> tuple:
 
 
 if __name__ == "__main__":
-    file_manger = File_management("","",BED_FILES_FOLDER,BIG_WIG_FOLDER,MERGED_TEST)
+    file_manger = File_management("","",BED_FILES_FOLDER,BIG_WIG_FOLDER, MERGED_TEST)
     runner_models = run_models(file_manager = file_manger) 
     runner_models.run("Test")
      
