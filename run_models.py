@@ -108,7 +108,7 @@ class run_models:
         answer = input("Please enter ML type:\n1. LOGREG\n2. XGBOOST\n3. XGBOOST_CW\n4. CNN\n") # ask for ML model
         if int(answer) < 4:
             self.ml_type = "ML"
-            self.set_ml_name()
+            self.set_ml_name(int(answer))
         else : 
             self.ml_type = "DEEP"
             self.ml_name = "CNN"
@@ -432,8 +432,9 @@ class run_models:
     def auto_run(self):
         self.run_only_seq()
         self.run_with_epigenetic_features()
-        self.run_with_bp_represenation()
-        self.run_with_epi_spacial()
+        if self.ml_type == "ML": # machine learing runs bp+seq but not seperate epi
+            self.run_with_bp_represenation()
+        else : self.run_with_epi_spacial() # deep learning run seperate epi
 
     def run(self, output_name):
         self.init_runs()
