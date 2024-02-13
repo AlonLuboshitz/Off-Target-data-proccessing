@@ -7,8 +7,8 @@
 FORCE_USE_CPU = False
 
 
-#from Server_constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_GS_EPI
-from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST, MERGED_CSGS_EPI 
+from Server_constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_GS_EPI
+#from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST, CHANGESEQ_GS_EPI 
 from file_management import File_management
 from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
@@ -54,8 +54,25 @@ class run_models:
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_epi_features = False  
     def init_deep_hyper_params(self):
         self.hyper_params = {'epochs': 5, 'batch_size': 1024, 'verbose' : 2}# Add any other fit parameters you need
-    
+    def init_runs(self):
+        self.set_model()  # set model (xgb, cnn, rnn)
+        self.set_over_sampling() # set over sampling
+        self.set_cross_validation() # set method
+        self.set_reproducibility() # set data, model reproducibility
 
+
+    def set_reproducibility(self):
+        self.data_reproducibility = True
+        self.model_reproducibility = False
+        if self.model_reproducibility:
+            self.set_model_seeds()
+    def set_model_seeds(self):
+        np.random.seed(42) # set np seed
+        tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
+        # Set seed for GPU operations (if applicable)
+        # Note: This may not work on all GPU setups
+        if tf.config.experimental.list_physical_devices('GPU'):
+            tf.config.experimental.set_seed(42)
 
     ## Features booleans setters
     def set_only_seq_booleans(self):
@@ -83,12 +100,29 @@ class run_models:
         answer = input("Set cross validation method:\n1. Leave one out\n2. K cross validation\n")
         if answer == "1":
             self.cross_validation_method = "Leave_one_out"
+            self.k = ""
         elif answer == "2":
             self.cross_validation_method = "K_cross"
             self.k = int(input("Set K (int): "))
-    def set_model_name(self):
-        answer = input("Please enter ML type: (LOGREG, XGBOOST, XGBOOST_CW, CNN):\n") # ask for ML model
-        self.ml_name = answer
+    def set_model(self):
+        answer = input("Please enter ML type:\n1. LOGREG\n2. XGBOOST\n3. XGBOOST_CW\n4. CNN\n") # ask for ML model
+        if int(answer) < 4:
+            self.ml_type = "ML"
+            self.set_ml_name()
+        else : 
+            self.ml_type = "DEEP"
+            self.ml_name = "CNN"
+        
+    def set_ml_name(self, i):
+        if i == 1:
+            self.ml_name = "LOGREG"
+        elif i == 2:
+            self.ml_name = "XGBOOST"
+        elif i == 3:
+            self.ml_name = "XGBOOST_CW"
+        
+
+               
     ## Over sampling setter
     def set_over_sampling(self):
         if_os = input("press y/Y to oversample, any other for more\n")
@@ -122,7 +156,7 @@ class run_models:
         self.set_features_output_description()
         # create feature f1_f2_f3...
         feature_str = "_".join(self.features_description)
-        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.cross_validation_method}_{self.sampler_type}_{feature_str}_{ending}.csv'
+        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.k}{self.cross_validation_method}_{self.sampler_type}_{feature_str}_{ending}.csv'
 
     '''3. Write results to output table:
     includes: ml type, auroc, auprc, unpacks 4 element tuple - tp,tn test, tp,tn train.
@@ -159,7 +193,9 @@ class run_models:
         columns = ["Seq","y_test","y_predict","auroc"]
         auc_table = pd.DataFrame(columns=columns)
         return auc_table
-        
+    
+    
+
     ## Assistant RUN FUNCTIONS: DATA, MODEL, REGRESSION, CLASSIFICATION, 
         
     ## DATA:
@@ -169,7 +205,7 @@ class run_models:
     def get_features(self): 
         return  generate_features_and_labels(self.file_manager.get_merged_data_path() , self.file_manager, self.encoded_length, self.bp_presntation, 
                                                                         self.if_bp, self.if_only_seq,self.if_seperate_epi,
-                                                                        self.epigenetic_window_size,self.features_columns)
+                                                                        self.epigenetic_window_size,self.features_columns, self.data_reproducibility)
     # OVER SAMPLING:
     '''1. Get the sampler instace with ratio and set the sampler string'''
     def get_sampler(self,balanced_ratio):
@@ -186,16 +222,12 @@ class run_models:
     '''1. GET MODEL'''
     def get_model(self):
         if self.ml_name == "LOGREG":
-            self.ml_type = "ML"
             return get_logreg()
         elif self.ml_name == "XGBOOST":
-            self.ml_type = "ML"
             return get_xgboost()
         elif self.ml_name == "XGBOOST_CW":
-            self.ml_type = "ML"
             return get_xgboost_cw(self.inverse_ratio)
         elif self.ml_name == "CNN":
-            self.ml_type = "DEEP"
             return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
                            self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.file_manager.get_number_of_bigiwig())
 
@@ -249,10 +281,13 @@ class run_models:
         # get data each x_feature has correspoding y_label
         x_features, y_labels, guides = self.get_features()
         # sum the y_labels > 0 for each array i in y_labels
+        
         sum_labels = [np.sum(array > 0) for array in y_labels]        # sort the sum labels in Desc and get the sorted indices
         sorted_indices = np.argsort(sum_labels)[::-1]
         # init K groups and fill them with features by the sorted indices
         k_groups = self.fill_k_groups_indices(self.k, sum_labels = sum_labels, sorted_indices = sorted_indices)
+        
+        
         # Set File output name
         self.set_file_output_name(self.out_put_name)
         # Set result table 
@@ -401,13 +436,7 @@ class run_models:
         self.run_with_epi_spacial()
 
     def run(self, output_name):
-        # set model (xgb, cnn, rnn)
-        self.set_model_name()
-        # file manager is on already
-        # set sampler
-        self.set_over_sampling()
-        # set method
-        self.set_cross_validation()
+        self.init_runs()
         self.out_put_name = output_name
         answer = input("press:\n1. auto\n2. manual\n")
         if answer == "1":
@@ -478,8 +507,8 @@ def balance_data(x_train,y_train,data_points) -> tuple:
 
 
 if __name__ == "__main__":
-    file_manger = File_management("","",BED_FILES_FOLDER,BIG_WIG_FOLDER, MERGED_TEST)
+    file_manger = File_management("","",BED_FILES_FOLDER,BIG_WIG_FOLDER, CHANGESEQ_GS_EPI)
     runner_models = run_models(file_manager = file_manger) 
-    runner_models.run("Test")
+    runner_models.run("Change_csgs")
      
     

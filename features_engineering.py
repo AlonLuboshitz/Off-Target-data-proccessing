@@ -26,14 +26,17 @@ Function: takes the data table, create a unique list of gRNAs, Split the data in
 Based on gRNA
 Outputs: 1. Dictionray - {gRNA : Data frame} 2. unique gRNA set
 '''
-def create_data_frames_for_features(data):
+def create_data_frames_for_features(data, if_data_reproducibility):
     data_table = pd.read_csv(data) # open data
-   
-    guides = set(data_table[TARGET_COLUMN]) # set unquie guide identifier
+    # set unquie guide identifier, sorted if reproducibilty is need with data spliting
+    if if_data_reproducibility:
+        guides = sorted(set(data_table[TARGET_COLUMN])) 
+    else : guides = set(data_table[TARGET_COLUMN])
      # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
     df_dict = {grna: group for grna, group in data_table.groupby(TARGET_COLUMN)}
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
+
     return (result_dataframes, guides)
 
 '''Args:
@@ -42,8 +45,8 @@ Function: Store x and y lists with x features after encoding, and coresponding y
 Iterate on each gRNA : Data frame and extract the Data
 Outputs --> x & y lists with N nd.arrays each of them is for gRNA (N - total number of gRNAs)
 Uses - internal functions for seq encoding, epigentic encoding, and bp intersection of epigenetics with seq'''
-def generate_features_and_labels(data_table, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns):
-    splited_guide_data,guides = create_data_frames_for_features(data_table)
+def generate_features_and_labels(data_table, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility):
+    splited_guide_data,guides = create_data_frames_for_features(data_table, if_data_reproducibility)
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
    
