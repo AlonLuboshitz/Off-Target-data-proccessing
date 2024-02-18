@@ -6,10 +6,6 @@
 
 FORCE_USE_CPU = False
 
-
-#from Server_constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_GS_EPI
-from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST, CHANGESEQ_GS_EPI 
-from file_management import File_management
 from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
