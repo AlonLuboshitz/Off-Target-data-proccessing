@@ -42,6 +42,11 @@ class File_management:
             return self.glb_max_dict
         else : raise RuntimeError("No max values setted for bigwig files")
     
+    ## Setters:
+
+    def set_model_results_output_path(self, output_path):
+        self.model_results_output_path = output_path
+    
     def set_bigwig_files(self,bw_list):
         flag = False
         if bw_list: #bw list isnt empty
@@ -117,6 +122,14 @@ class File_management:
                 max_val = bw_file.stats(chrom,0,length,type='max')[0]
                 max_list.append(max_val)
             self.glb_max_dict[bw_name] = max(max_list)
+
+    '''Function to save machine learning results to file
+    '''
+    def save_ml_results(self, results_table, model_name): 
+        # concatenate self.model_results_output_path with model_name
+        output_path = os.path.join(self.model_results_output_path,f'{model_name}.csv')
+        # save results to file
+        results_table.to_csv(model_name)
         
     '''dtor'''
     def __del__(self):

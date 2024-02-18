@@ -14,6 +14,7 @@ CHANGESEQ_CASO_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changes
 CHANGESEQ_GS = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs.csv"
 CHANGESEQ_GS_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_withEpigenetic_ALL.csv"
     # ML results
-
+DATA_REPRODUCIBILITY = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/Data"
+MODEL_REPRODUCIBILITY = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/Models"
 
 
