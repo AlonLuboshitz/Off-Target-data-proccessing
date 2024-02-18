@@ -4,12 +4,13 @@ import pyBigWig
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
-    def __init__(self, positives, negatives, epigenetics_bed , bigwig, merged_data) -> None: 
+    def __init__(self, positives, negatives, epigenetics_bed , bigwig, merged_data, data_folder_path) -> None: 
         self.positive_path = positives
         self.negative_path = negatives
         self.epigenetics_folder_path = epigenetics_bed
         self.bigwig_folder_path = bigwig
         self.merged_data_path = merged_data
+        self.data_folder_path = data_folder_path
         self.create_bigwig_files_objects()
         self.set_global_bw_max()
         #self.create_bed_files_objects()

@@ -7,16 +7,16 @@
 FORCE_USE_CPU = False
 
 
-from Server_constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_GS_EPI
-#from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST, CHANGESEQ_GS_EPI 
+#from Server_constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_GS_EPI
+from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST, CHANGESEQ_GS_EPI 
 from file_management import File_management
 from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
-
+from input_validation import validate_dictionary_input
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import RandomOverSampler, SMOTE
-
+from test import keep_groups
 import pandas as pd
 import numpy as np
 import sys
@@ -60,12 +60,13 @@ class run_models:
         self.set_cross_validation() # set method
         self.set_reproducibility() # set data, model reproducibility
 
-
+    '''Set reproducibility for data and model'''
     def set_reproducibility(self):
         self.data_reproducibility = True
         self.model_reproducibility = False
         if self.model_reproducibility:
             self.set_model_seeds()
+    '''Set seeds for reproducibility'''
     def set_model_seeds(self):
         np.random.seed(42) # set np seed
         tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
@@ -95,7 +96,8 @@ class run_models:
         class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
         class_weight_dict = dict(enumerate(class_weights))
         self.hyper_params['class_weight'] = class_weight_dict
-
+    
+    ''' Set cross validation method and k value if needed.'''
     def set_cross_validation(self):
         answer = input("Set cross validation method:\n1. Leave one out\n2. K cross validation\n")
         if answer == "1":
@@ -104,22 +106,28 @@ class run_models:
         elif answer == "2":
             self.cross_validation_method = "K_cross"
             self.k = int(input("Set K (int): "))
+    
+    ''' Create a dictionary for ML models and ask for input to choose from.'''
     def set_model(self):
-        answer = input("Please enter ML type:\n1. LOGREG\n2. XGBOOST\n3. XGBOOST_CW\n4. CNN\n") # ask for ML model
-        if int(answer) < 4:
+        self.model_dict = {
+            1: "LOGREG",
+            2: "XGBOOST",
+            3: "XGBOOST_CW",
+            4: "CNN",
+            5: "RNN"
+        }
+        answer = input(f"Please enter ML type: {self.model_dict}\n") # ask for ML model
+        answer = int(answer)
+        validate_dictionary_input(answer, self.model_dict) # validate input by model dictionary
+        if answer < 4:
             self.ml_type = "ML"
-            self.set_ml_name(int(answer))
         else : 
             self.ml_type = "DEEP"
-            self.ml_name = "CNN"
-        
-    def set_ml_name(self, i):
-        if i == 1:
-            self.ml_name = "LOGREG"
-        elif i == 2:
-            self.ml_name = "XGBOOST"
-        elif i == 3:
-            self.ml_name = "XGBOOST_CW"
+        self.ml_name = self.model_dict[answer]
+    
+    
+    
+      
         
 
                
@@ -286,7 +294,7 @@ class run_models:
         sorted_indices = np.argsort(sum_labels)[::-1]
         # init K groups and fill them with features by the sorted indices
         k_groups = self.fill_k_groups_indices(self.k, sum_labels = sum_labels, sorted_indices = sorted_indices)
-        
+        keep_groups(k_groups, sum_labels, guides, self.k, f"Test_{self.k}K_guides.csv")
         
         # Set File output name
         self.set_file_output_name(self.out_put_name)
@@ -339,7 +347,7 @@ class run_models:
         return groups
     
     
-    
+    '''Run the model for each split, write the results to the table and if auc < 0.5 write the scores to a file'''
     def pipe_line_model(self, x_train, y_train, x_test, y_test, iterations, i_iter, key, results_table):
     # get tps, tns and set inverse ratio
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
@@ -362,7 +370,7 @@ class run_models:
         self.set_only_seq_booleans()
         self.run_by_validation_type()
 
-        
+    '''Run with epigenetic features, split to groups and run each group and all together.'''    
     def run_with_epigenetic_features(self):
         # 1. set booleans
         self.set_epigenetic_feature_booleans()
@@ -376,7 +384,7 @@ class run_models:
                 continue
             self.features_columns = feature_group
             self.run_by_validation_type()
-        
+    '''Run with bp representation, run each epi mark by file separtly and all together.'''   
     def run_with_bp_represenation(self):
         self.set_bp_in_seq_booleans()
         bw_copy = self.file_manager.get_bigwig_files() # gets a copy of the list
@@ -392,7 +400,8 @@ class run_models:
         self.run_by_validation_type()
         # no need to close files will be closed by manager
 
-        
+    '''Run with epi seperatly from sequence (only valid for Deep)
+      run each epi mark by file separtly and all together.'''    
     def run_with_epi_spacial(self):
         # 1. set booleans
         self.set_epi_window_booleans()
@@ -404,6 +413,7 @@ class run_models:
         # run all epigentics mark togther
         self.file_manager.set_bigwig_files(bw_copy)
         self.run_by_validation_type()
+    
     def run_by_validation_type(self):
         validation_functions = {
             'Leave_one_out': self.leave_one_out,
@@ -416,18 +426,36 @@ class run_models:
             print("Invalid cross-validation method")
         
     def run_manualy(self):
-        answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n4. epi seperate\n")
-        if answer == "1":
-            self.run_only_seq()
-        elif answer == "2":
-            self.run_with_epigenetic_features()
-        elif answer == "3":
-            self.run_with_bp_represenation()
-        elif answer == "4":
-            self.run_with_epi_spacial()
-        else: 
-            print("no good option, exiting.")
-            exit(0)
+        # Init runs in a dictionary
+        manual_functions_dict = {
+            1: ("Only sequence",self.run_only_seq),
+            2: ("Epigenetic by features",self.run_with_epigenetic_features),
+            3: ("Base pair epigenetic in Sequence",self.run_with_bp_represenation),
+            4: ("Seperate epigenetics ",self.run_with_epi_spacial)
+        }
+        # Choose a method to run by the dictionary
+        print("Choose a method to run: ")
+        for key, value in manual_functions_dict.items():
+            print(f"{key}: {value[0]}")
+        answer = input()
+        answer = int(answer)
+        # Validate input by dictionary
+        validate_dictionary_input(answer, manual_functions_dict) # validate input by data method dictionary
+        # If valid run the method (1 for second tuple element in the dictionary value tuple)
+        manual_functions_dict[int(answer)][1]()
+        # #answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n4. epi seperate\n")
+        # if answer == "1":
+        #     self.run_only_seq()
+        # elif answer == "2":
+        #     self.run_with_epigenetic_features()
+        # elif answer == "3":
+        #     self.run_with_bp_represenation()
+        # elif answer == "4":
+        #     self.run_with_epi_spacial()
+        # else: 
+        #     print("no good option, exiting.")
+        #     exit(0)
+    
     '''function runs automation of all epigenetics combinations, onyl seq, and bp epigeneitcs represantion.'''
     def auto_run(self):
         self.run_only_seq()
@@ -507,9 +535,5 @@ def balance_data(x_train,y_train,data_points) -> tuple:
 
 
 
-if __name__ == "__main__":
-    file_manger = File_management("","",BED_FILES_FOLDER,BIG_WIG_FOLDER, CHANGESEQ_GS_EPI)
-    runner_models = run_models(file_manager = file_manger) 
-    runner_models.run("Change_csgs")
      
     

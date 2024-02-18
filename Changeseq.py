@@ -5,19 +5,19 @@ import pybedtools
 import re
 '''for table from changeseq both same amount of columns merge togther.
 set label column with active - 1 for guideseq expriments and 0 for change seq'''
-def label_pos_neg(guideseq,negatives,output_name,target_column):
+def label_pos_neg(positives,negatives,output_name,target_column):
     
-    guideseq = read_to_df_add_label(guideseq,1) # set 1 for guide seq
+    positives = read_to_df_add_label(positives,1) # set 1 for guide seq
     negatives = read_to_df_add_label(negatives,0) # set 0 for changeseq
-    negatives = remove_unmatching_guides(positive_data=guideseq,target_column=target_column,negative_data=negatives)
-    before_gs = len(guideseq)
+    negatives = remove_unmatching_guides(positive_data=positives,target_column=target_column,negative_data=negatives)
+    before_gs = len(positives)
     before_cs = len(negatives)
     drop_on_columns = ["chrom","chromStart","chromEnd","offtarget_sequence","distance"] # columns to drop duplicates on
-    guideseq, gs_duplicates = drop_by_colmuns(guideseq,drop_on_columns,"first")
+    positives, gs_duplicates = drop_by_colmuns(positives,drop_on_columns,"first")
     negatives,cs_duplicates = drop_by_colmuns(negatives,drop_on_columns,"first")
     neg_length=len(negatives)
-    merged_data = pd.concat([guideseq,negatives])
-    print(f"data points should be: {len(merged_data)}, {len(guideseq) + neg_length}")
+    merged_data = pd.concat([positives,negatives])
+    print(f"data points should be: {len(merged_data)}, {len(positives) + neg_length}")
     merged_data,md_duplicates = drop_by_colmuns(merged_data,drop_on_columns,"first")
     count_ones = sum(merged_data["Label"] == 1)
     count_zeros = sum(merged_data["Label"]==0)
