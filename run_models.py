@@ -63,17 +63,24 @@ class run_models:
     def set_data_reproducibility(self, bool):
         self.data_reproducibility = bool
     def set_model_reproducibility(self, bool):
+        self.random_state = np.random.randint(100) # set random state for model
         self.model_reproducibility = bool
         if self.model_reproducibility:
-            self.set_model_seeds()
+            if self.ml_type == "DEEP":
+                self.set_deep_seeds()
+            else : 
+                self.set_ml_seeds()
     '''Set seeds for reproducibility'''
-    def set_model_seeds(self):
-        np.random.seed(42) # set np seed
+    def set_deep_seeds(self):
         tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
-        # Set seed for GPU operations (if applicable)
-        # Note: This may not work on all GPU setups
-        if tf.config.experimental.list_physical_devices('GPU'):
-            tf.config.experimental.set_seed(42)
+        tf.keras.utils.set_random_seed(42)  # sets seeds for base-python, numpy and tf
+        tf.config.experimental.enable_op_determinism()
+    def set_ml_seeds(self):
+        #np.random.seed(42) # set np seed
+        self.random_state = 42
+    def set_random_seeds(self):
+        tf.random.set_seed(seed=int(time.time())) # Set seed for Python's random module (used by TensorFlow internally)
+        tf.keras.utils.set_random_seed(seed=int(time.time()))  # sets seeds for base-python, numpy and tf
 
     ## Features booleans setters
     def set_only_seq_booleans(self):
@@ -211,6 +218,7 @@ class run_models:
     Use generate_features_and_lables from feature_engineering.py
     returns x_features, y_features, guide set'''
     def get_features(self): 
+        self.set_random_seeds()
         return  generate_features_and_labels(self.file_manager.get_merged_data_path() , self.file_manager, self.encoded_length, self.bp_presntation, 
                                                                         self.if_bp, self.if_only_seq,self.if_seperate_epi,
                                                                         self.epigenetic_window_size,self.features_columns, self.data_reproducibility)
@@ -230,11 +238,11 @@ class run_models:
     '''1. GET MODEL'''
     def get_model(self):
         if self.ml_name == "LOGREG":
-            return get_logreg()
+            return get_logreg(self.random_state)
         elif self.ml_name == "XGBOOST":
-            return get_xgboost()
+            return get_xgboost(self.random_state)
         elif self.ml_name == "XGBOOST_CW":
-            return get_xgboost_cw(self.inverse_ratio)
+            return get_xgboost_cw(self.inverse_ratio, self.random_state,self.data_reproducibility)
         elif self.ml_name == "CNN":
             return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
                            self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.file_manager.get_number_of_bigiwig())
@@ -288,13 +296,14 @@ class run_models:
     def k_cross_validation(self):
         # get data each x_feature has correspoding y_label
         x_features, y_labels, guides = self.get_features()
+        
         # sum the y_labels > 0 for each array i in y_labels
         
         sum_labels = [np.sum(array > 0) for array in y_labels]        # sort the sum labels in Desc and get the sorted indices
         sorted_indices = np.argsort(sum_labels)[::-1]
         # init K groups and fill them with features by the sorted indices
         k_groups = self.fill_k_groups_indices(self.k, sum_labels = sum_labels, sorted_indices = sorted_indices)
-        keep_groups(k_groups, sum_labels, guides, self.k, f"Test_{self.k}K_guides.csv")
+        #keep_groups(k_groups, sum_labels, guides, self.k, f"Test_{self.k}K_guides.csv")
         
         # Set File output name
         self.set_file_output_name(self.out_put_name)
@@ -353,6 +362,7 @@ class run_models:
     # get tps, tns and set inverse ratio
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
         self.set_inverase_ratio(tps_tns)
+        self.set_model_reproducibility(self.model_reproducibility)
         # predict and evaluate model
         y_scores_probs = self.predict_with_model(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
         auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)

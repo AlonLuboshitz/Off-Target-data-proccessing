@@ -129,7 +129,7 @@ class File_management:
         # concatenate self.model_results_output_path with model_name
         output_path = os.path.join(self.model_results_output_path,f'{model_name}.csv')
         # save results to file
-        results_table.to_csv(model_name)
+        results_table.to_csv(output_path)
         
     '''dtor'''
     def __del__(self):

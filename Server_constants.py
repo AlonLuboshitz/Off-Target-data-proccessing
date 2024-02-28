@@ -13,8 +13,9 @@ CHANGESEQ_CASO = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/m
 CHANGESEQ_CASO_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_casofinder_withEpigenetic_ALL.csv"
 CHANGESEQ_GS = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs.csv"
 CHANGESEQ_GS_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_withEpigenetic_ALL.csv"
+TEST = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_test.csv"
     # ML results
-DATA_REPRODUCIBILITY = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/Data"
-MODEL_REPRODUCIBILITY = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/Models"
-
+DATA_REPRODUCIBILITY = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/vs_caso/K_cross/Data/5K"
+MODEL_REPRODUCIBILITY = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/vs_caso/K_cross/Models/5K"
+ALL_REPRODUCIBILITY = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/Both"
 
