@@ -6,10 +6,6 @@
 
 FORCE_USE_CPU = False
 
-
-#from Server_constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_GS_EPI
-from constants import BED_FILES_FOLDER, BIG_WIG_FOLDER, MERGED_TEST, CHANGESEQ_GS_EPI 
-from file_management import File_management
 from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
@@ -54,26 +50,37 @@ class run_models:
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_epi_features = False  
     def init_deep_hyper_params(self):
         self.hyper_params = {'epochs': 5, 'batch_size': 1024, 'verbose' : 2}# Add any other fit parameters you need
-    def init_runs(self):
+    def setup_runner(self):
         self.set_model()  # set model (xgb, cnn, rnn)
         self.set_over_sampling() # set over sampling
         self.set_cross_validation() # set method
-        self.set_reproducibility() # set data, model reproducibility
+        self.set_data_reproducibility(False) # set data, model reproducibility
+        self.set_model_reproducibility(False)
+        self.set_functions_dict()
+        self.init = True
 
     '''Set reproducibility for data and model'''
-    def set_reproducibility(self):
-        self.data_reproducibility = True
-        self.model_reproducibility = False
+    def set_data_reproducibility(self, bool):
+        self.data_reproducibility = bool
+    def set_model_reproducibility(self, bool):
+        self.random_state = np.random.randint(100) # set random state for model
+        self.model_reproducibility = bool
         if self.model_reproducibility:
-            self.set_model_seeds()
+            if self.ml_type == "DEEP":
+                self.set_deep_seeds()
+            else : 
+                self.set_ml_seeds()
     '''Set seeds for reproducibility'''
-    def set_model_seeds(self):
-        np.random.seed(42) # set np seed
+    def set_deep_seeds(self):
         tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
-        # Set seed for GPU operations (if applicable)
-        # Note: This may not work on all GPU setups
-        if tf.config.experimental.list_physical_devices('GPU'):
-            tf.config.experimental.set_seed(42)
+        tf.keras.utils.set_random_seed(42)  # sets seeds for base-python, numpy and tf
+        tf.config.experimental.enable_op_determinism()
+    def set_ml_seeds(self):
+        #np.random.seed(42) # set np seed
+        self.random_state = 42
+    def set_random_seeds(self):
+        tf.random.set_seed(seed=int(time.time())) # Set seed for Python's random module (used by TensorFlow internally)
+        tf.keras.utils.set_random_seed(seed=int(time.time()))  # sets seeds for base-python, numpy and tf
 
     ## Features booleans setters
     def set_only_seq_booleans(self):
@@ -164,7 +171,7 @@ class run_models:
         self.set_features_output_description()
         # create feature f1_f2_f3...
         feature_str = "_".join(self.features_description)
-        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.k}{self.cross_validation_method}_{self.sampler_type}_{feature_str}_{ending}.csv'
+        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.k}{self.cross_validation_method}_{self.sampler_type}_{feature_str}_{ending}'
 
     '''3. Write results to output table:
     includes: ml type, auroc, auprc, unpacks 4 element tuple - tp,tn test, tp,tn train.
@@ -211,6 +218,7 @@ class run_models:
     Use generate_features_and_lables from feature_engineering.py
     returns x_features, y_features, guide set'''
     def get_features(self): 
+        self.set_random_seeds()
         return  generate_features_and_labels(self.file_manager.get_merged_data_path() , self.file_manager, self.encoded_length, self.bp_presntation, 
                                                                         self.if_bp, self.if_only_seq,self.if_seperate_epi,
                                                                         self.epigenetic_window_size,self.features_columns, self.data_reproducibility)
@@ -230,11 +238,11 @@ class run_models:
     '''1. GET MODEL'''
     def get_model(self):
         if self.ml_name == "LOGREG":
-            return get_logreg()
+            return get_logreg(self.random_state)
         elif self.ml_name == "XGBOOST":
-            return get_xgboost()
+            return get_xgboost(self.random_state)
         elif self.ml_name == "XGBOOST_CW":
-            return get_xgboost_cw(self.inverse_ratio)
+            return get_xgboost_cw(self.inverse_ratio, self.random_state,self.data_reproducibility)
         elif self.ml_name == "CNN":
             return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
                            self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.file_manager.get_number_of_bigiwig())
@@ -288,13 +296,14 @@ class run_models:
     def k_cross_validation(self):
         # get data each x_feature has correspoding y_label
         x_features, y_labels, guides = self.get_features()
+        
         # sum the y_labels > 0 for each array i in y_labels
         
         sum_labels = [np.sum(array > 0) for array in y_labels]        # sort the sum labels in Desc and get the sorted indices
         sorted_indices = np.argsort(sum_labels)[::-1]
         # init K groups and fill them with features by the sorted indices
         k_groups = self.fill_k_groups_indices(self.k, sum_labels = sum_labels, sorted_indices = sorted_indices)
-        keep_groups(k_groups, sum_labels, guides, self.k, f"Test_{self.k}K_guides.csv")
+        #keep_groups(k_groups, sum_labels, guides, self.k, f"Test_{self.k}K_guides.csv")
         
         # Set File output name
         self.set_file_output_name(self.out_put_name)
@@ -305,7 +314,8 @@ class run_models:
             x_train, y_train, x_test, y_test, test_guides = self.split_by_group(x_features, y_labels, k_groups, i, guides) 
             self.pipe_line_model(x_train, y_train, x_test, y_test, self.k, i+1 , test_guides, results_table)
         results_table = results_table.sort_values(by="File_out")
-        results_table.to_csv(self.file_name)
+        self.file_manager.save_ml_results(results_table, self.file_name)
+
 
     
     '''3. Split to x_test y_test by indices given in the k_group, rest of indices will be the training set'''
@@ -352,6 +362,7 @@ class run_models:
     # get tps, tns and set inverse ratio
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
         self.set_inverase_ratio(tps_tns)
+        self.set_model_reproducibility(self.model_reproducibility)
         # predict and evaluate model
         y_scores_probs = self.predict_with_model(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
         auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
@@ -424,57 +435,46 @@ class run_models:
             validation_function()
         else:
             print("Invalid cross-validation method")
-        
-    def run_manualy(self):
-        # Init runs in a dictionary
-        manual_functions_dict = {
+    def set_functions_dict(self):  
+        self.functions_dict = {
             1: ("Only sequence",self.run_only_seq),
             2: ("Epigenetic by features",self.run_with_epigenetic_features),
             3: ("Base pair epigenetic in Sequence",self.run_with_bp_represenation),
             4: ("Seperate epigenetics ",self.run_with_epi_spacial)
-        }
+        }   
+    def run_manualy(self):
+        
         # Choose a method to run by the dictionary
         print("Choose a method to run: ")
-        for key, value in manual_functions_dict.items():
+        for key, value in self.functions_dict.items():
             print(f"{key}: {value[0]}")
         answer = input()
         answer = int(answer)
         # Validate input by dictionary
-        validate_dictionary_input(answer, manual_functions_dict) # validate input by data method dictionary
+        validate_dictionary_input(answer, self.functions_dict) # validate input by data method dictionary
         # If valid run the method (1 for second tuple element in the dictionary value tuple)
-        manual_functions_dict[int(answer)][1]()
-        # #answer = input("press:\n1. only seq\n2. epigenetic features\n3. bp presentation\n4. epi seperate\n")
-        # if answer == "1":
-        #     self.run_only_seq()
-        # elif answer == "2":
-        #     self.run_with_epigenetic_features()
-        # elif answer == "3":
-        #     self.run_with_bp_represenation()
-        # elif answer == "4":
-        #     self.run_with_epi_spacial()
-        # else: 
-        #     print("no good option, exiting.")
-        #     exit(0)
+        self.functions_dict[int(answer)][1]()
+       
     
     '''function runs automation of all epigenetics combinations, onyl seq, and bp epigeneitcs represantion.'''
-    def auto_run(self):
-        self.run_only_seq()
-        self.run_with_epigenetic_features()
-        if self.ml_type == "ML": # machine learing runs bp+seq but not seperate epi
+    def auto_run(self, function_number):
+        validate_dictionary_input(function_number, self.functions_dict) # validate input by data method dictionary
+        self.functions_dict[function_number][1]()
+        if self.ml_type == "ML" and function_number == 3: # machine learing runs bp+seq but not seperate epi
             self.run_with_bp_represenation()
-        else : self.run_with_epi_spacial() # deep learning run seperate epi
-
-    def run(self, output_name):
-        self.init_runs()
+        elif function_number == 4 :
+            self.run_with_epi_spacial() # deep learning run seperate epi
+    '''auto_run is a parameter to run the model automaticly or manualy
+    its a dictionary with the following: key- run_values, values - tuple of boolean and number of the function to run.'''
+    def run(self, auto_run_bool, function_number ,output_name):
+        if not self.init:
+            self.setup_runner()
         self.out_put_name = output_name
-        answer = input("press:\n1. auto\n2. manual\n")
-        if answer == "1":
-            self.auto_run()
-        elif answer == "2":
-            self.run_manualy()
+        if auto_run_bool:
+            self.auto_run(function_number)
         else:
-            print("no good option, exiting.")
-            exit(0)
+            self.run_manualy()
+        print("Done")  
 
 
 ## Epigenetic features helper

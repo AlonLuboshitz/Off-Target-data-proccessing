@@ -31,8 +31,12 @@ def create_data_frames_for_features(data, if_data_reproducibility):
     # set unquie guide identifier, sorted if reproducibilty is need with data spliting
     if if_data_reproducibility:
         guides = sorted(set(data_table[TARGET_COLUMN])) 
-    else : guides = set(data_table[TARGET_COLUMN])
-     # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
+    else : 
+        guides = list(set(data_table[TARGET_COLUMN]))
+        print(guides)
+        guides = shuffle(guides)
+        print(guides)
+    # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
     df_dict = {grna: group for grna, group in data_table.groupby(TARGET_COLUMN)}
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
@@ -58,6 +62,7 @@ def generate_features_and_labels(data_table, manager, encoded_length, bp_presena
             big_wig_data = get_bp_for_one_hot_enconded(data = guide_data_frame, encoded_length = encoded_length, manager = manager, bp_presenation = bp_presenation)
             seq_info = seq_info.astype(np.float32) 
             x_data = seq_info + big_wig_data
+           
         elif if_seperate_epi: # seperate vector to epigenetic by window size
             epi_window_data = get_seperate_epi_by_window(data = guide_data_frame, epigenetic_window_size = epigenetic_window_size, manager = manager)
             seq_info = seq_info.astype(np.float32)
@@ -95,7 +100,7 @@ def get_bp_for_one_hot_enconded(data, encoded_length, manager, bp_presenation):
     for index, (chrom, start, end) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN], data[END_COLUMN])):
         if not (end - start) == 23:
             end = start + 23
-            bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end,encoded_length=encoded_length,bp_presenation=bp_presenation)
+        bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end,encoded_length=encoded_length,bp_presenation=bp_presenation)
     bigwig_info = bigwig_info.astype(np.float32)
     return bigwig_info
 '''Args: 1. gRNA : data frame, 2. encoded length - as epi window size , 3. file manager with epigenetic files

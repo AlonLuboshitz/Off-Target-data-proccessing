@@ -1,8 +1,10 @@
 ## script for analysis of ml results
 import pandas as pd
 import numpy as np
+import os
 from scipy.stats import wilcoxon
 from scipy.stats import mannwhitneyu
+
 '''
 wilxocon test for paired samples, x-y
 recomendation is to give the function only the x-y difrences vector.'''
@@ -93,5 +95,79 @@ def remove_main_sheet(sheets_dict,ml_path):
     else:
         print(f"Key '{main_sheet_name}' not found in the dictionary.")
     return temp_dict,main_sheet_name
+## REPRODUCIBILITY ANALYSIS
+'''Given a path for a folder eather DATA REPRODUCIBILITY or MODEL REPRODUCIBILITY,
+iterate on the files and do the following:
+1. DATA REPRODUCIBILITY: the data spliting is the same over all replicates
+    a) Each file contains auroc,auprc,n-rank for k data splits.
+    b) Calculate the mean and std for each data split over all files.
+    c) Calculate the mean and std for all splits over all files.
+2. MODEL REPRODUCIBILITY: the model initialization is the same over all replicates
+    a) For each file (replicate) calculate the mean and std of the auroc and auprc
+    b) Calculate the mean and std over all the given files
+    '''
+def extract_reproducibility_data(reproducibility_data_paths, k_splits, model_name, repro_type):
+    # 1. Init np arrays from the shape (num_files,num_splits) in a dictionary
+    keys = ["Auroc","Auprc","N-rank"]
+    rows = len(reproducibility_data_paths)
+    results_dict = {key: np.zeros((rows,k_splits)) for key in keys}
+    
+    # 2. Iterate on each file and append the results to the np arrays row wise  
+    for i,path in enumerate(reproducibility_data_paths):
+        # 2.1. Read the data
+        data = pd.read_csv(path)
+        # 2.2. Append the data to the np arrays
+        for key in keys:
+            results_dict[key][i,]= data[key].values
+        
+    # 3. Add to each row its mean. Add to each column its mean and std
+    for key in keys:
+        results_dict[key] = get_auroc_auprc_nrank_mean_std(results_dict[key])
+        write_reproducibility_results_to_file(results_dict[key],model_name,repro_type,key,k_splits)
+''' Given a np array where each row is a file data, each colum is a data split data
+return the mean and std for each column (data split), and calculate the mean and std
+for all rows (all replicates) and calculate mean and std of these. '''       
+def get_auroc_auprc_nrank_mean_std(np_array ):
+    # 1. Calculate the mean and std for each row (replicate) and add it to the end of the raw
+    mean_replicate = np.mean(np_array,axis=1)
+    std_replicate = np.std(np_array,axis=1)
+    # 2. Add the mean and std to the end of the row
+    np_array = np.column_stack((np_array,mean_replicate))
+    np_array = np.column_stack((np_array,std_replicate))
+    # 3. Calculate the mean and std for each column (data split)
+    mean_data_split = np.mean(np_array,axis=0)
+    std_data_split = np.std(np_array,axis=0)
+    # 4. Add the mean and std to new row each
+    np_array = np.row_stack((np_array,mean_data_split))
+    np_array = np.row_stack((np_array,std_data_split))
+    
+    return np_array
+    
+def write_reproducibility_results_to_file(np_results, model_name, repro_type, key,k_splits):
+    file_name = f"{model_name}_{key}_{repro_type}_Reproducibility_summary.csv"
+    # Header is the number of columns -1 and mean
+    header_str = ""
+    for i in range(k_splits):
+        header_str = header_str + f'{i+1},'
+    header_str = header_str +  "Mean,Std" 
+    np.savetxt(file_name, np_results, delimiter=',', fmt='%.5f', header=header_str, comments='')
+def create_paths(folder):
+        paths = []
+        for path in os.listdir(folder):
+            paths.append(os.path.join(folder,path))
+        return paths
+
+
+    
 if __name__ == "__main__":
-    extract_ml_data("/home/alon/masterfiles/pythonscripts/LOGREG_summary.xlsx")
+    models_repro_path = {"CNN":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/CNN",
+                        "XGBOOST":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/XGBOOST",
+                        "LOGREG":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/LOGREG"}
+    data_path = {"CNN":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Data/5K/CNN"}
+    models_repro_paths = {model : create_paths(models_repro_path[model]) for model in models_repro_path.keys()}
+    data_paths = {model : create_paths(data_path[model]) for model in data_path.keys()}
+    for model,paths in models_repro_paths.items():
+       extract_reproducibility_data(reproducibility_data_paths=paths, k_splits=5, model_name=model, repro_type="model")
+    for model,paths in data_paths.items():
+        extract_reproducibility_data(reproducibility_data_paths=paths, k_splits=5, model_name=model, repro_type="data")
+       

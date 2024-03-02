@@ -1,21 +1,25 @@
 
 
-import numpy as np
+
 from xgboost import XGBClassifier
 from sklearn.linear_model import LogisticRegression
 
 from tensorflow import keras
 from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape
 
-
+## No random state is initialized, np.random.seed(42) is used in the model runner file if needed
 def get_cnn(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number):
         return create_convolution_model(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number)   
-def get_xgboost_cw(scale_pos_weight):
-        return XGBClassifier(scale_pos_weight=scale_pos_weight,random_state=42, objective='binary:logistic',n_jobs=-1) 
-def get_xgboost():
-        return XGBClassifier(random_state=42, objective='binary:logistic',n_jobs=-1)
-def get_logreg():
-        return LogisticRegression(random_state=42,n_jobs=-1)
+def get_xgboost_cw(scale_pos_weight, random_state, if_data_reproducibility):
+    sub_sample = 1
+    if if_data_reproducibility:
+        sub_sample = 0.5
+
+    return XGBClassifier(random_state=random_state,subsample=sub_sample,scale_pos_weight=scale_pos_weight, objective='binary:logistic',n_jobs=-1) 
+def get_xgboost(random_state):
+        return XGBClassifier(random_state=random_state, objective='binary:logistic',n_jobs=-1)
+def get_logreg(random_state):
+        return LogisticRegression(random_state=random_state,n_jobs=-1)
 def create_conv_seq_layers(seq_input,sequence_length,bp_presenation):
     seq_input_reshaped = Reshape((sequence_length, bp_presenation)) (seq_input)
 
