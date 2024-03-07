@@ -47,17 +47,9 @@ def run_reproducibility_model_and_data(run_models, model_name, file_manager, k_t
 '''Given the number of models to run, function will init an file manager
 set an enmsbel output and create a list of guides from the guides file via the given list index
 then it will create an output path and run N models without the tested guides and save them into the path.'''
-def run_ensmbel(n_modles):
-    from Server_constants import ENSMBEL, ENSMBEL_GUIDES
-    file_manager = init_file_management()
-    file_manager.set_ensmbel_output_path(ENSMBEL)
-    answer = input("Choose a guide splits: 0,1,2,3,4\n")
-    answer = int(answer)
-    guides = create_guides_list(ENSMBEL_GUIDES, answer)
-    output_path = file_manager.create_ensemble_train_folder(answer + 1)
-    runner = run_models(file_manager)
-    runner.setup_ensmbel_runner()
-    runner.create_ensemble(n_modles, output_path, guides)
+
+    
+    
 
 def test_enmsbel():
     from Server_constants import ENSMBEL, ENSMBEL_GUIDES, ENSMBEL_RESULTS
@@ -73,9 +65,22 @@ def test_enmsbel():
     # add ensmbel number to ensmbel results path
     output_path = os.path.join(ENSMBEL_RESULTS,f'{ENSMBEL.split("/")[-1]}.csv')
     write_2d_array_to_csv(results, output_path, header)
-
+'''Given number of model for each ensmbel and the amount of ensembels create N ensembels with N models'''
+def create_n_ensembles(n, n_modles):
+    from Server_constants import ENSMBEL, ENSMBEL_GUIDES
+    file_manager = init_file_management()
+    file_manager.set_ensmbel_output_path(ENSMBEL)
+    guides = create_guides_list(ENSMBEL_GUIDES, 0)
+    runner = run_models(file_manager)
+    runner.setup_ensmbel_runner()
+    for i in range(2,n+1):
+        output_path = file_manager.create_ensemble_train_folder(i)
+        runner.create_ensemble(n_modles, output_path, guides)
+        
 def main():
-    test_enmsbel()
+    
+
+    create_n_ensembles(10, 10)
     
 
    

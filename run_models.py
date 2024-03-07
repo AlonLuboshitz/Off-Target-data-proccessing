@@ -69,13 +69,14 @@ class run_models:
     def set_data_reproducibility(self, bool):
         self.data_reproducibility = bool
     def set_model_reproducibility(self, bool):
-        self.random_state = np.random.randint(100) # set random state for model
         self.model_reproducibility = bool
         if self.model_reproducibility:
             if self.ml_type == "DEEP":
                 self.set_deep_seeds()
             else : 
                 self.set_ml_seeds()
+        else : # set randomness
+            self.set_random_seeds()
     '''Set seeds for reproducibility'''
     def set_deep_seeds(self):
         tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
@@ -413,16 +414,18 @@ class run_models:
         x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
         #new_path = self.create_ensemble_train_folder(output_path, i, guides_test_list) # create folder for
         for j in range(n_models):
-            # no model repro needed as diffrenet initiazlations needed
+            self.set_random_seeds()
             classifier = self.train_model(X_train=x_train,y_train=y_train)
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
             classifier.save(temp_path)
+    def write_guides(self):
         # keep test guides via indexes to compare with given test guides
-        tested_guides = [guides[i] for i in range(len(guides)) if i not in guides_idx]
-        temp_path = os.path.join(output_path,"tested_guides.txt")
-        with open(temp_path, "w") as file:
-            for guide in tested_guides:
-                file.write(guide + ", ")
+        # tested_guides = [guides[i] for i in range(len(guides)) if i not in guides_idx]
+        # temp_path = os.path.join(output_path,"tested_guides.txt")
+        # with open(temp_path, "w") as file:
+        #     for guide in tested_guides:
+        #         file.write(guide + ", ")   
+        pass
     def test_ensmbel(self, ensembel_model_list, tested_guide_list):
         self.set_only_seq_booleans()
         # Get data
