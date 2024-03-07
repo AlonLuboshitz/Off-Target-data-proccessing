@@ -160,14 +160,14 @@ def create_paths(folder):
 
     
 if __name__ == "__main__":
-    models_repro_path = {"CNN":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/CNN",
-                        "XGBOOST":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/XGBOOST",
-                        "LOGREG":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/LOGREG"}
-    data_path = {"CNN":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Data/5K/CNN"}
-    models_repro_paths = {model : create_paths(models_repro_path[model]) for model in models_repro_path.keys()}
+    # models_repro_path = {"CNN":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/CNN",
+    #                     "XGBOOST":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/XGBOOST",
+    #                     "LOGREG":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/LOGREG"}
+    data_path = {"LOGREG":"/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Reproducibility/vs_change/Data/LOGREG"}
+    #models_repro_paths = {model : create_paths(models_repro_path[model]) for model in models_repro_path.keys()}
     data_paths = {model : create_paths(data_path[model]) for model in data_path.keys()}
-    for model,paths in models_repro_paths.items():
-       extract_reproducibility_data(reproducibility_data_paths=paths, k_splits=5, model_name=model, repro_type="model")
+    # for model,paths in models_repro_paths.items():
+    #    extract_reproducibility_data(reproducibility_data_paths=paths, k_splits=5, model_name=model, repro_type="model")
     for model,paths in data_paths.items():
         extract_reproducibility_data(reproducibility_data_paths=paths, k_splits=5, model_name=model, repro_type="data")
        

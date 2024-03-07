@@ -9,7 +9,7 @@ FORCE_USE_CPU = False
 from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
-from input_validation import validate_dictionary_input
+from utilities import validate_dictionary_input
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 from test import keep_groups
@@ -21,8 +21,9 @@ import logging
 import os
 if FORCE_USE_CPU:
     os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
-#os.environ["CUDA_VISIBLE_DEVICES"]="1"  
+os.environ["CUDA_VISIBLE_DEVICES"]="1"  
 import tensorflow as tf
+
 logger = tf.get_logger()
 logger.setLevel(logging.ERROR)
 
@@ -58,7 +59,12 @@ class run_models:
         self.set_model_reproducibility(False)
         self.set_functions_dict()
         self.init = True
-
+    def setup_ensmbel_runner(self):
+        self.set_model()
+        self.set_over_sampling()
+        self.set_data_reproducibility(False)
+        self.set_model_reproducibility(False)
+        self.init = True
     '''Set reproducibility for data and model'''
     def set_data_reproducibility(self, bool):
         self.data_reproducibility = bool
@@ -238,7 +244,7 @@ class run_models:
     '''1. GET MODEL'''
     def get_model(self):
         if self.ml_name == "LOGREG":
-            return get_logreg(self.random_state)
+            return get_logreg(self.random_state, self.data_reproducibility)
         elif self.ml_name == "XGBOOST":
             return get_xgboost(self.random_state)
         elif self.ml_name == "XGBOOST_CW":
@@ -268,7 +274,29 @@ class run_models:
             y_scores_probs = classifier.predict_proba(X_test)
             y_pos_scores_probs = y_scores_probs[:,1] # probalities for positive label (1 column for positive)
         return y_pos_scores_probs
-    
+    ## Train model: if Deep learning set class wieghting and extract features
+    def train_model(self,X_train, y_train):
+        classifier = self.get_model()
+        if self.ml_type == "DEEP":
+            self.set_hyper_params_class_wieghting(y_train= y_train)
+            if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)): 
+                # if seperate epi/ only_seq=bp=false --> features added to seq encoding
+                # extract featuers/epi window from sequence enconding 
+                X_train = extract_features(X_train, self.encoded_length)
+            classifier.fit(X_train,y_train,**self.hyper_params)
+        else :
+            classifier.fit(X_train,y_train)
+        return classifier
+    ## Predict on classifier
+    def predict_with_model(self, classifier, X_test):
+        if self.ml_type == "DEEP":
+            if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)):
+                X_test = extract_features(X_test,self.encoded_length)
+            y_pos_scores_probs = classifier.predict(X_test,verbose = 2)
+        else :
+            y_scores_probs = classifier.predict_proba(X_test)
+            y_pos_scores_probs = y_scores_probs[:,1]
+        return y_pos_scores_probs
 
     ## RUNNERS:
     # LEAVE OUT OUT
@@ -364,7 +392,10 @@ class run_models:
         self.set_inverase_ratio(tps_tns)
         self.set_model_reproducibility(self.model_reproducibility)
         # predict and evaluate model
-        y_scores_probs = self.predict_with_model(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+        classifier = self.train_model(X_train=x_train,y_train=y_train)
+        
+        y_scores_probs = self.predict_with_model(classifier=classifier,X_test=x_test)
+       
         auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
         print(f"Ith: {i_iter}\{iterations} split is done")
@@ -373,6 +404,55 @@ class run_models:
         if auroc <= 0.5:
             self.write_scores(key,y_test,y_scores_probs,auroc)  
     
+    ## ENSEMBLE:
+    def create_ensemble(self, n_models, output_path, guides_test_list):
+        self.set_only_seq_booleans()
+        # Get data
+        x_features, y_labels, guides = self.get_features()
+        guides_idx = self.keep_train_guides_indices(guides, guides_test_list) # keep only the train guides indexes
+        x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
+        #new_path = self.create_ensemble_train_folder(output_path, i, guides_test_list) # create folder for
+        for j in range(n_models):
+            # no model repro needed as diffrenet initiazlations needed
+            classifier = self.train_model(X_train=x_train,y_train=y_train)
+            temp_path = os.path.join(output_path,f"model_{j+1}.keras")
+            classifier.save(temp_path)
+        # keep test guides via indexes to compare with given test guides
+        tested_guides = [guides[i] for i in range(len(guides)) if i not in guides_idx]
+        temp_path = os.path.join(output_path,"tested_guides.txt")
+        with open(temp_path, "w") as file:
+            for guide in tested_guides:
+                file.write(guide + ", ")
+    def test_ensmbel(self, ensembel_model_list, tested_guide_list):
+        self.set_only_seq_booleans()
+        # Get data
+        x_features, y_labels, guides = self.get_features()
+        guides_idx = self.keep_test_guide_indices(guides, tested_guide_list) # keep only the test guides indexes
+        x_test, y_test = self.split_by_indexes(x_features, y_labels, guides_idx) # split by test indexes
+        # init 2d array for y_scores 
+        # Row - model, Column - probalities
+        y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
+        for index,model_path in enumerate(ensembel_model_list): # iterate on models and predict y_scores
+            classifier = tf.keras.models.load_model(model_path)
+            model_predictions = self.predict_with_model(classifier=classifier,X_test=x_test).ravel() # predict and flatten to 1d
+            y_scores_probs[index] = model_predictions
+        return y_scores_probs, y_test
+    def keep_train_guides_indices(self, guides, test_guides):
+        return [idx for idx, guide in enumerate(guides) if guide not in test_guides]
+    def keep_test_guide_indices(self,guides, test_guides):
+        return [idx for idx, guide in enumerate(guides) if guide in test_guides]
+    
+    def split_by_indexes(self, x_features, y_labels, indices):
+        x_, y_ = [], [] 
+        for idx in indices:
+            x_.append(x_features[idx])
+            y_.append(y_labels[idx])
+        # Concatenate into np array and flatten the y arrays
+        x_ = np.concatenate(x_, axis= 0)
+        y_ = np.concatenate(y_, axis= 0).ravel()
+        return x_, y_
+    
+
     ## RUN TYPES:
     # only seq
         

@@ -18,8 +18,10 @@ def get_xgboost_cw(scale_pos_weight, random_state, if_data_reproducibility):
     return XGBClassifier(random_state=random_state,subsample=sub_sample,scale_pos_weight=scale_pos_weight, objective='binary:logistic',n_jobs=-1) 
 def get_xgboost(random_state):
         return XGBClassifier(random_state=random_state, objective='binary:logistic',n_jobs=-1)
-def get_logreg(random_state):
-        return LogisticRegression(random_state=random_state,n_jobs=-1)
+def get_logreg(random_state,if_data_reproducibility):
+    if if_data_reproducibility:
+        return LogisticRegression(random_state=random_state,solver='sag',n_jobs=-1)
+    return LogisticRegression(random_state=random_state,n_jobs=-1)
 def create_conv_seq_layers(seq_input,sequence_length,bp_presenation):
     seq_input_reshaped = Reshape((sequence_length, bp_presenation)) (seq_input)
 

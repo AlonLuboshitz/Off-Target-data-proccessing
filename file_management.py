@@ -29,6 +29,8 @@ class File_management:
         return self.bigwig_amount
     def get_number_of_bed_files(self):
         return self.bed_files_amount
+    def get_ensmbel_path(self):
+        return self.ensmbel_output_path
     def get_bigwig_files(self):
         if self.bigwig_amount > 0 :
             return self.bigwig_files.copy() # keep original list
@@ -41,11 +43,22 @@ class File_management:
         if len(self.glb_max_dict) > 0 :
             return self.glb_max_dict
         else : raise RuntimeError("No max values setted for bigwig files")
+    def get_ensmbel_models_path_list(self):
+        if self.ensmbel_path:
+            return self.create_paths(self.ensmbel_path)
+        else : raise RuntimeError("No ensmbel path setted")
     
     ## Setters:
 
     def set_model_results_output_path(self, output_path):
+        self.validate_path_exsits(output_path)
         self.model_results_output_path = output_path
+    def set_ensmbel_output_path(self, output_path):
+        self.validate_path_exsits(output_path)
+        self.ensmbel_output_path = output_path
+    def set_ensmbel_path(self, ensmbel_path):
+        self.validate_path_exsits(ensmbel_path)
+        self.ensmbel_path = ensmbel_path
     
     def set_bigwig_files(self,bw_list):
         flag = False
@@ -130,7 +143,17 @@ class File_management:
         output_path = os.path.join(self.model_results_output_path,f'{model_name}.csv')
         # save results to file
         results_table.to_csv(output_path)
+    def create_ensemble_train_folder(self, i_ensmbel):
+        output_path = os.path.join(self.ensmbel_output_path,f'ensemble_{i_ensmbel}')
+        # create dir output_path if not exsits
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        return output_path
         
+    ## Validations
+    '''Function to validate the paths'''
+    def validate_path_exsits(self,path):
+        assert os.path.exists(path), f"{path}Path does not exist"
     '''dtor'''
     def __del__(self):
         self.close_big_wig([])
