@@ -1,7 +1,7 @@
 from Server_constants import   EPIGENETIC_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_CASO_EPI,CHANGESEQ_GS_EPI, DATA_PATH, DATA_REPRODUCIBILITY, MODEL_REPRODUCIBILITY, ALL_REPRODUCIBILITY
 from file_management import File_management
 from run_models import run_models
-from utilities import validate_dictionary_input, create_guides_list, write_2d_array_to_csv
+from utilities import validate_dictionary_input, create_guides_list, write_2d_array_to_csv, create_paths, keep_only_folders
 from evaluation import eval_all_combinatorical_ensmbel
 import os
 
@@ -47,40 +47,41 @@ def run_reproducibility_model_and_data(run_models, model_name, file_manager, k_t
 '''Given the number of models to run, function will init an file manager
 set an enmsbel output and create a list of guides from the guides file via the given list index
 then it will create an output path and run N models without the tested guides and save them into the path.'''
-
-    
-    
-
-def test_enmsbel():
+def test_ensmbel_partition():
     from Server_constants import ENSMBEL, ENSMBEL_GUIDES, ENSMBEL_RESULTS
     file_manager = init_file_management()
-    file_manager.set_ensmbel_path(ENSMBEL)
-    models_path_list = file_manager.get_ensmbel_models_path_list()
-    guides = create_guides_list(ENSMBEL_GUIDES, 0)
-    runner = run_models(file_manager)
-    runner.setup_ensmbel_runner()
-    y_scores, y_test = runner.test_ensmbel(models_path_list, guides)
+    ensmbels_paths = create_paths(ENSMBEL)  # Create paths for each ensmbel in partition
+    ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
+    guides = create_guides_list(ENSMBEL_GUIDES, 0)  # Create guides list    
+    runner = run_models(file_manager) # Init runner
+    runner.setup_ensmbel_runner() # Setup runner
+    for ensmbel in ensmbels_paths:
+        test_enmsbel(runner, ensmbel, guides, ENSMBEL_RESULTS)
+
+def test_enmsbel(runner, ensmbel_path, test_guides, output_path):
+    models_path_list = create_paths(ensmbel_path)
+    y_scores, y_test = runner.test_ensmbel(models_path_list, test_guides)
     header = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]
     results = eval_all_combinatorical_ensmbel(y_scores, y_test)
     # add ensmbel number to ensmbel results path
-    output_path = os.path.join(ENSMBEL_RESULTS,f'{ENSMBEL.split("/")[-1]}.csv')
-    write_2d_array_to_csv(results, output_path, header)
+    temp_output_path = os.path.join(output_path,f'{ensmbel_path.split("/")[-1]}.csv')
+    write_2d_array_to_csv(results, temp_output_path, header)
 '''Given number of model for each ensmbel and the amount of ensembels create N ensembels with N models'''
-def create_n_ensembles(n, n_modles):
+def create_n_ensembles(n_ensembles, n_modles):
     from Server_constants import ENSMBEL, ENSMBEL_GUIDES
     file_manager = init_file_management()
     file_manager.set_ensmbel_output_path(ENSMBEL)
     guides = create_guides_list(ENSMBEL_GUIDES, 0)
     runner = run_models(file_manager)
     runner.setup_ensmbel_runner()
-    for i in range(2,n+1):
+    for i in range(1,n_ensembles+1):
         output_path = file_manager.create_ensemble_train_folder(i)
         runner.create_ensemble(n_modles, output_path, guides)
         
 def main():
     
 
-    create_n_ensembles(10, 10)
+    create_n_ensembles(10,10)
     
 
    

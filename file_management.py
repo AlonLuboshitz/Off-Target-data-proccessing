@@ -1,5 +1,6 @@
 import os
 import pyBigWig
+from utilities import create_paths
 #import pybedtools
 
 class File_management:
@@ -45,7 +46,7 @@ class File_management:
         else : raise RuntimeError("No max values setted for bigwig files")
     def get_ensmbel_models_path_list(self):
         if self.ensmbel_path:
-            return self.create_paths(self.ensmbel_path)
+            return create_paths(self.ensmbel_path)
         else : raise RuntimeError("No ensmbel path setted")
     
     ## Setters:
@@ -81,17 +82,12 @@ class File_management:
 
 
     # Functions to create paths from folders
-    '''Create paths list from folder'''
-    def create_paths(self,folder):
-        paths = []
-        for path in os.listdir(folder):
-            paths.append(os.path.join(folder,path))
-        return paths
+    
 
     '''Create pyBigWig objects list of the bigwig files'''
     def create_bigwig_files_objects(self):
         self.bigwig_files = []
-        for path in self.create_paths(self.bigwig_folder_path):
+        for path in create_paths(self.bigwig_folder_path):
             name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
             try:
                 name_object_tpl = (name,pyBigWig.open(path))
@@ -102,7 +98,7 @@ class File_management:
         
     # def create_bed_files_objects(self):
     #     self.bed_files = []
-    #     for path in self.create_paths(self.epigenetics_folder_path):
+    #     for path in create_paths(self.epigenetics_folder_path):
     #         name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
     #         try:
     #             name_object_tpl = (name,pybedtools.BedTool(path))
