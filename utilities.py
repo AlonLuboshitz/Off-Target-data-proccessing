@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 '''This function is used to validate the input from the user.
  It checks if the input is a valid number and if it is within the range of the list of options
@@ -25,3 +26,15 @@ def write_2d_array_to_csv(np_array, file_path, header):
     if len(header) != np_array.shape[1]:
         raise Exception("header must be the same length as the number of columns in the np_array") 
     np.savetxt(file_path, np_array, delimiter=',', fmt='%.5f', header=','.join(header), comments='')
+
+## FILES
+    
+'''Create paths list from folder'''
+def create_paths(folder):
+    paths = []
+    for path in os.listdir(folder):
+        paths.append(os.path.join(folder,path))
+    return paths
+'''Given list of paths return only folders from the list'''
+def keep_only_folders(paths_list):
+    return [path for path in paths_list if os.path.isdir(path)]
