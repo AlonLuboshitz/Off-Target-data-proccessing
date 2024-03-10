@@ -410,11 +410,12 @@ class run_models:
         self.set_only_seq_booleans()
         # Get data
         x_features, y_labels, guides = self.get_features()
+        print(guides_test_list)
         guides_idx = self.keep_train_guides_indices(guides, guides_test_list) # keep only the train guides indexes
         x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
         #new_path = self.create_ensemble_train_folder(output_path, i, guides_test_list) # create folder for
         for j in range(n_models):
-            # self.set_random_seeds()
+            self.set_random_seeds()
             classifier = self.train_model(X_train=x_train,y_train=y_train)
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
             classifier.save(temp_path)

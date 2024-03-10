@@ -1,7 +1,7 @@
 from Server_constants import   EPIGENETIC_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_CASO_EPI,CHANGESEQ_GS_EPI, DATA_PATH, DATA_REPRODUCIBILITY, MODEL_REPRODUCIBILITY, ALL_REPRODUCIBILITY
 from file_management import File_management
 from run_models import run_models
-from utilities import validate_dictionary_input, create_guides_list, write_2d_array_to_csv, create_paths, keep_only_folders
+from utilities import validate_dictionary_input, create_guides_list, write_2d_array_to_csv, create_paths, keep_only_folders, add_row_to_np_array
 from evaluation import eval_all_combinatorical_ensmbel
 import os
 
@@ -50,27 +50,35 @@ then it will create an output path and run N models without the tested guides an
 def test_ensmbel_partition():
     from Server_constants import ENSMBEL, ENSMBEL_GUIDES, ENSMBEL_RESULTS
     file_manager = init_file_management()
+    file_manager.set_ensmbel_result_path(ENSMBEL_RESULTS) # Set ensmbel results path
+    score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder() # Create score and combi folders
     ensmbels_paths = create_paths(ENSMBEL)  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
     guides = create_guides_list(ENSMBEL_GUIDES, 0)  # Create guides list    
     runner = run_models(file_manager) # Init runner
     runner.setup_ensmbel_runner() # Setup runner
     for ensmbel in ensmbels_paths:
-        test_enmsbel(runner, ensmbel, guides, ENSMBEL_RESULTS)
+        test_enmsbel(runner, ensmbel, guides, score_path, combi_path)
 
-def test_enmsbel(runner, ensmbel_path, test_guides, output_path):
+def test_enmsbel(runner, ensmbel_path, test_guides, score_path, combi_path):
     models_path_list = create_paths(ensmbel_path)
+    models_path_list.sort(key=lambda x: int(x.split(".")[-2].split("_")[-1]))  # Sort model paths by models number
     y_scores, y_test = runner.test_ensmbel(models_path_list, test_guides)
-    header = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]
+    # Save raw scores in score path
+    temp_output_path = os.path.join(score_path,f'{ensmbel_path.split("/")[-1]}.csv')
+    y_scores_with_test = add_row_to_np_array(y_scores, y_test)  
+    
+    write_2d_array_to_csv(y_scores_with_test,temp_output_path,[])
+    # Evaluate combi results and save to combi path
     results = eval_all_combinatorical_ensmbel(y_scores, y_test)
-    # add ensmbel number to ensmbel results path
-    temp_output_path = os.path.join(output_path,f'{ensmbel_path.split("/")[-1]}.csv')
+    header = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]
+    temp_output_path = os.path.join(combi_path,f'{ensmbel_path.split("/")[-1]}.csv')
     write_2d_array_to_csv(results, temp_output_path, header)
 '''Given number of model for each ensmbel and the amount of ensembels create N ensembels with N models'''
 def create_n_ensembles(n_ensembles, n_modles):
     from Server_constants import ENSMBEL, ENSMBEL_GUIDES
     file_manager = init_file_management()
-    file_manager.set_ensmbel_output_path(ENSMBEL)
+    file_manager.set_ensmbel_train_path(ENSMBEL)
     guides = create_guides_list(ENSMBEL_GUIDES, 0)
     runner = run_models(file_manager)
     runner.setup_ensmbel_runner()
@@ -80,8 +88,7 @@ def create_n_ensembles(n_ensembles, n_modles):
         
 def main():
     
-
-    create_n_ensembles(10,10)
+    test_ensmbel_partition()
     
 
    
