@@ -9,6 +9,7 @@ import os
 from pybedtools import BedTool
 #from common_variables import 
 from sklearn.utils import shuffle
+from file_management import File_management
 from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN
 ## in common variables class there are columns for: 
 '''1. TARGET - gRNA seq column
@@ -144,6 +145,26 @@ def seq_to_one_hot(sequence, seq_guide,encoded_length,bp_presenation):
             except ValueError:  # Non-ATCG base found
                 pass
     return onehot
+'''1.2 Reverse one hot encoding to sequence'''
+def reversed_ont_hot_to_seq(one_hot, bp_presenation):
+    bases = ['A', 'T', 'C', 'G']
+    sequence = ''
+    guide_seq = ''
+    for i in range(int(len(one_hot) / bp_presenation)):
+        base_indices = np.nonzero(one_hot[i * bp_presenation:i * bp_presenation + 4])[0] # get indices of 1's
+        # Check mismatchess
+        if one_hot[i*bp_presenation + 4] == 1: # mismatch
+            # First base is ots second is gRNA
+            sequence += bases[base_indices[0]]
+            guide_seq += bases[base_indices[1]]
+        elif one_hot[i*bp_presenation + 5] == 1: # mismatch
+             # First base is gRNA second is ots
+            sequence += bases[base_indices[1]]
+            guide_seq += bases[base_indices[0]]
+        else : # no mismatch add to both sequences the same value
+            sequence += bases[base_indices[0]]
+            guide_seq += bases[base_indices[0]]
+    return sequence, guide_seq
 
 '''2. bigwig (base pair epigentics) to one hot
 Fill vector sized |encoded length| with values from bigwig file. 
@@ -325,3 +346,30 @@ def get_tp_tn(y_test,y_train):
         print("error")
     tp_ratio = tp_test / (tp_test + tn_test)
     return (tp_ratio,tp_test,tn_test,tp_train,tn_train)
+
+if __name__ == "__main__":
+    from Server_constants import EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH
+    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH)
+    x_features, y_labels, guides = generate_features_and_labels(file_manager.get_merged_data_path(), file_manager,
+                                                                 23*6, 6, False, True, False, 2000, [], False)
+    # Check if there are duplicates in x_features
+    x_features = np.concatenate(x_features, axis=0)
+    unique_ele,counts = np.unique(x_features, axis=0, return_counts=True)
+    duplicates = unique_ele[counts > 1]
+    unuiq = len(unique_ele)
+    not_un = len(x_features)
+    print("len(duplicates):", len(duplicates))
+    print("not_un - unuiq:", not_un - unuiq)
+    print("Unique elements:", unique_ele)
+    print("Counts:", counts)
+    otss = []
+    if unuiq < not_un:
+        print("There are duplicates in x_features")
+        for ele in duplicates:
+            otss.append(reversed_ont_hot_to_seq(ele, 6))
+    # save otss to txt file
+    with open("otss.txt", "w") as file:
+        for ots in otss:
+            file.write(f"OTS: {ots[0]}, gRNA: {ots[1]}\n")
+    
+    

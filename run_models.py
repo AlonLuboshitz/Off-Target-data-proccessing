@@ -76,7 +76,7 @@ class run_models:
             else : 
                 self.set_ml_seeds()
         else : # set randomness
-            self.set_random_seeds()
+            self.set_random_seeds(False)
     '''Set seeds for reproducibility'''
     def set_deep_seeds(self):
         tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
@@ -85,9 +85,12 @@ class run_models:
     def set_ml_seeds(self):
         #np.random.seed(42) # set np seed
         self.random_state = 42
-    def set_random_seeds(self):
-        tf.random.set_seed(seed=int(time.time())) # Set seed for Python's random module (used by TensorFlow internally)
-        tf.keras.utils.set_random_seed(seed=int(time.time()))  # sets seeds for base-python, numpy and tf
+    def set_random_seeds(self,seed):
+        loc_seed =int(time.time())
+        if seed:
+            loc_seed = seed
+        tf.random.set_seed(loc_seed) # Set seed for Python's random module (used by TensorFlow internally)
+        tf.keras.utils.set_random_seed(loc_seed)  # sets seeds for base-python, numpy and tf
 
     ## Features booleans setters
     def set_only_seq_booleans(self):
@@ -225,7 +228,7 @@ class run_models:
     Use generate_features_and_lables from feature_engineering.py
     returns x_features, y_features, guide set'''
     def get_features(self): 
-        self.set_random_seeds()
+        self.set_random_seeds(False)
         return  generate_features_and_labels(self.file_manager.get_merged_data_path() , self.file_manager, self.encoded_length, self.bp_presntation, 
                                                                         self.if_bp, self.if_only_seq,self.if_seperate_epi,
                                                                         self.epigenetic_window_size,self.features_columns, self.data_reproducibility)
@@ -293,7 +296,7 @@ class run_models:
         if self.ml_type == "DEEP":
             if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)):
                 X_test = extract_features(X_test,self.encoded_length)
-            y_pos_scores_probs = classifier.predict(X_test,verbose = 2)
+            y_pos_scores_probs = classifier.predict(X_test,verbose = 2,batch_size=self.hyper_params['batch_size'])
         else :
             y_scores_probs = classifier.predict_proba(X_test)
             y_pos_scores_probs = y_scores_probs[:,1]
@@ -415,7 +418,7 @@ class run_models:
         x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
         #new_path = self.create_ensemble_train_folder(output_path, i, guides_test_list) # create folder for
         for j in range(n_models):
-            self.set_random_seeds()
+            self.set_random_seeds(seed = (j+1)) # repro but random init (j+1 not 0)
             classifier = self.train_model(X_train=x_train,y_train=y_train)
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
             classifier.save(temp_path)
