@@ -47,7 +47,15 @@ def evaluate_model( y_test, y_pos_scores_probs):
     # Calculate AUPRC
     auprc = average_precision_score(y_test, y_pos_scores_probs)
     return (auroc,auprc)
-
+def get_200_random_indices(n_models, k):
+    # Create a list of indices from 0 to n_models
+    indices = list(range(n_models))
+    all_indices = []
+    # Create 200 random combinations of k indices
+    for j in range(200):
+        random_indices = np.random.choice(indices, k, replace=False)
+        all_indices.append(random_indices)
+    return all_indices
 '''This function aasses all the possible combinatorical options for k given.
 N choose K options.
 For exmaple: if there are 10 models and n = 3, the function will average 
@@ -55,13 +63,14 @@ the results of all the possible combinations of 3 models out of 10.
 The function will return the average of the aurpc,auroc and std over all the combinations.'''
 def evaluate_n_combinatorical_models(n_models, n_y_scores, y_test, k):
     # Get list of tuples containing k indices out of n_models
-    indices_combinations = list(combinations(range(n_models), k))
-    indices_combinations = [list(indices) for indices in indices_combinations]
-    if k > 2 and k < n_models - 2: # To many combinations   
-        if n_models > 10: # Combinations to big check all.
-            random_indices = np.random.choice(range(len(indices_combinations)), 100, replace=False) # pick 100 random combinations
-            indices_combinations = [indices_combinations[i] for i in random_indices]
-
+    if n_models <= 10 or k==2: # more then 10 models to many combinations to validate
+        indices_combinations = list(combinations(range(n_models), k))
+        if len(indices_combinations) > 200: 
+            indices_combinations = get_200_random_indices(n_models, k)
+        indices_combinations = [list(indices) for indices in indices_combinations]
+    else :
+        indices_combinations = get_200_random_indices(n_models, k)    
+    
     # Create np array for each indice combination average auroc,auprc,n_rank
     # Row - combination, Column - auroc,auprc,n_rank
     all_combination_results = np.zeros(shape=(len(indices_combinations),3))
@@ -84,6 +93,7 @@ def eval_all_combinatorical_ensmbel(y_scores, y_test, header = ["Auroc","Auprc",
     all_combination_results = np.zeros(shape=(n_models,len(header)))
     # first row k = 1 no ensmble to calculate
     for k in range(1,n_models): # 1 
+        print(f"Check combinations of {k + 1} models out of {n_models}")
         k_combination_result = evaluate_n_combinatorical_models(n_models, y_scores, y_test, k + 1) 
         # Average the k_combination_results over the 2d dimension
         k_combination_result_mean = np.mean(k_combination_result, axis = 0)
@@ -93,28 +103,3 @@ def eval_all_combinatorical_ensmbel(y_scores, y_test, header = ["Auroc","Auprc",
         all_combination_results[k] = k_mean_and_std
     return all_combination_results
 
-'''Given a list of paths for csv files containing models predicitions scores
-extract the scores and combine them into one np array.
-The last line the file should contain the actual labels so each file should have the same labels'''
-def extract_scores_from_files(paths):
-    all_scores = []
-    for path in paths:
-        # Read the file
-        scores = np.genfromtxt(path, delimiter=',')
-        # Remove last row from scores - slice the last row
-        y_test = scores[-1]
-        scores = scores[:-1]
-        # Add the scores to the scores array
-        all_scores.append(scores)
-    # Concate the arrays
-    all_scores = np.concatenate(all_scores)
-    return all_scores,y_test
-# if __name__ == "__main__":
-#     import os
-#     from utilities import write_2d_array_to_csv
-#     path = ["/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_2/Scores/ensemble_1_20.csv"]
-#     scores,y_test = extract_scores_from_files(path)
-#     results = eval_all_combinatorical_ensmbel(scores, y_test)
-#     header = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]
-#     temp_output_path = "/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_2/Combi/ensemble_1_20.csv"
-#     write_2d_array_to_csv(results, temp_output_path, header)

@@ -57,3 +57,50 @@ def keep_only_folders(paths_list):
 '''Validate if path exists or not'''
 def validate_path(path):
     return os.path.exists(path)
+
+
+'''Given a list of paths for csv files containing models predicitions scores
+extract the scores and combine them into one np array.
+The last line the file should contain the actual labels so each file should have the same labels'''
+def extract_scores_from_files(paths):
+    all_scores = []
+    for path in paths:
+        # Read the file
+        scores = np.genfromtxt(path, delimiter=',')
+        # Remove last row from scores - slice the last row
+        y_test = scores[-1]
+        scores = scores[:-1]
+        # Add the scores to the scores array
+        all_scores.append(scores)
+    # Concate the arrays
+    all_scores = np.concatenate(all_scores)
+    return all_scores,y_test
+
+'''Given a list of paths for csv files containing ensembel combinatiorical results
+And given a list with model amounts in each ensmbel to check return a dictionary
+with the results of each combinatorical amount from each ensmbel'''
+def extract_combinatorical_results(ensmbel_combi_path, n_models_in_ensmbel_list):
+    ensmbels_combi_paths = create_paths(ensmbel_combi_path) 
+    # Create a dictinoary of 2d np arrays. key is number of models in the ensmbel and value is the results
+    all_n_models = {n_models: np.zeros(shape=(len(ensmbels_combi_paths),3)) for n_models in n_models_in_ensmbel_list}
+    
+    for idx,ensmbel in enumerate(ensmbels_combi_paths):
+        results = np.genfromtxt(ensmbel, delimiter=',') # read file
+        for n_models in n_models_in_ensmbel_list:
+            # n_models is the row number first row is header
+            n_results = results[n_models,:3] # 3 columns - auroc,auprc,n-rank
+            all_n_models[n_models][idx] = n_results 
+
+    return all_n_models
+if __name__ == "__main__":
+    list_50 = [i for i in range(2,51)]
+    list_40 = [i for i in range(2,41) ]
+    list_30 = [i for i in range(2,31)]
+    list_20 = [i for i in range(2,21)]
+    dict_50 = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_50/Combi",list_50)
+    dict_40 = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_40/Combi",list_40)
+    dict_30 = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_30/Combi",list_30)
+    dict_20 = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_20/Combi",list_20)
+    print(f'mean of 50: {np.mean(dict_50[50],axis=0)}\nmean of 40: {np.mean(dict_40[40],axis=0)}\nmean of 30: {np.mean(dict_30[30],axis=0)}\nmean of 20: {np.mean(dict_20[20],axis=0)}')
+    print(f'std of 50: {np.std(dict_50[50],axis=0)}\nstd of 40: {np.std(dict_40[40],axis=0)}\nstd of 30: {np.std(dict_30[30],axis=0)}\nstd of 20: {np.std(dict_20[20],axis=0)}')
+    print(f"std of 50,40,30,20 from 50\n{np.std(dict_50[50],axis=0)}\n{np.std(dict_50[40],axis=0)}\n{np.std(dict_50[30],axis=0)}\n{np.std(dict_50[20],axis=0)}")

@@ -34,14 +34,11 @@ def create_data_frames_for_features(data, if_data_reproducibility):
         guides = sorted(set(data_table[TARGET_COLUMN])) 
     else : 
         guides = list(set(data_table[TARGET_COLUMN]))
-        print(guides)
         guides = shuffle(guides)
-        print(guides)
-    # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
+        # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
     df_dict = {grna: group for grna, group in data_table.groupby(TARGET_COLUMN)}
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
-
     return (result_dataframes, guides)
 
 '''Args:
