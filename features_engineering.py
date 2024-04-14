@@ -11,6 +11,7 @@ from pybedtools import BedTool
 from sklearn.utils import shuffle
 from file_management import File_management
 from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN
+ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 ## in common variables class there are columns for: 
 '''1. TARGET - gRNA seq column
    2. OFFTARGET- off-target seq column
@@ -51,7 +52,7 @@ def generate_features_and_labels(data_table, manager, encoded_length, bp_presena
     splited_guide_data,guides = create_data_frames_for_features(data_table, if_data_reproducibility)
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
-   
+    ALL_INDEXES.clear() # clear indexes
     for guide_data_frame in splited_guide_data.values(): # for every guide get x_features by booleans
         # get seq info - represented in all!
         seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = bp_presenation) #int8
@@ -70,7 +71,7 @@ def generate_features_and_labels(data_table, manager, encoded_length, bp_presena
         else : # add features into 
             x_data = guide_data_frame[features_columns].values
             x_data = np.append(seq_info, x_data, axis = 1)
-        
+        ALL_INDEXES.append(guide_data_frame.index)
         x_data_all.append(x_data)
         
         y_labels_all.append(guide_data_frame[[BINARY_LABEL_COLUMN]].values) # add label values by extracting from the df by series values.
@@ -259,7 +260,13 @@ def update_y_values_by_intersect(intersect_tmp, start, window_size):
     return y_values
 
 ## Data and features manipulation
-
+'''Function to extract the guides indexes given which guides to keep.
+The guides to keep are given as a list of indexes.
+The function take the guides_indexes and return from ALL_INDEXES and spesific guide indexes'''
+def get_guides_indexes(guide_idxs):
+    choosen_indexes = [index for idx in guide_idxs for index in ALL_INDEXES[idx]]
+    choosen_indexes = np.array(choosen_indexes)
+    return choosen_indexes
 
 '''given feature list, label list split them into
 test and train data.
@@ -343,10 +350,7 @@ def get_tp_tn(y_test,y_train):
         print("error")
     tp_ratio = tp_test / (tp_test + tn_test)
     return (tp_ratio,tp_test,tn_test,tp_train,tn_train)
-
-if __name__ == "__main__":
-    from Server_constants import EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH
-    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH)
+def get_duplicates(file_manager):
     x_features, y_labels, guides = generate_features_and_labels(file_manager.get_merged_data_path(), file_manager,
                                                                  23*6, 6, False, True, False, 2000, [], False)
     # Check if there are duplicates in x_features
@@ -368,5 +372,11 @@ if __name__ == "__main__":
     with open("otss.txt", "w") as file:
         for ots in otss:
             file.write(f"OTS: {ots[0]}, gRNA: {ots[1]}\n")
+if __name__ == "__main__":
+    from Server_constants import EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH
+    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH)
+    x_features, y_labels, guides = generate_features_and_labels(file_manager.get_merged_data_path(), file_manager,
+                                                                 23*6, 6, False, True, False, 2000, [], False)
+    
     
     

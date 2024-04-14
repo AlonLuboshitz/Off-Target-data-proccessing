@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from file_management import File_management
-from feature_engineering import get_epi_data_bw,get_epi_data_bed
+#from file_management import File_management
+#from features_engineering import get_epi_data_bw,get_epi_data_bed
 
 '''given a x data and y data draws a auc curve.
 add marking lines to x_pinpoint and y_points - i.a y = 0.5 draw a line there to mark this value
@@ -189,11 +189,50 @@ def draw_histogram_bigwig(file_manager):
 
     # Save the entire figure to a file
     plt.savefig('epigenetics_histograms.png')
+'''Draw a bar plot. y- metric\premonace, x - num of models in the ensemble'''
+def plot_ensemeble_preformance(y_values, x_values, title, y_label,path):
+    plt.clf()
+    plt.plot(x_values, y_values)
+    plt.title(title)
+    plt.xlabel('num_models')
+    plt.ylabel(y_label)
+    path = path + f"/{title}.png"
+    plt.savefig(path)
+
+def plot_ensemble_performance_mean_std(mean_values, std_values, x_values, title, y_label, path):
+    plt.clf()
+    num_models = len(mean_values)
+    ind = np.arange(num_models)  # the x locations for the groups
+    width = 0.35  # the width of the bars
+
+    fig, ax = plt.subplots()
+    bars = ax.bar(ind, mean_values, width, yerr=std_values, label='Mean ± Std')
+
+    ax.set_xlabel('Models')
+    ax.set_ylabel(y_label)
+    ax.set_title(title)
+    ax.set_xticks(ind)
+    ax.set_xticklabels(x_values)  # Use the provided x_values as labels
+    ax.legend()
+    min_y = min(mean_values) - 2*(max(std_values)) if min(mean_values) > 0 else 0
+    max_y = max(mean_values) + 2*(max(std_values))
+    ax.set_ylim(min_y, max_y)
+    path = path + f"/{title}.png"
+    plt.savefig(path)
 
 
-
-if __name__ == "__main__":
-    file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
-    run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
-    #draw_averages_epigenetics()
-    #draw_histogram_bigwig(file_manager)
+# if __name__ == "__main__":
+#     #file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
+#     #run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
+#     #draw_averages_epigenetics()
+#     #draw_histogram_bigwig(file_manager)
+#     import numpy as np
+#     scores = np.genfromtxt("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_50/Combi/ensemble_1.csv", delimiter=',')
+#     y_auroc = scores[2:,0]
+#     y_auprc = scores[2:,1]
+#     y_nrank = scores[2:,2]
+#     x = np.arange(2,51)
+#     output_ath = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq"
+#     plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
+#     plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
+#     plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)

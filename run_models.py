@@ -6,10 +6,10 @@
 
 FORCE_USE_CPU = False
 
-from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
+from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features, get_guides_indexes
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
-from utilities import validate_dictionary_input
+from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 from test import keep_groups
@@ -61,6 +61,7 @@ class run_models:
         self.init = True
     def setup_ensmbel_runner(self):
         self.set_model()
+        self.set_boleans_method()
         self.set_over_sampling()
         self.set_data_reproducibility(False)
         self.set_model_reproducibility(False)
@@ -108,6 +109,7 @@ class run_models:
     def set_epigenetic_feature_booleans(self):
         self.if_only_seq = self.if_bp = self.if_seperate_epi = False
         self.if_epi_features = True
+
     ## Model setters
     def set_hyper_params_class_wieghting(self, y_train):
         class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
@@ -142,9 +144,28 @@ class run_models:
             self.ml_type = "DEEP"
         self.ml_name = self.model_dict[answer]
     
+    '''Set running method'''
+    def set_boleans_method(self):  
+        booleans_dict = {
+            1: ("Only sequence",self.set_only_seq_booleans),
+            2: ("Epigenetic by features",self.set_epigenetic_feature_booleans),
+            3: ("Base pair epigenetic in Sequence",self.set_bp_in_seq_booleans),
+            4: ("Seperate epigenetics ",self.set_epi_window_booleans)
+        }   
+        for key, value in booleans_dict.items():
+            print(f"{key}: {value[0]}")
+        print("Set boleans method:")
+        answer = input()
+        answer = int(answer)
+        validate_dictionary_input(answer, booleans_dict) # validate input by data method dictionary
+        # If valid run the method (1 for second tuple element in the dictionary value tuple)
+        booleans_dict[int(answer)][1]()
     
-    
-      
+    '''Set features columns for the model'''
+    def set_features_columns(self, features_columns):
+        if features_columns:
+            self.features_columns = features_columns
+        else: raise RuntimeError("Trying to set features columns for model where no features columns were given")
         
 
                
@@ -410,7 +431,6 @@ class run_models:
     
     ## ENSEMBLE:
     def create_ensemble(self, n_models, output_path, guides_test_list):
-        self.set_only_seq_booleans()
         # Get data
         x_features, y_labels, guides = self.get_features()
         print(guides_test_list)
@@ -431,10 +451,10 @@ class run_models:
         #         file.write(guide + ", ")   
         pass
     def test_ensmbel(self, ensembel_model_list, tested_guide_list):
-        self.set_only_seq_booleans()
         # Get data
         x_features, y_labels, guides = self.get_features()
         guides_idx = self.keep_test_guide_indices(guides, tested_guide_list) # keep only the test guides indexes
+        all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
         x_test, y_test = self.split_by_indexes(x_features, y_labels, guides_idx) # split by test indexes
         # init 2d array for y_scores 
         # Row - model, Column - probalities
@@ -443,7 +463,7 @@ class run_models:
             classifier = tf.keras.models.load_model(model_path)
             model_predictions = self.predict_with_model(classifier=classifier,X_test=x_test).ravel() # predict and flatten to 1d
             y_scores_probs[index] = model_predictions
-        return y_scores_probs, y_test
+        return y_scores_probs, y_test, all_guides_idx
     def keep_train_guides_indices(self, guides, test_guides):
         return [idx for idx, guide in enumerate(guides) if guide not in test_guides]
     def keep_test_guide_indices(self,guides, test_guides):
@@ -458,7 +478,8 @@ class run_models:
         x_ = np.concatenate(x_, axis= 0)
         y_ = np.concatenate(y_, axis= 0).ravel()
         return x_, y_
-    
+
+        
 
     ## RUN TYPES:
     # only seq
@@ -565,14 +586,7 @@ class run_models:
 
 
 ## Epigenetic features helper
-def split_epigenetic_features_into_groups(features_columns):
-    # Create a dictionary to store groups based on endings
-    groups = {}
-    # Group strings based on their endings
-    for feature in features_columns:
-        ending = feature.split("_")[-1]  # last part after _ "can be score, enrichment, etc.."
-        groups.setdefault(ending, []).append(feature)
-    return groups
+
     
 
 
