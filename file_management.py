@@ -1,5 +1,5 @@
 import os
-import pyBigWig
+#import pyBigWig
 from utilities import create_paths, validate_path
 #import pybedtools
 
@@ -12,8 +12,8 @@ class File_management:
         self.bigwig_folder_path = bigwig
         self.merged_data_path = merged_data
         self.data_folder_path = data_folder_path
-        self.create_bigwig_files_objects()
-        self.set_global_bw_max()
+        #self.create_bigwig_files_objects()
+        #self.set_global_bw_max()
         #self.create_bed_files_objects()
     ## Getters:
     def get_positive_path(self):
@@ -27,7 +27,12 @@ class File_management:
     def get_bigwig_folder(self):
         return self.bigwig_folder_path
     def get_number_of_bigiwig(self):
+        return 0
         return self.bigwig_amount
+    def get_model_path(self):
+        return self.models_path
+    def get_ml_results_path(self):
+        return self.ml_results_path
     def get_number_of_bed_files(self):
         return self.bed_files_amount
     def get_ensmbel_path(self):
@@ -47,16 +52,106 @@ class File_management:
     
     
     ## Setters:
+    def set_models_path(self, models_path):
+        self.validate_path_exsits(models_path)
+        self.models_path = models_path
+    def set_ml_results_path(self, ml_results_path):
+        self.validate_path_exsits(ml_results_path)
+        self.ml_results_path = ml_results_path
+    def set_model_path_nd_results_path(self, path):
+        self.set_models_path(path)
+        self.set_ml_results_path(path)
 
     def set_model_results_output_path(self, output_path):
         self.validate_path_exsits(output_path)
         self.model_results_output_path = output_path
-    def set_ensmbel_train_path(self, train_path):
-        self.validate_path_exsits(train_path)
-        self.ensmbel_train_path = train_path
+
+    
+    def add_type_to_models_paths(self, type):
+        '''Given a type create folders in ML_results and Models with the type
+        type will be anything to add:
+        1. model type - cnn,rnn...
+        2. cross val type -  k_fold, leave_one_out,ensmbel,
+        3. features - only_seq, epigenetics, epigenetics_in_seq, spatial_epigenetics'''
+        self.validate_ml_results_and_model()
+       # create folders
+        self.ml_results_path = self.add_to_path(self.ml_results_path,type)
+        self.models_path = self.add_to_path(self.models_path,type)
+  
+    ## ENSMBELS:    
+    # def set_ensmbel_train_path(self, train_path):
+    #     self.validate_path_exsits(train_path)
+    #     self.ensmbel_train_path = train_path
+    def set_n_models(self, n_models):
+        if n_models < 0 :
+            raise RuntimeError('Number of models cannot be negative')
+        self.n_models = n_models
+        self.add_n_models_ensmbel_path()
+
+    def add_partition_path(self):
+        self.validate_ml_results_and_model()
+        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{self.partition}_partition')
+        self.models_path = self.add_to_path(self.models_path,f'{self.partition}_partition')
+    
+    def add_n_models_ensmbel_path(self):
+        self.validate_ml_results_and_model()
+        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{self.partition}_partition_{self.n_models}')
+        self.models_path = self.add_to_path(self.models_path,f'{self.partition}_partition_{self.n_models}')
+        
     def set_ensmbel_result_path(self, ensmbel_path):
         self.validate_path_exsits(ensmbel_path)
         self.ensmbel_result_path = ensmbel_path
+    def set_ensmbel_guides_path(self, guides_path):
+        self.validate_path_exsits(guides_path)
+        self.ensmbel_guides_path = guides_path
+    def add_to_path(self, path, path_to_add):
+        '''Function take two paths, concatenate togther, create a folder and return the path'''
+        temp_path = os.path.join(path, path_to_add)
+        if not os.path.exists(temp_path):
+            os.makedirs(temp_path)
+        return temp_path
+    def add_path_to_train_ensmbel(self, path_to_add):
+        temp_path = os.path.join(self.ensmbel_train_path,path_to_add)
+        if not os.path.exists(temp_path):
+            os.makedirs(temp_path)
+        self.ensmbel_train_path = temp_path
+    def add_path_to_result_ensmbel(self, path_to_add):
+        temp_path = os.path.join(self.ensmbel_result_path,path_to_add)
+        if not os.path.exists(temp_path):
+            os.makedirs(temp_path)
+        self.ensmbel_result_path = temp_path    
+    def set_partition(self, partition):
+        '''Function to set the partition number'''
+        # Check for number of partitions
+        if os.path.exists(self.ensmbel_guides_path):
+            # check for partition
+            if partition > 0 and partition <= len(os.listdir(self.ensmbel_guides_path)):
+                self.partition = partition
+                self.add_partition_path()
+            else:
+                raise Exception(f'Partition number {partition} is out of range')
+        else: 
+            raise Exception('Guides path not set')
+    def get_partition(self):
+        if self.partition:
+            return self.partition
+        else: raise Exception('Partition not set')
+    def get_guides_partition(self):
+        '''Function to get the guides for the partition setted
+        If partition/path not setted, raise exception
+        Else sort the list of guides by partition number and 
+        return the path of the partition guides
+        '''
+        if self.partition and self.ensmbel_guides_path:
+            guides_list = os.listdir(self.ensmbel_guides_path)
+            # sort the list by name
+            guides_list.sort()
+            # get the partition
+            partition_guides = guides_list[self.partition-1]
+            return os.path.join(self.ensmbel_guides_path,partition_guides)
+        else : raise Exception('Guides path not set or partition not set')
+    
+
     
     def set_bigwig_files(self,bw_list):
         flag = False
@@ -137,7 +232,7 @@ class File_management:
         # save results to file
         results_table.to_csv(output_path)
     def create_ensemble_train_folder(self, i_ensmbel):
-        output_path = os.path.join(self.ensmbel_train_path,f'ensemble_{i_ensmbel}')
+        output_path = os.path.join(self.models_path,f'ensemble_{i_ensmbel}')
         # create dir output_path if not exsits
         if not os.path.exists(output_path):
             os.makedirs(output_path)
@@ -151,10 +246,10 @@ class File_management:
         return output_path
     
     def create_ensemble_score_nd_combi_folder(self):
-        if not self.ensmbel_result_path:
+        if not self.ml_results_path:
             raise Exception("Ensemble result path not set")
-        score_path = os.path.join(self.ensmbel_result_path,"Scores")
-        combi_path = os.path.join(self.ensmbel_result_path,"Combi")
+        score_path = os.path.join(self.ml_results_path,"Scores")
+        combi_path = os.path.join(self.ml_results_path,"Combi")
         if not os.path.exists(score_path):
             os.makedirs(score_path)
         if not os.path.exists(combi_path):
@@ -165,8 +260,14 @@ class File_management:
     '''Function to validate the paths'''
     def validate_path_exsits(self,path):
         assert os.path.exists(path), f"{path}Path does not exist"
+    def validate_ml_results_and_model(self):
+        if not self.ml_results_path:
+            raise Exception("ML results path not set")
+        if not self.models_path:
+            raise Exception("Models path not set")
     '''dtor'''
     def __del__(self):
-        self.close_big_wig([])
+        #self.close_big_wig([])
         #self.close_bed_files()
         # call more closing
+        pass

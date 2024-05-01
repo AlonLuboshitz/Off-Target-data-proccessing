@@ -157,8 +157,36 @@ def create_paths(folder):
             paths.append(os.path.join(folder,path))
         return paths
 
+def get_ensmbels_stats(ensemble_dict,n_models):
+    '''This function take an ensmbel dict:
+    {Ensmbel_group: {n_models : scores (auroc,auprc,n-rank)}}
+    The function will compare the statics using wilcoxon test
+    for each group compared to Only_seq.
+    the comparison will be on the same number of models'''
+    # 1. Get the Only_seq scores
+    only_seq_scores = get_values_from_ensmbel_dict(ensemble_dict["Only_seq"],n_models)
+    # 2. Compare the scores of each group to the only seq
+    compare_dict = {} # Init dict that hold the comparison results key: seq vs _, value: stats
+    for group in ensemble_dict.keys():
+        if group != "Only_seq":
+            group_score = get_values_from_ensmbel_dict(ensemble_dict[group],n_models)
+            stats = extract_roc_prc_nrank_pvals(only_seq_scores,group_score)
+            compare_dict[group] = stats
+    return compare_dict 
 
-    
+
+def get_values_from_ensmbel_dict(ensemble_dict, n_models):
+    '''This function will return the auroc,auprc,n-rank values for a given number of models
+    in ensmbel.'''
+    return ensemble_dict[n_models][:,0] , ensemble_dict[n_models][:,1], ensemble_dict[n_models][:,2]
+def extract_roc_prc_nrank_pvals(onlyseq_scores, group_scores):
+    '''Thie function will take the scores of the only_seq and the group scores and will
+    return the p-values of the wilcoxon test for each metric
+    0 - auroc, 1 - auprc, 2 - nrank'''
+    p_vals = []
+    for i in range(3):
+        p_vals.append(wilcoxon(onlyseq_scores[i],group_scores[i],alternative="less")[1])
+    return p_vals    
 if __name__ == "__main__":
     # models_repro_path = {"CNN":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/CNN",
     #                     "XGBOOST":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/XGBOOST",

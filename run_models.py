@@ -36,36 +36,87 @@ class run_models:
         self.ml_task = "" # class/reg
         self.shuffle = True
         self.if_os = False
+        self.os_valid = False
         self.bp_presntation = 6
         self.guide_length = 23
         self.encoded_length =  self.guide_length * self.bp_presntation
         self.init_booleans()
-        self.init_deep_hyper_params()
+        self.init_model_dict()
+        self.init_cross_val_dict()
+        self.init_features_methods_dict()
         self.epigenetic_window_size = 0
         if file_manager: # Not None
             self.file_manager = file_manager
+        else : raise RuntimeError("Trying to init model runner without file manager")
         
         self.features_columns = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
     ## initairs
     def init_booleans(self):
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_epi_features = False  
+        self.method_init = False
+    
     def init_deep_hyper_params(self):
         self.hyper_params = {'epochs': 5, 'batch_size': 1024, 'verbose' : 2}# Add any other fit parameters you need
-    def setup_runner(self):
-        self.set_model()  # set model (xgb, cnn, rnn)
-        self.set_over_sampling() # set over sampling
-        self.set_cross_validation() # set method
+    
+    def init_model_dict(self):
+        ''' Create a dictionary for ML models'''
+        self.model_dict = {
+            1: "LOGREG",
+            2: "XGBOOST",
+            3: "XGBOOST_CW",
+            4: "CNN",
+            5: "RNN"
+        }
+        self.model_type_initiaded = False
+    
+    def init_cross_val_dict(self):
+        ''' Create a dictionary for cross validation methods'''
+        self.cross_val_dict = {
+            1: "Leave_one_out",
+            2: "K_cross",
+            3: "Ensmbel"
+        }
+        self.cross_val_init = False
+    
+    def init_features_methods_dict(self):
+        ''' Create a dictionary for running methods'''
+        self.features_methods_dict = {
+            1: "Only_sequence",
+            2: "Epigenetics_by_features",
+            3: "Base_pair_epigenetics_in_Sequence",
+            4: "Spatial_epigenetics"
+        }
+        self.method_init = False
+    
+    def validate_initiation(self):
+        if not self.model_type_initiaded:
+            raise RuntimeError("Model type was not set")
+        elif not self.method_init:
+            raise RuntimeError("Method type was not set")
+        elif not self.cross_val_init:
+            raise RuntimeError("Cross validation type was not set")
+        elif not self.os_valid:
+            raise RuntimeError("Over sampling was not set")
+        
+
+    def setup_runner(self, model_num = None, cross_val = None, features_method = None, over_sampling = None):
+        self.set_model(model_num)
+        self.set_cross_validation(cross_val)
+        self.set_features_method(features_method)
+        self.set_over_sampling('n') # set over sampling
         self.set_data_reproducibility(False) # set data, model reproducibility
         self.set_model_reproducibility(False)
         self.set_functions_dict()
+        self.validate_initiation()
         self.init = True
-    def setup_ensmbel_runner(self):
-        self.set_model()
-        self.set_boleans_method()
-        self.set_over_sampling()
-        self.set_data_reproducibility(False)
-        self.set_model_reproducibility(False)
-        self.init = True
+    
+    # def setup_ensmbel_runner(self):
+    #     self.set_model()
+    #     self.set_boleans_method()
+    #     self.set_over_sampling()
+    #     self.set_data_reproducibility(False)
+    #     self.set_model_reproducibility(False)
+    #     self.init = True
     '''Set reproducibility for data and model'''
     def set_data_reproducibility(self, bool):
         self.data_reproducibility = bool
@@ -116,51 +167,56 @@ class run_models:
         class_weight_dict = dict(enumerate(class_weights))
         self.hyper_params['class_weight'] = class_weight_dict
     
-    ''' Set cross validation method and k value if needed.'''
-    def set_cross_validation(self):
-        answer = input("Set cross validation method:\n1. Leave one out\n2. K cross validation\n")
-        if answer == "1":
+    def set_model(self, model_num_answer = None):
+        if self.model_type_initiaded:
+            return # model was already set
+        model_num_answer = validate_dictionary_input(model_num_answer, self.model_dict)
+        '''Given an answer - model number, set the ml_type and ml name'''
+        if model_num_answer > 0 and model_num_answer < len(self.model_dict):
+            if model_num_answer < 4: # ML models
+                self.ml_type = "ML"
+            else : # Deep models
+                self.ml_type = "DEEP"
+                self.init_deep_hyper_params()
+            self.ml_name = self.model_dict[model_num_answer]
+            self.model_type_initiaded = True
+            self.file_manager.add_type_to_models_paths(self.ml_name) # add model name to models and results path
+
+    def set_cross_validation(self, cross_val_answer = None):
+        if not self.model_type_initiaded:
+            raise RuntimeError("Model type need to be setted before cross val type")
+        if self.cross_val_init:
+            return # cross val was already set
+        ''' Set cross validation method and k value if needed.'''
+        cross_val_answer = validate_dictionary_input(cross_val_answer, self.cross_val_dict)
+        if cross_val_answer == 1:
             self.cross_validation_method = "Leave_one_out"
             self.k = ""
-        elif answer == "2":
+        elif cross_val_answer == 2:
             self.cross_validation_method = "K_cross"
             self.k = int(input("Set K (int): "))
+        elif cross_val_answer == 3:
+            self.cross_validation_method = "Ensemble"
+        self.file_manager.add_type_to_models_paths(self.cross_validation_method) # add cross_val to models and results path
+        self.cross_val_init = True
     
-    ''' Create a dictionary for ML models and ask for input to choose from.'''
-    def set_model(self):
-        self.model_dict = {
-            1: "LOGREG",
-            2: "XGBOOST",
-            3: "XGBOOST_CW",
-            4: "CNN",
-            5: "RNN"
-        }
-        answer = input(f"Please enter ML type: {self.model_dict}\n") # ask for ML model
-        answer = int(answer)
-        validate_dictionary_input(answer, self.model_dict) # validate input by model dictionary
-        if answer < 4:
-            self.ml_type = "ML"
-        else : 
-            self.ml_type = "DEEP"
-        self.ml_name = self.model_dict[answer]
-    
-    '''Set running method'''
-    def set_boleans_method(self):  
+    def set_features_method(self, feature_method_answer = None):  
+        if not self.model_type_initiaded and not self.cross_val_init:
+            raise RuntimeError("Model type and cross val need to be setted before features method")
+        if self.method_init:
+            return # method was already set
+        '''Set running method'''
+        feature_method_answer = validate_dictionary_input(feature_method_answer, self.features_methods_dict)
         booleans_dict = {
-            1: ("Only sequence",self.set_only_seq_booleans),
-            2: ("Epigenetic by features",self.set_epigenetic_feature_booleans),
-            3: ("Base pair epigenetic in Sequence",self.set_bp_in_seq_booleans),
-            4: ("Seperate epigenetics ",self.set_epi_window_booleans)
+            1: self.set_only_seq_booleans,
+            2: self.set_epigenetic_feature_booleans,
+            3: self.set_bp_in_seq_booleans,
+            4: self.set_epi_window_booleans
         }   
-        for key, value in booleans_dict.items():
-            print(f"{key}: {value[0]}")
-        print("Set boleans method:")
-        answer = input()
-        answer = int(answer)
-        validate_dictionary_input(answer, booleans_dict) # validate input by data method dictionary
-        # If valid run the method (1 for second tuple element in the dictionary value tuple)
-        booleans_dict[int(answer)][1]()
-    
+        booleans_dict[feature_method_answer]()
+        self.file_manager.add_type_to_models_paths(self.features_methods_dict[feature_method_answer]) # add method to models and results path
+        self.method_init = True
+
     '''Set features columns for the model'''
     def set_features_columns(self, features_columns):
         if features_columns:
@@ -170,14 +226,20 @@ class run_models:
 
                
     ## Over sampling setter
-    def set_over_sampling(self):
-        if_os = input("press y/Y to oversample, any other for more\n")
+    def set_over_sampling(self, over_sampling):
+        if self.os_valid:
+            return # over sampling was already set
+        if not over_sampling:
+            if_os = input("press y/Y to oversample, any other for more\n")
+        else : if_os = over_sampling
         if if_os.lower() == "y":
             self.sampler = self.get_sampler('auto')
             self.if_os = True
+            
         else: 
             self.sampler_type = ""
             self.sampler = None
+        self.os_valid = True
     '''Tp are minority class, set the inverase ratio for xgb_cw
         args are 5 element tuple from get_tp_tn()'''
     def set_inverase_ratio(self, tps_tns):
@@ -430,7 +492,9 @@ class run_models:
             self.write_scores(key,y_test,y_scores_probs,auroc)  
     
     ## ENSEMBLE:
-    def create_ensemble(self, n_models, output_path, guides_test_list):
+    def create_ensemble(self, n_models, output_path, guides_test_list, seed_addition = 0):
+        if not self.init:
+            raise RuntimeError("Trying to run model without setup")
         # Get data
         x_features, y_labels, guides = self.get_features()
         print(guides_test_list)
@@ -438,7 +502,7 @@ class run_models:
         x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
         #new_path = self.create_ensemble_train_folder(output_path, i, guides_test_list) # create folder for
         for j in range(n_models):
-            self.set_random_seeds(seed = (j+1)) # repro but random init (j+1 not 0)
+            self.set_random_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
             classifier = self.train_model(X_train=x_train,y_train=y_train)
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
             classifier.save(temp_path)
@@ -461,6 +525,7 @@ class run_models:
         y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
         for index,model_path in enumerate(ensembel_model_list): # iterate on models and predict y_scores
             classifier = tf.keras.models.load_model(model_path)
+            # self.set_random_seeds(seed = (index+1+additional_seed))
             model_predictions = self.predict_with_model(classifier=classifier,X_test=x_test).ravel() # predict and flatten to 1d
             y_scores_probs[index] = model_predictions
         return y_scores_probs, y_test, all_guides_idx

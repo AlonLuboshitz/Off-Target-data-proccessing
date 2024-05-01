@@ -199,28 +199,91 @@ def plot_ensemeble_preformance(y_values, x_values, title, y_label,path):
     path = path + f"/{title}.png"
     plt.savefig(path)
 
-def plot_ensemble_performance_mean_std(mean_values, std_values, x_values, title, y_label, path):
+def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, title, y_label, path):
     plt.clf()
-    num_models = len(mean_values)
-    ind = np.arange(num_models)  # the x locations for the groups
-    width = 0.35  # the width of the bars
+    # Sort indices based on mean values
+    sorted_indices = np.argsort(mean_values)
+    mean_values_sorted = [mean_values[i] for i in sorted_indices]
+    x_values_sorted = [x_values[i] for i in sorted_indices]
+    std_sorted = [std_values[i] for i in sorted_indices]
+    # get amount of models and set widgth of bars
+    num_models = len(mean_values_sorted)
+    ind = np.arange(num_models)  # the y locations for the groups
+    width = 0.8  # the width of the bars
+    longest_label = max(x_values_sorted, key=len)
+    label_width = len(longest_label) * 0.1  # Adjust the multiplier as needed for proper spacing
 
-    fig, ax = plt.subplots()
-    bars = ax.bar(ind, mean_values, width, yerr=std_values, label='Mean ± Std')
+    # Set the figure size based on the width required for the longest label
+    fig_width = 8 + label_width  # Adjust the initial figure width as needed
+    fig_height = 6  # Adjust the initial figure height as needed
 
-    ax.set_xlabel('Models')
-    ax.set_ylabel(y_label)
-    ax.set_title(title)
-    ax.set_xticks(ind)
-    ax.set_xticklabels(x_values)  # Use the provided x_values as labels
-    ax.legend()
-    min_y = min(mean_values) - 2*(max(std_values)) if min(mean_values) > 0 else 0
-    max_y = max(mean_values) + 2*(max(std_values))
-    ax.set_ylim(min_y, max_y)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        # create plt
+    fig.tight_layout(pad=5)
+    bars = ax.barh(ind, mean_values_sorted, width, xerr=std_sorted, label='Mean ± Std')
+    multi = False
+    # Add p-value annotations
+    if p_values: # not empty
+        for i, bar in enumerate(bars):
+            model = x_values_sorted[i]
+            if model == "Only_seq":
+                continue
+            else :
+                p_val = p_values[model]
+                annotation = p_val_annotation(p_val)
+            plt.text(bar.get_width() + std_sorted[i] + 0.001 , bar.get_y() + (width/2), annotation, va='center', fontsize=8)
+            if "_" in model:
+                multi = True
+                bar.set_color('red')
+          
+       
+
+    ax.set_ylabel('Models', fontsize=12)
+    ax.set_xlabel(y_label, fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.set_yticks(ind)
+   
+    ax.set_yticklabels( x_values_sorted,fontsize = 8)  # Use the sorted x_values as labels
+     
+    
+    fig.subplots_adjust(left=label_width/fig_width)
+    if multi:
+        ax.plot([], label='Multi_marks', color='red')
+    ax.legend(loc='lower right')
+    min_x = min(mean_values_sorted) - 2 * (max(std_values)) if min(mean_values_sorted) > 0 else 0
+    max_x = max(mean_values_sorted) + 2 * (max(std_values))
+    ax.set_xlim(min_x, max_x)
+    # Remove right and upper spines
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+
+    plt.show()
+
     path = path + f"/{title}.png"
     plt.savefig(path)
-
-
+def add_pval_legend(plt):
+    pval_dict = define_pval_dict()
+    for key, value in pval_dict.items():
+        plt.plot([], label=f'{key}: {value}', color='none')  # Create an empty plot just for the legend entry
+    return plt
+def define_pval_dict():
+    pval_dict = {}
+    pval_dict['***'] = '<0.001'
+    pval_dict['**'] = '<0.01'
+    pval_dict['*'] = '<0.05'
+    pval_dict['ns'] = 'ns'
+    return pval_dict
+def p_val_annotation(p_val):
+    '''Function returns annotation for a given p-value.'''
+    if p_val < 0.001:
+        annotation = "***"
+    elif p_val < 0.01:
+        annotation = "**"
+    elif p_val < 0.05:
+        annotation = "*"
+    else:
+        annotation = ""
+    return annotation
 # if __name__ == "__main__":
 #     #file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
 #     #run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
