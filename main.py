@@ -51,13 +51,18 @@ def init_epigenetics(runner):
 def set_ensmbel_preferences(file_manager, n_models = None, n_ensmbels = None, partition_num = None):
     
     # Pick partition
-    if not partition_num:
+    if partition_num is None:
         partition_num = input("Enter partition number: ")
     
     file_manager.set_partition(int(partition_num))
     # Get guides
-    guides = file_manager.get_guides_partition()
-    guides = create_guides_list(guides, 0)
+    guides_path = file_manager.get_guides_partition()
+    guides = []
+    if partition_num == 0: # All guides
+        for guide_path in guides_path:
+            guides += create_guides_list(guide_path, 0) 
+    else: guides = create_guides_list(guides_path, 0)
+
     # Set n_models in each ensmbel:
     if not n_models: 
         n_models = int(input("Enter number of models in each ensmbel: "))   
@@ -68,9 +73,22 @@ def set_ensmbel_preferences(file_manager, n_models = None, n_ensmbels = None, pa
     file_manager.set_n_models(n_models)
     return  guides, n_models, n_ensmbels
 
-## ENSMBEL - EPIGENETICS:
+## ENSMBEL
+# Only sequence
+def create_ensmble_only_seq():
+    '''The function will create an ensmbel with only sequence features'''
+    runner, file_manager = set_up_model_runner()
+    init_cnn(runner)
+    init_ensmbel(runner)
+    init_only_seq(runner)
+    runner.setup_runner()
+    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager,n_models=50, n_ensmbels=10, partition_num=0)
+    create_n_ensembles(n_ensmbels, n_models, guides, file_manager, runner)
+
+
+## - EPIGENETICS:
     ## 1. Creation
-def create_ensembels_by_epigenetic_features():
+def create_ensembels_by_feature_columns():
     '''# THIS FUNCTION CAN BE TUREND INTO MULTIPROCESSING!
     Given the epigenetic features columns, the function will split them into groups
     Each group reprsents the epigenetic value estimation i.e binary, score, enrichment.
@@ -78,12 +96,12 @@ def create_ensembels_by_epigenetic_features():
     features_dict = split_epigenetic_features_into_groups(FEATURES_COLUMNS)
     arg_list = []
     for group, features in features_dict.items():
-        # for feature in features:
-        #     create_ensembels_with_epigenetic_features(group, [feature]) # singel epigenetic mark
+        for feature in features:
+            create_ensembels_with_epigenetic_features(group, [feature]) # singel epigenetic mark
         create_ensembels_with_epigenetic_features(group, features) # all epigenetic marks togther
 
 
-def create_ensembels_with_epigenetic_features(group, features):
+def create_ensembels_with_epigenetic_features(group, features,n_models=50):
     '''The function accepet a group type and features in that group.
     It sets the ensmbel prefrences -  i.e. 
     1. The file manager paths.
@@ -95,10 +113,10 @@ def create_ensembels_with_epigenetic_features(group, features):
     init_ensmbel(runner)
     init_epigenetics(runner)
     runner.setup_runner()
-    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager=file_manager,n_models=50, n_ensmbels=10, partition_num=1)
+    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager=file_manager,n_models=n_models, n_ensmbels=10, partition_num=0)
 
     if len(features) > 1:
-        features_str = "h3k4me3_atacseq_H3K27ac"
+        features_str = "All"
         
     else:
         features_str = "".join(features)    
@@ -117,6 +135,7 @@ def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner):
     ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10)) for i in range(1, n_ensembles+1)]
     # Create_ensmbel accpets - n_models, output_path, guides, additional_seed for reproducibility
     # Create a pool of processes
+    
     with Pool(processes=num_proceses) as pool:
         # Use starmap to map the worker function to the arguments list
         pool.starmap(runner.create_ensemble, ensemble_args_list)
@@ -127,29 +146,29 @@ def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner):
 
 ## 2. ENSMBEL SCORES/Predictions
 
-def multi_process_ensembls_scores(models_folder):
-    '''Given a folder with ensbmels, the function will create a pool of processes
-    Each process accepets a path to a folder with n ensembls'''
-    # args_list = [(os.path.join(models_folder, path),) for path in os.listdir(models_folder)]
-    # cpu_count = os.cpu_count()
-    # num_proceses = min(cpu_count, len(args_list))
-    # with Pool(processes=num_proceses) as pool:
-    #    pool.starmap(process_score_path_epigenetics, args_list)
+def test_ensembles_via_epi_features_in_folder(models_folder, different_test_folder_path = None):
+    '''Given a folder with diffrenet features, each feature is a folder with n ensembls
+    Send each folder (feature) to a diffrenet process to create the scores for each ensmbel in the folder
+    If a different test folder is given, the function will set this path for the file manager
+    The results will be set in this folder.'''
     for path in os.listdir(models_folder):
-        process_score_path_epigenetics(os.path.join(models_folder, path))
-def process_score_path_epigenetics(model_path):
-    '''Given a path to a folder with n ensembls the function will create:
+        test_ensemble_via_epi_feature(os.path.join(models_folder, path), different_test_folder_path)
+def test_ensemble_via_epi_feature(model_path, different_test_folder_path):
+    '''Given a path to a folder(epigentic feature) with n ensembls the function will create:
     1. file manager
     2. runner models
+    init both with cnn,ensmbel, epigenetics
     Will set the file manager and suffix by the ensmbel path and create the score and combi folders
     Will set the runner features column by the suffix
     Call test_ensmbel_scores to test the ensmbel and save the scores in the score folder'''
     runner, file_manager = set_up_model_runner()
+    if different_test_folder_path: # Not None
+        file_manager.set_ml_results_path(different_test_folder_path)
     init_cnn(runner)
     init_ensmbel(runner)
     init_epigenetics(runner)
     runner.setup_runner()
-    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager=file_manager,n_models=50, n_ensmbels=10, partition_num=1)
+    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager=file_manager,n_models=50, n_ensmbels=10, partition_num=0)
     group_folder = model_path.split("/")[-2]
     epi_mark = model_path.split("/")[-1]
     features_columns_by_epi_mark = set_epigenetic_features_by_string(FEATURES_COLUMNS, epi_mark,"_")
@@ -162,25 +181,24 @@ def process_score_path_epigenetics(model_path):
     args = [(runner, ensmbel, guides, score_path) for ensmbel in ensmbels_paths]
     with Pool(processes=10) as pool:
         pool.starmap(test_enmsbel_scores, args)
-    # for ensmbel in ensmbels_paths:
-    #     print(f"Testing ensmbel {ensmbel}")
-    #     test_enmsbel_scores(runner, ensmbel, guides, score_path)
+   
 
-def test_ensmbel(n_models):
+def test_ensemble_via_onlyseq_feature(n_models=50,different_test_folder_path = None):
     runner, file_manager = set_up_model_runner()
+    if different_test_folder_path: # Not None
+        file_manager.set_ml_results_path(different_test_folder_path)
     init_cnn(runner)
     init_ensmbel(runner)
     init_only_seq(runner)
     runner.setup_runner()
-    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager, n_models=n_models, n_ensmbels=10, partition_num=1)
+    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager, n_models=n_models, n_ensmbels=10, partition_num=0)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
     args = [(runner, ensmbel, guides, score_path) for ensmbel in ensmbels_paths]
     with Pool(processes=10) as pool:
         pool.starmap(test_enmsbel_scores, args)
-    # for ensmbel in ensmbels_paths:
-    #     test_enmsbel_scores(runner, ensmbel, guides, score_path)
+    
 def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
     '''Given a path to an ensmbel, a list of test guides and a score path
     the function will test the ensmbel on the test guides and save the scores in the score path.
@@ -197,16 +215,17 @@ def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
     y_scores_with_test = y_scores_with_test[:,y_scores_with_test[-1,:].argsort()] # sort by indexes
     write_2d_array_to_csv(y_scores_with_test,temp_output_path,[])
 
-def process_ensmbel_scores_folder(ensmbel_folder):
-    '''This function will process all the ensmbel scores in the given folder'''
+def process_all_ensembels_scores_in_folder(ensmbel_folder):
+    '''Given a folder with subfolders inside - each subfolder is a feature
+     the feature score will be combinatorical evaluated and saved in the combi folder for each feature'''
     ensmbel_paths = create_paths(ensmbel_folder)
     ensmbel_paths = keep_only_folders(ensmbel_paths)
     ensmbel_paths = [(path,) for path in ensmbel_paths]
     for path in ensmbel_paths:
-        process_ensmbel_scores(*path)
+        process_single_ensemble_scores(*path)
     # with Pool(processes=2) as pool:
     #     pool.starmap(process_ensmbel_scores, ensmbel_paths)
-def process_ensmbel_scores(scores_path):
+def process_single_ensemble_scores(scores_path):
     '''This function will process all the ensmbel scores in the given path
 Given a score csv file it will extract from the scores diffrenet combinations of the scores and evaluate them 
 vs the labels. The results will be saved in the combi path for the same ensmbel.'''
@@ -274,42 +293,21 @@ def run_reproducibility_model_and_data(run_models, model_name, file_manager, k_t
         temp_model_name = f"{model_name}_{i}"
         run_model_only_seq(run_models, temp_model_name)
 
-'''Given the number of models to run, function will init an file manager
-set an enmsbel output and create a list of guides from the guides file via the given list index
-then it will create an output path and run N models without the tested guides and save them into the path.'''
-def test_ensmbel_partition():
-    from run_models import run_models
-    from Server_constants import ENSMBEL, ENSMBEL_GUIDES, ENSMBEL_RESULTS
-    file_manager = init_file_management()
-    file_manager.set_ensmbel_result_path(ENSMBEL_RESULTS) # Set ensmbel results path
-    score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder() # Create score and combi folders
-    ensmbels_paths = create_paths(ENSMBEL)  # Create paths for each ensmbel in partition
-    ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
-    guides = create_guides_list(ENSMBEL_GUIDES, 0)  # Create guides list    
-    runner = run_models(file_manager) # Init runner
-    runner.setup_ensmbel_runner() # Setup runner
-    runner.set_features_columns(["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]) # Set features columns ,""
-    
-    for ensmbel in ensmbels_paths:
-        print(f"Testing ensmbel {ensmbel}")
-        test_enmsbel_scores(runner, ensmbel, guides, score_path)
+
+### With creation of ensemble i seed is *100 and not 10! need to change back!
+def only_seq_ensemble_pipe():
+    create_ensmble_only_seq()
+    #test_ensemble_via_onlyseq_feature(n_models=50,different_test_folder_path="/localdata/alon/ML_results/Train_vitro_test_genome")
+    #process_single_ensemble_scores("/localdata/alon/ML_results/Train_vitro_test_genome/CNN/Ensemble/Only_sequence/1_partition/1_partition_50")
+    pass
+def epigeneitc_ensemble_pipe():
+    from Server_constants import LOCAL_RESULTS_EPIGENETICS, LOCAL_MODELS_EPIGENETICS
+    #create_ensembels_by_feature_columns()
+    #test_ensembles_via_epi_features_in_folder(LOCAL_MODELS_EPIGENETICS,"/localdata/alon/ML_results/Train_vitro_test_genome")
+    process_all_ensembels_scores_in_folder("/localdata/alon/ML_results/Train_vitro_test_genome/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary")
+    pass
 
 
-def main():
-    #create_ensembels_by_epigenetic_features()
-    #multi_process_ensembls_scores("/localdata/alon/Models/Epigenetics/binary/1_partition/1_partition_50")
-     #process_ensmbel_scores_folder("/localdata/alon/ML_results/Epigenetics/binary/1_partition/1_partition_50")    
-    runner, file_manager = init_only_seq()
-    file_manager.set_ensmbel_train_path("/home/dsi/lubosha/Off-Target-data-proccessing/Models/Change_seq_gs_cs/CNN/ENSEMBLE/Only_seq/1_partition/1_partition_50")
-    file_manager.set_ensmbel_guides_path(ENSMBEL_GUIDES_FOLDER)
-
-    file_manager.set_partition(int(1))
-    # Get guides
-    guides = file_manager.get_guides_partition()
-    guides = create_guides_list(guides, 0)
-    create_n_ensembles(10,50, guides, file_manager, runner)
-
-def main1():
-    process_ensmbel_scores("/localdata/alon/ML_results/Change_seq/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary/h3k4me3_atacseq_H3K27ac")
 if __name__ == "__main__":
-    main1()
+    #epigeneitc_ensemble_pipe()
+    only_seq_ensemble_pipe()

@@ -125,7 +125,7 @@ class File_management:
         # Check for number of partitions
         if os.path.exists(self.ensmbel_guides_path):
             # check for partition
-            if partition > 0 and partition <= len(os.listdir(self.ensmbel_guides_path)):
+            if partition >= 0 and partition <= len(os.listdir(self.ensmbel_guides_path)):
                 self.partition = partition
                 self.add_partition_path()
             else:
@@ -142,15 +142,19 @@ class File_management:
         Else sort the list of guides by partition number and 
         return the path of the partition guides
         '''
-        if self.partition and self.ensmbel_guides_path:
+        if self.ensmbel_guides_path:
             guides_list = os.listdir(self.ensmbel_guides_path)
-            # sort the list by name
-            guides_list.sort()
-            # get the partition
-            partition_guides = guides_list[self.partition-1]
-            return os.path.join(self.ensmbel_guides_path,partition_guides)
-        else : raise Exception('Guides path not set or partition not set')
-    
+            if self.partition == 0:
+                return [os.path.join(self.ensmbel_guides_path,guide) for guide in guides_list] # Return all guides 
+            elif self.partition:
+                
+                # sort the list by name
+                guides_list.sort()
+                # get the partition
+                partition_guides = guides_list[self.partition-1]
+                return os.path.join(self.ensmbel_guides_path,partition_guides)
+            else : raise Exception('Partition not set')
+        else : raise Exception('Guides path not set')
 
     
     def set_bigwig_files(self,bw_list):

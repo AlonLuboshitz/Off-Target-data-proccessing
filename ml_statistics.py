@@ -164,16 +164,26 @@ def get_ensmbels_stats(ensemble_dict,n_models):
     for each group compared to Only_seq.
     the comparison will be on the same number of models'''
     # 1. Get the Only_seq scores
-    only_seq_scores = get_values_from_ensmbel_dict(ensemble_dict["Only_seq"],n_models)
+    only_seq_scores = get_values_from_ensmbel_dict(ensemble_dict["Only-seq"],n_models)
     # 2. Compare the scores of each group to the only seq
     compare_dict = {} # Init dict that hold the comparison results key: seq vs _, value: stats
     for group in ensemble_dict.keys():
-        if group != "Only_seq":
+        if group != "Only-seq":
             group_score = get_values_from_ensmbel_dict(ensemble_dict[group],n_models)
             stats = extract_roc_prc_nrank_pvals(only_seq_scores,group_score)
             compare_dict[group] = stats
     return compare_dict 
 
+def get_mean_std_from_ensmbel_results(ensmbel_results):
+    '''Given a dictionary of ensmbel results:
+     {key : folder_name, val: dict{key: n_models_in_ensmbel, val: np array of results}
+    calculate the mean and std of the results for each ensmbel.
+     ------
+      returns a dictionary with the mean and std for each ensmbel - [0] -auroc,[1] - auprc,[2] - n-rank'''
+    ensmbel_mean_std = {}
+    for ensmbel,results in ensmbel_results.items():
+        ensmbel_mean_std[ensmbel] = {n_models: (np.mean(results[n_models],axis=0),np.std(results[n_models],axis=0)) for n_models in results.keys()}
+    return ensmbel_mean_std
 
 def get_values_from_ensmbel_dict(ensemble_dict, n_models):
     '''This function will return the auroc,auprc,n-rank values for a given number of models
@@ -187,6 +197,7 @@ def extract_roc_prc_nrank_pvals(onlyseq_scores, group_scores):
     for i in range(3):
         p_vals.append(wilcoxon(onlyseq_scores[i],group_scores[i],alternative="less")[1])
     return p_vals    
+
 if __name__ == "__main__":
     # models_repro_path = {"CNN":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/CNN",
     #                     "XGBOOST":"/home/alon/masterfiles/pythonscripts/Changeseq/ML_data/Reproducibility/vs_caso/K_cross/Models/5K/XGBOOST",

@@ -13,9 +13,9 @@ BED_FILES_FOLDER = "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Ch
 BIG_WIG_FOLDER = "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig"
     # Preprocessed data
 CHANGESEQ_CASO = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_casofinder.csv"
-CHANGESEQ_CASO_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_casofinder_withEpigenetic_ALL.csv"
+CHANGESEQ_CASO_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_casofinder_withEpigenetic_ALL_indexed.csv"
 CHANGESEQ_GS = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs.csv"
-CHANGESEQ_GS_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_withEpigenetic_ALL_with_index.csv"
+CHANGESEQ_GS_EPI = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_withEpigenetic_ALL_indexed.csv"
 TEST = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_test_with_index.csv"
     # Ensembels:
 ENSMBEL_MODELS_FOLDER = "/home/dsi/lubosha/Off-Target-data-proccessing/Models/Change_seq_gs_cs/CNN/ENSEMBLE"

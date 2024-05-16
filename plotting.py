@@ -220,38 +220,46 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
         # create plt
     fig.tight_layout(pad=5)
-    bars = ax.barh(ind, mean_values_sorted, width, xerr=std_sorted, label='Mean ± Std')
+    bars = ax.barh(ind, mean_values_sorted, width, xerr=std_sorted)
     multi = False
+    min_x = min(mean_values_sorted) - 3 * (max(std_values)) if min(mean_values_sorted) > 0 else 0
+    max_x = max(mean_values_sorted) + 2 * (max(std_values))
     # Add p-value annotations
     if p_values: # not empty
         for i, bar in enumerate(bars):
             model = x_values_sorted[i]
-            if model == "Only_seq":
+            if model == "Only-seq":
+                plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.4f}', va='center', fontsize=8, color='white')
                 continue
             else :
                 p_val = p_values[model]
                 annotation = p_val_annotation(p_val)
             plt.text(bar.get_width() + std_sorted[i] + 0.001 , bar.get_y() + (width/2), annotation, va='center', fontsize=8)
-            if "_" in model:
+            plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.4f}', va='center', fontsize=8,color='white')
+
+            if "_" in model or model == "All":
                 multi = True
                 bar.set_color('red')
           
        
 
-    ax.set_ylabel('Models', fontsize=12)
+    ax.set_ylabel('Epigenetic marks', fontsize=12)
     ax.set_xlabel(y_label, fontsize=12)
     ax.set_title(title, fontsize=14)
     ax.set_yticks(ind)
-   
-    ax.set_yticklabels( x_values_sorted,fontsize = 8)  # Use the sorted x_values as labels
-     
+    # If models in x_values_sorted are with _ in them turn into list of strings
+    y_labels = [model.split("_") if "_" in model else model for model in x_values_sorted]
+    y_labels_joined = ['\n'.join(label) if isinstance(label, list) else label for label in y_labels]
+    ax.set_yticklabels( y_labels_joined,fontsize = 8)  # Use the sorted x_values as labels
+    
+
+    
     
     fig.subplots_adjust(left=label_width/fig_width)
     if multi:
-        ax.plot([], label='Multi_marks', color='red')
+        ax.plot([], label='Epigenetic subsets', color='red')
     ax.legend(loc='lower right')
-    min_x = min(mean_values_sorted) - 2 * (max(std_values)) if min(mean_values_sorted) > 0 else 0
-    max_x = max(mean_values_sorted) + 2 * (max(std_values))
+    
     ax.set_xlim(min_x, max_x)
     # Remove right and upper spines
     ax.spines['right'].set_visible(False)

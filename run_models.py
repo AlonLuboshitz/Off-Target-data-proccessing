@@ -12,10 +12,8 @@ from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
 from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import RandomOverSampler, SMOTE
-from test import keep_groups
 import pandas as pd
 import numpy as np
-import sys
 import time
 import logging
 import os
@@ -130,9 +128,9 @@ class run_models:
         else : # set randomness
             self.set_random_seeds(False)
     '''Set seeds for reproducibility'''
-    def set_deep_seeds(self):
-        tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
-        tf.keras.utils.set_random_seed(42)  # sets seeds for base-python, numpy and tf
+    def set_deep_seeds(self,seed=42):
+        tf.random.set_seed(seed) # Set seed for Python's random module (used by TensorFlow internally)
+        tf.keras.utils.set_random_seed(seed)  # sets seeds for base-python, numpy and tf
         tf.config.experimental.enable_op_determinism()
     def set_ml_seeds(self):
         #np.random.seed(42) # set np seed
@@ -251,7 +249,7 @@ class run_models:
     Create a feature description list'''
     def set_features_output_description(self):
         if self.if_only_seq: # only seq
-            self.features_description  = ["Only_Seq"]
+            self.features_description  = ["Only-Seq"]
         elif self.if_bp: # with base pair to gRNA bases or epigenetic window
             self.features_description = [file_name[0] for file_name in self.file_manager.get_bigwig_files()]
         elif self.if_seperate_epi: # window size epenetics
@@ -496,13 +494,18 @@ class run_models:
         if not self.init:
             raise RuntimeError("Trying to run model without setup")
         # Get data
+        # self.set_data_reproducibility(True)
         x_features, y_labels, guides = self.get_features()
         print(guides_test_list)
         guides_idx = self.keep_train_guides_indices(guides, guides_test_list) # keep only the train guides indexes
-        x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
+        if len(guides_idx) == 0: # All test guide are for training
+            x_train = np.concatenate(x_features, axis= 0)
+            y_train = np.concatenate(y_labels, axis= 0).ravel()
+        else:
+            x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
         #new_path = self.create_ensemble_train_folder(output_path, i, guides_test_list) # create folder for
         for j in range(n_models):
-            self.set_random_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
+            self.set_deep_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
             classifier = self.train_model(X_train=x_train,y_train=y_train)
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
             classifier.save(temp_path)
@@ -536,6 +539,7 @@ class run_models:
     
     def split_by_indexes(self, x_features, y_labels, indices):
         x_, y_ = [], [] 
+        
         for idx in indices:
             x_.append(x_features[idx])
             y_.append(y_labels[idx])
@@ -695,7 +699,6 @@ def balance_data(x_train,y_train,data_points) -> tuple:
     y_train = y_train[combined_indices] 
     x_train = x_train[combined_indices]
     return (x_train,y_train) 
-
 
 
 

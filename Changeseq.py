@@ -169,9 +169,9 @@ def run_intersection(merged_data_path,bed_folder,if_update):
     data["Index"] = data.index # set index column
     bed_types_nd_paths = get_bed_folder(bed_folder)
     new_data_name = merged_data_path.replace(".csv","")
-    new_data_name = f'{new_data_name}_withEpigenetic_log.csv'
+    new_data_name = f'{new_data_name}_withEpigenetic.csv'
     if if_update:
-        bed_types_nd_paths = remove_exsiting_epigenetics(data,bed_types_nd_paths) # remove exsiting epigenetics
+        bed_types_nd_paths = remove_exsiting_epigenetics(data,bed_types_nd_paths,True) # remove exsiting epigenetics
         new_data_name = merged_data_path # update exsiting data
     for chrom_type,bed_paths in bed_types_nd_paths:
         for bed_path in bed_paths:
@@ -180,22 +180,33 @@ def run_intersection(merged_data_path,bed_folder,if_update):
     data = data.drop("Index", axis=1) # remove "Index" column
     data.to_csv(new_data_name,index=False)
 
-def remove_exsiting_epigenetics(data,bed_type_nd_paths):
+def remove_exsiting_epigenetics(data,bed_type_nd_paths,full_match=False):
+    '''This function accpets data frame and list of tuples where
+    First element is epigenetic type - Chrom, methylation, etc
+    Second element is the epigeneitc mark itself - h3k4me3...
+    Removes from the tuple list any epigenetic mark that already exists in the data frame.
+    if full_match is True, the function will remove only the epigenetic marks that are fully matched in the data frame.
+    if full_match is False, the function will remove any epigenetic mark that is partially matched in the data frame.'''
     new_chrom_information = [] # assign new list to keep only new data
     for chrom_type,bed_paths in bed_type_nd_paths:
         paths_list = [] 
         for bed_path in bed_paths:
             file_ending = get_ending(bed_path) 
-            column_to_check = f'{chrom_type}_{file_ending}'
-            if not column_to_check in data.columns: # if the name is in the columns data already been made.
-                paths_list.append(bed_path)
+            if full_match:
+                column_to_check = f'^{chrom_type}_{file_ending}$'
+            else : column_to_check = f'^{chrom_type}_{file_ending}'
+            if any(re.match(column_to_check, column) for column in data.columns):
+                continue
+            else : paths_list.append(bed_path)
+            
         new_chrom_information.append((chrom_type,paths_list))
     return new_chrom_information
 
 
-''' function iterate on bed folder and returns a list of tuples:
-each tuple: [0] - folder name [1] - list of paths for the bed files in that folder.'''
+
 def get_bed_folder(bed_parent_folder):
+    ''' function iterate on bed folder and returns a list of tuples:
+    each tuple: [0] - folder name [1] - list of paths for the bed files in that folder.'''  
     # create a list of tuples - each tuple contain - folder name, folder path inside the parent bed file folder.
     subfolders_info = [(entry.name, entry.path) for entry in os.scandir(bed_parent_folder) if entry.is_dir()]
     # Create a new list of tuples with folder names and the information retrieved from the get bed files
@@ -239,16 +250,34 @@ def remove_buldges(data,off_target_column):
     print(f"before fil: {before}, after: {(after)}, removed : {before-after}")
     return data
 
-           
+def count_feature(data_frame,feature_column,label_column):
+    '''Given a data frame, feature column and label column
+    Return the amount of label > 0 and feature column > 0 - i.e. positive and feature is present
+    Return the amount of label == 0 and feature column > 0 - i.e. negative and feature is present'''
+    pos_feature = len(data_frame[(data_frame[label_column] > 0) & (data_frame[feature_column] > 0)])
+    neg_feature = len(data_frame[(data_frame[label_column] == 0) & (data_frame[feature_column] > 0)])
+    return (pos_feature,neg_feature)
+
+def count_features(data_path, feature_columns, label_column):
+    '''Given a data path, feature columns and label column:
+    For each feature column count the amount of positive and negative labels where the 
+    feature is present using count_feature function
+    '''
+    data = pd.read_csv(data_path) # open data
+    feature_amount_dict = {key : count_feature(data,key,label_column) for key in feature_columns}
+    return feature_amount_dict    
 
 
 
 
 if __name__ == "__main__":
+   
     #transofrm_casofiner_into_csv("/home/alon/masterfiles/pythonscripts/Changeseq/one_output.txt")
     #label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/CHANGE-seq.csv",output_name="merged_csgs",target_column="target")
     #run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
-   
-    change = pd.read_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv")
-    change =  remove_buldges(change,"offtarget_sequence")
-    change.to_csv("/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",index=False)
+    # 1.transform casofinder into csv 
+    # 2.   label data
+    #3. add epigenetics
+    pass
+  
+     
