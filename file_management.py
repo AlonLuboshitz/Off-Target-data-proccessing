@@ -5,13 +5,16 @@ from utilities import create_paths, validate_path
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
-    def __init__(self, positives, negatives, epigenetics_bed , bigwig, merged_data, data_folder_path) -> None: 
+    def __init__(self, positives, negatives, epigenetics_bed , bigwig, vivo_silico_path = None, vivo_vitro_path = None) -> None: 
         self.positive_path = positives
         self.negative_path = negatives
         self.epigenetics_folder_path = epigenetics_bed
         self.bigwig_folder_path = bigwig
-        self.merged_data_path = merged_data
-        self.data_folder_path = data_folder_path
+        self.vivo_silico_path = vivo_silico_path
+        self.vivo_vitro_path = vivo_vitro_path
+        
+        
+        self.test_data_path = False
         #self.create_bigwig_files_objects()
         #self.set_global_bw_max()
         #self.create_bed_files_objects()
@@ -21,7 +24,14 @@ class File_management:
     def get_negative_path(self):
         return self.negative_path
     def get_merged_data_path(self):
-        return self.merged_data_path
+        if self.merged_data_path:
+            return self.merged_data_path
+        elif self.vivo_silico_path is None and self.vivo_vitro_path is None:
+            raise RuntimeError("No merged data path set")
+        else:
+            raise RuntimeError("No silico/vitro bools data path set")
+        
+
     def get_epigenetics_folder(self):
         return self.epigenetics_folder_path
     def get_bigwig_folder(self):
@@ -49,7 +59,9 @@ class File_management:
         if len(self.glb_max_dict) > 0 :
             return self.glb_max_dict
         else : raise RuntimeError("No max values setted for bigwig files")
-    
+    def get_seperate_test_data(self):
+        if self.test_data_path:
+            return self.test_data_path
     
     ## Setters:
     def set_models_path(self, models_path):
@@ -61,12 +73,36 @@ class File_management:
     def set_model_path_nd_results_path(self, path):
         self.set_models_path(path)
         self.set_ml_results_path(path)
-
+    def set_silico_vitro_bools(self, silico_bool = False, vitro_bool = False):
+        '''This function sets the merged data path to the vivo_silico_path or vivo_vitro_path.
+        As well adds to model and model results path the vivo-silico/vivo-vitro suffix.
+        Args:
+        1. silico_bool - bool, default False
+        2. vitro_bool - bool, default False
+        -----------
+        Returns: Error if both bools are false'''
+        suffix_str = ""
+        if silico_bool:
+            self.merged_data_path = self.vivo_silico_path
+            suffix_str = "vivo-silico"
+        elif vitro_bool:
+            self.merged_data_path = self.vivo_vitro_path
+            suffix_str = "vivo-vitro"
+        else:
+            raise RuntimeError("No silico vitro bools were given data path set")
+        if (suffix_str not in self.models_path) and (suffix_str not in self.ml_results_path):
+            self.add_type_to_models_paths(suffix_str)
+        else:
+            raise RuntimeError(f"Suffix {suffix_str} already in model or results paths:\n {self.models_path}\n{self.ml_results_path}")
     def set_model_results_output_path(self, output_path):
         self.validate_path_exsits(output_path)
         self.model_results_output_path = output_path
 
-    
+    def set_seperate_test_data(self, test_data_path,guides_path):
+        self.validate_path_exsits(test_data_path)
+        self.test_data_path = True
+        self.merged_data_path = test_data_path
+        self.ensmeble_test_guides = guides_path
     def add_type_to_models_paths(self, type):
         '''Given a type create folders in ML_results and Models with the type
         type will be anything to add:
@@ -87,22 +123,25 @@ class File_management:
             raise RuntimeError('Number of models cannot be negative')
         self.n_models = n_models
         self.add_n_models_ensmbel_path()
-
     def add_partition_path(self):
         self.validate_ml_results_and_model()
-        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{self.partition}_partition')
-        self.models_path = self.add_to_path(self.models_path,f'{self.partition}_partition')
+        partition_str = "-".join(map(str,self.partition)) # Join the partition numbers into str seperated by '-'
+        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{partition_str}_partition')
+        self.models_path = self.add_to_path(self.models_path,f'{partition_str}_partition')
     
     def add_n_models_ensmbel_path(self):
         self.validate_ml_results_and_model()
-        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{self.partition}_partition_{self.n_models}')
-        self.models_path = self.add_to_path(self.models_path,f'{self.partition}_partition_{self.n_models}')
+        partition_str = "-".join(map(str,self.partition)) # Join the partition numbers into str seperated by '-'
+        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{partition_str}_partition_{self.n_models}')
+        self.models_path = self.add_to_path(self.models_path,f'{partition_str}_partition_{self.n_models}')
         
     def set_ensmbel_result_path(self, ensmbel_path):
         self.validate_path_exsits(ensmbel_path)
         self.ensmbel_result_path = ensmbel_path
     def set_ensmbel_guides_path(self, guides_path):
         self.validate_path_exsits(guides_path)
+        if os.listdir(guides_path) == 0:
+            raise Exception('Guides path is empty')
         self.ensmbel_guides_path = guides_path
     def add_to_path(self, path, path_to_add):
         '''Function take two paths, concatenate togther, create a folder and return the path'''
@@ -120,18 +159,28 @@ class File_management:
         if not os.path.exists(temp_path):
             os.makedirs(temp_path)
         self.ensmbel_result_path = temp_path    
-    def set_partition(self, partition):
-        '''Function to set the partition number'''
+    def set_partition(self, partition_list):
+        '''Function to set the partition number
+        The partition number argument is a list of number.
+        Each number is a partition number
+        The fuction check if the partition number is in the range of the number of partitions
+        If so it set the partition number list
+        Other wise it raise an exception'''
         # Check for number of partitions
         if os.path.exists(self.ensmbel_guides_path):
-            # check for partition
-            if partition >= 0 and partition <= len(os.listdir(self.ensmbel_guides_path)):
-                self.partition = partition
-                self.add_partition_path()
-            else:
-                raise Exception(f'Partition number {partition} is out of range')
+            self.partition = []
+            for partition in partition_list:
+                    
+                # check for partition
+                if partition > 0 and partition <= len(os.listdir(self.ensmbel_guides_path)):
+                    self.partition.append(partition)
+                else:
+                    self.partition = [] # clear the list
+                    raise Exception(f'Partition number {partition} is out of range')
         else: 
             raise Exception('Guides path not set')
+        self.add_partition_path()
+
     def get_partition(self):
         if self.partition:
             return self.partition
@@ -143,16 +192,19 @@ class File_management:
         return the path of the partition guides
         '''
         if self.ensmbel_guides_path:
+            if self.test_data_path:
+                return [self.ensmeble_test_guides]
             guides_list = os.listdir(self.ensmbel_guides_path)
-            if self.partition == 0:
-                return [os.path.join(self.ensmbel_guides_path,guide) for guide in guides_list] # Return all guides 
-            elif self.partition:
+            if self.partition:
+                guides_path = []
+                for partition in self.partition:
+                    guides_txt = f'tested_guides_{partition}_partition.txt'
+                    if guides_txt not in guides_list:
+                        raise RuntimeError(f'Guides for partition {partition} not found')
+                    guides_path.append(os.path.join(self.ensmbel_guides_path,guides_txt))
+                return guides_path                
+               
                 
-                # sort the list by name
-                guides_list.sort()
-                # get the partition
-                partition_guides = guides_list[self.partition-1]
-                return os.path.join(self.ensmbel_guides_path,partition_guides)
             else : raise Exception('Partition not set')
         else : raise Exception('Guides path not set')
 

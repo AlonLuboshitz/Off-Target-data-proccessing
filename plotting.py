@@ -4,23 +4,36 @@ import pandas as pd
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 
-'''given a x data and y data draws a auc curve.
-add marking lines to x_pinpoint and y_points - i.a y = 0.5 draw a line there to mark this value
-y_data is a dictionary - key: (expirement name\guide rna), value: ascending rates
-plot all keys through the x data
-x data is a dictionary with one key: name of label, value: data '''
-def draw_auc_curve(x_data,y_data,x_pinpoints,y_pinpoints,title):
-    # Plot the AUC curve
-    plt.figure()
 
-    for key_x,ranks in x_data.items():   
-        for key_y,rates in y_data.items():
-            plt.plot(ranks, rates,label=key_y)
-    plt.xlabel(key_x)
-    plt.ylabel("TPR")
-    plt.title(title)
-    plt.legend()
+
+def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
+    '''This function plots the ROC curve for 1 or more models.
+    Args:
+    1. fpr_list: A list of false positive rates for each model.
+    2. tpr_list: A list of true positive rates for each model.
+    3. aurocs: A list of AUROC values for each model.
+    4. titles: A list of titles for each model.
+    5. output_path: A string representing the output path for saving the plot.
+    6. general_title: A string representing the general title for the plot.
+    ----------
+    Show the figure and saves it.'''
+    if len(fpr_list) != len(tpr_list) != len(aurocs) != len(titles):
+        raise ValueError('All input lists must have the same length.')
+    plt.figure(figsize=(8, 6))
+    
+    for i in range(len(fpr_list)):
+        plt.plot(fpr_list[i], tpr_list[i], lw=2, label=f'{titles[i]} (AUC = {aurocs[i]:.2f})')
+    
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic (ROC) Curve')
+    plt.legend(loc='lower right')
+    plt.grid(True)
     plt.show()
+    plt.savefig(output_path + f"/{general_title}.png")
+
+
 def draw_averages_epigenetics():
     data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
     file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
@@ -190,14 +203,16 @@ def draw_histogram_bigwig(file_manager):
     # Save the entire figure to a file
     plt.savefig('epigenetics_histograms.png')
 '''Draw a bar plot. y- metric\premonace, x - num of models in the ensemble'''
-def plot_ensemeble_preformance(y_values, x_values, title, y_label,path):
+def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,output_path):
     plt.clf()
-    plt.plot(x_values, y_values)
+    plt.scatter(x_values, y_values)
+    plt.errorbar(x_values, y_values, yerr=stds, fmt='none', capsize=5, elinewidth=2, markeredgewidth=2, color='blue')
+
     plt.title(title)
-    plt.xlabel('num_models')
+    plt.xlabel(x_label)
     plt.ylabel(y_label)
-    path = path + f"/{title}.png"
-    plt.savefig(path)
+    output_path = output_path + f"/{title}.png"
+    plt.savefig(output_path)
 
 def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, title, y_label, path):
     plt.clf()

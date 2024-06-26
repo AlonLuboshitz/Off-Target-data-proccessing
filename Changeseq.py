@@ -3,96 +3,16 @@ import numpy as np
 import os
 import pybedtools
 import re
-'''for table from changeseq both same amount of columns merge togther.
-set label column with active - 1 for guideseq expriments and 0 for change seq'''
-def label_pos_neg(positives,negatives,output_name,target_column):
-    
-    positives = read_to_df_add_label(positives,1) # set 1 for guide seq
-    negatives = read_to_df_add_label(negatives,0) # set 0 for changeseq
-    negatives = remove_unmatching_guides(positive_data=positives,target_column=target_column,negative_data=negatives)
-    before_gs = len(positives)
-    before_cs = len(negatives)
-    drop_on_columns = ["chrom","chromStart","chromEnd","offtarget_sequence","distance"] # columns to drop duplicates on
-    positives, gs_duplicates = drop_by_colmuns(positives,drop_on_columns,"first")
-    negatives,cs_duplicates = drop_by_colmuns(negatives,drop_on_columns,"first")
-    neg_length=len(negatives)
-    merged_data = pd.concat([positives,negatives])
-    print(f"data points should be: {len(merged_data)}, {len(positives) + neg_length}")
-    merged_data,md_duplicates = drop_by_colmuns(merged_data,drop_on_columns,"first")
-    count_ones = sum(merged_data["Label"] == 1)
-    count_zeros = sum(merged_data["Label"]==0)
-    print(f"positives: {before_gs} - {gs_duplicates} = {before_gs-gs_duplicates}(gsb-gsd), label: {count_ones}")
-    print(f"negatives: {neg_length} - {count_ones} = {neg_length - count_ones}(csb-csd), label: {count_zeros} ")
-    print(merged_data.columns)
-    # set index to first column
-    merged_data.to_csv(output_name + ".csv",index=False)
+import time
 
-def remove_unmatching_guides(positive_data,target_column,negative_data):
-    # create a unuiqe set of guides from positive guides and negative guides
-    positive_guides = set(positive_data[target_column])
-    negative_guides = set(negative_data[target_column])
-    # keep only the guides that presnted in the negative but not positive set
-    diffrence_set = negative_guides - positive_guides
-    intersect = negative_guides.intersection(positive_guides)
-    print(f'intersect: {len(intersect)}, length pos: {len(positive_guides)}, length negative: {len(negative_guides)},\ndifrence: {len(diffrence_set)}')
-    # remove the raws data from the nagative set matching the left guides
-    before = len(negative_data)
-    for guide in diffrence_set:
-        negative_data = negative_data[negative_data[target_column]!=guide]
-        after = len(negative_data)
-        print(f'{before-after} rows were removed')
-        before =  after
-    return negative_data
-'''drop duplicates by columns return data and amount of duplicates'''
-def drop_by_colmuns(data,columns,keep):
-    length_before = len(data)
-    data = data.drop_duplicates(subset=columns,keep=keep)
-    length_after = len(data)
-    return data,length_before-length_after  
-'''add label column to data frame'''
-def read_to_df_add_label(path,label):
-    table = pd.read_csv(path, sep=",",encoding='latin-1',on_bad_lines='skip')
-    columns_before = table.columns
-    table["Label"] = label
-    columns_after = table.columns
-    print(f"columns before: {columns_before}\nColumns after: {columns_after}")
-    print(table.head(5))
-    return table
-def transofrm_casofiner_into_csv(path_to_txt):
-    columns = ['target','Chrinfo','chromStart','offtarget_sequence','strand','distance']
-    new_out = path_to_txt.replace(".txt",".csv")
-    try:
-        negative_file = pd.read_csv(path_to_txt,sep="\t",encoding='latin-1',on_bad_lines='skip')
-    except pd.errors.EmptyDataError as e:
-        print(f"{path_to_txt}, is empty")
-        exit(0)
-    negative_file.columns = columns
-    potential_ots = add_info_to_negative(negative_file)
-    potential_ots.to_csv(new_out,sep=',',index=False)
-'''add info to casofinder output to get same columns ad guideseq'''
-def add_info_to_negative(data):
-    data['chrinfo_extracted'] = data['Chrinfo'].str.extract(r'(chr[^\s]+)') # extract chr
-    data = data.rename(columns={ 'chrinfo_extracted':'chrom'}) 
-    data = data.drop('Chrinfo',axis=1) # drop unwanted chrinfo
-    data['chromEnd'] = data['chromStart'] + 23 # assuming all guide are 23 bp
-    data['casofinder_readc'] = 0 # set readcount to zero
-    data = upper_case_series(data,colum_name="offtarget_sequence") # upcase all oftarget in data
-    ordered_columns = ['chrom','chromStart','chromEnd','casofinder_readc','','strand','offtarget_sequence','','distance','target',''] # order of data
-    new_data = pd.DataFrame(columns=ordered_columns) # create new data with spesific columns
-    for column in data.columns:
-        new_data[column] = data[column] # set data in the new df from the old one
-    return new_data
-def upper_case_series(data,colum_name):
-    print(data.head(5))
-    values_list = data[colum_name].values
-    print(values_list[:5])
-    upper_values = [val.upper() for val in values_list]
-    print(upper_values[:5])
-    data[colum_name] = upper_values
-    print(data.head(5))
-    return data
-'''function to return a list of columns for the bed epigenetic file and put column 5 with score'''
+
 def get_bed_columns(bedtool):
+    '''This function accepts a bedtool and returns the columns of the bedtool as a list.
+    The function add the score, fold_enrichement, logp and logq columns to the list.
+    Args:
+    1. bedtool - a bedtool object
+    ------------
+    Returns: a list of columns'''
     # Get the first interval
     first_interval = next(iter(bedtool))
     # Get the number of fields (columns) for the first interval
@@ -106,6 +26,15 @@ def get_bed_columns(bedtool):
     columns[8] = "logq"
     return columns
 def intersect_with_epigentics(whole_data,epigentic_data,if_strand):
+    '''This function intersects off-target data with epigenetic data/data from bed file.
+    The functions accepts two data frames - whole_data and epigentic_data.
+    It intersects the point by -wb param for bed intersection function.
+    Args:
+    1. whole_data - data frame with off-target data
+    2. epigentic_data - bed file with epigenetic data
+    3. if_strand - boolean, if True, the function will intersect by strand
+    ------------
+    Returns: whole_data, intersection_df_wa - data frame with off-target data and data frame with intersection data.'''
     # get data
     whole_data_bed = pybedtools.BedTool.from_dataframe(whole_data)
     epigentic_data = pybedtools.BedTool(epigentic_data)
@@ -116,55 +45,78 @@ def intersect_with_epigentics(whole_data,epigentic_data,if_strand):
     intersection_df_wa = intersection_wa.to_dataframe(header=None,names = columns)
     return whole_data,intersection_df_wa
     
-def assign_epigenetics(data,intersection,file_ending,chrom_type):
+def assign_epigenetics(off_target_data,intersection,file_ending,chrom_type,score_type_dict={"binary":True}):
+    '''This function assign epigenetic data to the off-target data frame.
+    It extracts the epigenetic type - i.e. chromatin accesesibility, histone modification, etc.
+    To that it adds the epigenetic mark itself - i.e. H3K4me3, H3K27ac, etc.
+    To each combination of type and mark it assigns a binary column by defualt.
+    If other score types are given it will assign them as well.
+    An example to set binary value and the fold enrichement value:
+    score_type_dict = {"binary":True,"score":False,"fold_enrichemnt":True,"log_fold_enrichemnt":False,"logp":False,"logq":False}
+    Args:
+    1. off_target_data - data frame with off-target data
+    2. intersection - data frame with intersection data
+    3. file_ending - the ending of the bed file - i.e. H3K4me3, H3K27ac, etc.
+    4. chrom_type - the type of the epigenetic data - i.e. chromatin accesesibility, histone modification, etc. 
+    5. score_type_dict - a dictionary with the score types and the values to assign to the columns
+    ------------
+    Returns: off_target_data - data frame with the epigenetic data assigned.
+    '''
     chrom_column = f'{chrom_type}_{file_ending}' # set chrom type and mark column
-    # set binary and score column with zeros
-    binary_column = f'{chrom_column}_binary'
-    score_column = f'{chrom_column}_score'
-    fold_column = f'{chrom_column}_fold_enrichemnt'
-    log_fold_column = f'{chrom_column}_log_fold_enrichemnt'
-    logp_column = f'{chrom_column}_logp'
-    logq_column = f'{chrom_column}_logq'
-    data[binary_column] = 0 
-    # data[score_column] = 0
-    # data[fold_column] = 0 
-    # data[logp_column] = 0
-    # data[logq_column] = 0
-    data[log_fold_column] = 0
-    # convert score data from intersection info to list
-    # score_vals = intersection["score"].tolist()
-    fold_vals= intersection["fold_enrichemnt"].tolist()
-    # logp_vals = intersection["logp"].tolist()
-    # logq_vals = intersection["logq"].tolist()
-    log_fold_vals = np.array(fold_vals)
-    log_fold_vals = np.log(log_fold_vals)
+    columns_dict = {key: f'{chrom_column}_{key}' for key in score_type_dict.keys()} # set columns names
+    # add columns to the off-target data
+    for column_name in columns_dict.values():
+        off_target_data[column_name] = 0
+    # Set a dictionary with the columns names and the intersect values
+    values_dict = {key: None for key in score_type_dict.keys()} # Intersect columns
+    log_gold_flag = False
+    for key in values_dict.keys():
+        if key == "log_fold_enrichemnt": # if log fold enrichemnt need to be set set the flag.
+            log_gold_flag = True
+            continue
+        values_dict[key] = intersection[key].tolist()
+    # set log fold enrichemnt
+    if log_gold_flag and "fold_enrichemnt" in values_dict.keys():
+        log_fold_vals = np.array(values_dict["fold_enrichemnt"])
+        log_fold_vals = np.log(log_fold_vals)
+    
     if not intersection.empty:
         try:
-            print(data.head(5))
-            # assign intersection indexes with 1
-            data.loc[intersection["Index"], binary_column] = 1
-            # # assign intersection indexes with score values
-            # data.loc[intersection["Index"], score_column] = score_vals
-            # data.loc[intersection["Index"], fold_column] = fold_vals
-            # data.loc[intersection["Index"], logp_column] = logp_vals
-            # data.loc[intersection["Index"], logq_column] = logq_vals
-            data.loc[intersection["Index"], log_fold_column] = log_fold_vals
-            print(data.head(5))
-            
-           
+            print(f"Assigning the next epigenetic values: {columns_dict.keys()}")
+            print("OT data before assignment:\n",off_target_data.head(5))
+            time.sleep(1)
+            # Assign intersection indexes in the off-target data with 1 for binary column and values to other columns
+            for key in score_type_dict.keys():
+                if key == "binary":
+                    off_target_data.loc[intersection["Index"], columns_dict["binary"]] = 1
+                else :
+                    off_target_data.loc[intersection["Index"], columns_dict[key]] = values_dict[key]
+            print("OT data after assignment:\n",off_target_data.head(5))
         except KeyError as e:
-              print(data,': file has no intersections output will be with 0')
-        #     # # : input is dismissed via running this as subprocess
-        #     #input("press anything to continue: ")
-    labeled_epig_1 = sum(data[binary_column]==1)
-    labeled_epig_0 =  sum(data[binary_column]==0)
+              print(off_target_data,': file has no intersections output will be with 0')
+    ## Print statistics   
+    labeled_epig_1 = sum(off_target_data[columns_dict["binary"]]==1)
+    labeled_epig_0 =  sum(off_target_data[columns_dict["binary"]]==0)
+    if (labeled_epig_1 + labeled_epig_0) != len(off_target_data):
+        raise RuntimeError("The amount of labeled epigenetics is not equal to the amount of data")
     print(f"length of intersect: {len(intersection)}, amount of labled epigenetics: {labeled_epig_1}")
-    print(f'length of data: {len(data)}, 0: {labeled_epig_0}, 1+0: {labeled_epig_1 + labeled_epig_0}')
-    return data
+    print(f'length of data: {len(off_target_data)}, 0: {labeled_epig_0}, 1+0: {labeled_epig_1 + labeled_epig_0}')
+    return off_target_data
+
 def get_ending(txt):
     ending = txt.split("/")[-1].split(".")[0]
     return ending
 def run_intersection(merged_data_path,bed_folder,if_update):
+    '''This function intersect off-target data with given folder of epigenetic data given in bed files.
+    It will intersect the data with each bed file in the folder and assign the epigenetic data to the off-target data.
+    If if_update is True, the function will update the existing data with the new epigenetic data.
+    Args:
+    1. merged_data_path - path to the merged off-target data
+    2. bed_folder - path to the folder with the epigenetic data
+    3. if_update - boolean, if True the function will update the existing data with the new epigenetic data.
+    ----------
+    Returns: None
+    Saves the new data frame with the epigenetic data in the same path as the merged data with the ending _withEpigenetic.csv'''
     data = pd.read_csv(merged_data_path)
     data["Index"] = data.index # set index column
     bed_types_nd_paths = get_bed_folder(bed_folder)
@@ -176,7 +128,7 @@ def run_intersection(merged_data_path,bed_folder,if_update):
     for chrom_type,bed_paths in bed_types_nd_paths:
         for bed_path in bed_paths:
             data,intersect = intersect_with_epigentics(data,epigentic_data=bed_path,if_strand=False)
-            data = assign_epigenetics(data=data,intersection=intersect,file_ending=get_ending(bed_path),chrom_type=chrom_type)
+            data = assign_epigenetics(off_target_data=data,intersection=intersect,file_ending=get_ending(bed_path),chrom_type=chrom_type)
     data = data.drop("Index", axis=1) # remove "Index" column
     data.to_csv(new_data_name,index=False)
 
@@ -186,7 +138,8 @@ def remove_exsiting_epigenetics(data,bed_type_nd_paths,full_match=False):
     Second element is the epigeneitc mark itself - h3k4me3...
     Removes from the tuple list any epigenetic mark that already exists in the data frame.
     if full_match is True, the function will remove only the epigenetic marks that are fully matched in the data frame.
-    if full_match is False, the function will remove any epigenetic mark that is partially matched in the data frame.'''
+    if full_match is False, the function will remove any epigenetic mark that is partially matched in the data frame.
+    '''
     new_chrom_information = [] # assign new list to keep only new data
     for chrom_type,bed_paths in bed_type_nd_paths:
         paths_list = [] 
@@ -204,27 +157,7 @@ def remove_exsiting_epigenetics(data,bed_type_nd_paths,full_match=False):
 
 
 
-def get_bed_folder(bed_parent_folder):
-    ''' function iterate on bed folder and returns a list of tuples:
-    each tuple: [0] - folder name [1] - list of paths for the bed files in that folder.'''  
-    # create a list of tuples - each tuple contain - folder name, folder path inside the parent bed file folder.
-    subfolders_info = [(entry.name, entry.path) for entry in os.scandir(bed_parent_folder) if entry.is_dir()]
-    # Create a new list of tuples with folder names and the information retrieved from the get bed files
-    result_list = [(folder_name, get_bed_files(folder_path)) for folder_name, folder_path in subfolders_info]
-    return result_list
 
-'''function retrives bed files
-args- bed foler
-return list paths.'''
-def get_bed_files(bed_files_folder):
-    bed_files = []
-    for foldername, subfolders, filenames in os.walk(bed_files_folder):
-        for name in filenames:
-            # check file type the narrow,broad, bed type. $ for ending
-            if re.match(r'.*(\.bed|\.narrowPeak|\.broadPeak)$', name):
-                bed_path = os.path.join(foldername, name)
-                bed_files.append(bed_path)
-    return bed_files
 '''Keep just chroms info from the type chrN where N is 1-23,X,Y,M'''
 def remove_random_alt_chroms(data,chrom_column):
     before = len(data)
@@ -236,6 +169,10 @@ def remove_random_alt_chroms(data,chrom_column):
     
     return filtered_df
 def remove_buldges(data,off_target_column):
+    '''This function remove bulges from the data given the off target column
+    removes by length and by "-" in the off target column.
+    ------
+    returns a data frame without bulges'''
     before = len(data)
     print(data[off_target_column].head(5))
     # keep only ots with 23 length
@@ -268,16 +205,49 @@ def count_features(data_path, feature_columns, label_column):
     return feature_amount_dict    
 
 
+def code_for_turing_read_into_labels():
+    
+    print(new_gs.head(5))
+    print(new_gs.info())
+    # print amount of label =1 or 0
+    print(sum(new_gs["Align.#Bulges"] > 0))
+    print(sum(new_gs["Label"] > 0))
+    new_gs["Read_count"] = new_gs["Label"]
+    # Turn the label column into binary
+    new_gs['Label'] = new_gs['Label'].apply(lambda x: 1 if x > 0 else 0)
+    print(sum(new_gs["Label"] > 0))
+    print(new_gs.head(5))
+    print(new_gs["Label"].nunique())
+    print(new_gs.info())
+    print(new_gs["Label"].value_counts())
+    print(sum(new_gs["Read_count"] > 0))
+    new_gs = new_gs[new_gs["Align.#Bulges"] == 0]
+    print(sum(new_gs["Align.#Bulges"] > 0))
+    new_gs=remove_buldges(new_gs,"offtarget_sequence")
+    print(sum(new_gs["Align.#Bulges"] > 0))
+    print(new_gs["Label"].nunique())
+    print(new_gs["Label"].value_counts())
 
 
 if __name__ == "__main__":
-   
     #transofrm_casofiner_into_csv("/home/alon/masterfiles/pythonscripts/Changeseq/one_output.txt")
     #label_pos_neg("/home/alon/masterfiles/pythonscripts/Changeseq/GUIDE-seq.csv","/home/alon/masterfiles/pythonscripts/Changeseq/CHANGE-seq.csv",output_name="merged_csgs",target_column="target")
     #run_intersection(merged_data_path="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs.csv",bed_folder="/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics",if_update=False)
     # 1.transform casofinder into csv 
     # 2.   label data
     #3. add epigenetics
-    pass
-  
-     
+    
+    #label_pos_neg("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/only_pos_new_guideseq.csv",
+     #             "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/only_pos_changeseq.csv",output_name="merged_new_csgs",output_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/",target_column="target")
+   
+    pd1 = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/40_exp/40.csv")
+    pd2 = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/50_exp/50.csv")
+    sg1 = set(pd1['target'])
+    sg2 = set(pd2['target'])
+    sgRNA = sg1.union(sg2)
+    print(len(sgRNA))
+    print(sgRNA)
+    sgRNA_list = list(sgRNA)
+    with open("/home/dsi/lubosha/Off-Target-data-proccessing/Data/sgRNAcaso.txt", "w") as file:
+        for sgRNA in sgRNA_list:
+            file.write(sgRNA + "6 \n")

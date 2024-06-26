@@ -454,11 +454,14 @@ class run_models:
         y_train = np.concatenate(y_train, axis= 0).ravel()
         return x_train, y_train, x_test, y_test, test_guides
 
-    '''2. Greedy approch to fill k groups with ~ equal amount of labels
+    
+    def fill_k_groups_indices(self, k, sum_labels, sorted_indices):
+        '''2. Greedy approch to fill k groups with ~ equal amount of labels
         Getting sum of labels for each indice and sorted indices by sum filling the groups
         from the biggest amount to smallest adding to the minimum group'''
-    def fill_k_groups_indices(self, k, sum_labels, sorted_indices):
         # Create k groups with 1 indice each from the sorted indices in descending order
+        if k < len(sorted_indices):
+            raise RuntimeError("K value is smaller than the amount of guides")
         groups = [[sorted_indices[i]] for i in range(k)]
         
         
@@ -490,37 +493,35 @@ class run_models:
             self.write_scores(key,y_test,y_scores_probs,auroc)  
     
     ## ENSEMBLE:
-    def create_ensemble(self, n_models, output_path, guides_test_list, seed_addition = 0):
+    def create_ensemble(self, n_models, output_path, guides_train_list, seed_addition = 0):
         if not self.init:
             raise RuntimeError("Trying to run model without setup")
         # Get data
         # self.set_data_reproducibility(True)
         x_features, y_labels, guides = self.get_features()
-        print(guides_test_list)
-        guides_idx = self.keep_train_guides_indices(guides, guides_test_list) # keep only the train guides indexes
-        if len(guides_idx) == 0: # All test guide are for training
+        guides_idx = self.keep_intersect_guides_indices(guides, guides_train_list) # keep only the train guides indexes
+        if (len(guides_idx) == len(guides)): # All guides are for training
             x_train = np.concatenate(x_features, axis= 0)
             y_train = np.concatenate(y_labels, axis= 0).ravel()
         else:
             x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
-        #new_path = self.create_ensemble_train_folder(output_path, i, guides_test_list) # create folder for
         for j in range(n_models):
             self.set_deep_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
             classifier = self.train_model(X_train=x_train,y_train=y_train)
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
             classifier.save(temp_path)
-    def write_guides(self):
-        # keep test guides via indexes to compare with given test guides
-        # tested_guides = [guides[i] for i in range(len(guides)) if i not in guides_idx]
-        # temp_path = os.path.join(output_path,"tested_guides.txt")
-        # with open(temp_path, "w") as file:
-        #     for guide in tested_guides:
-        #         file.write(guide + ", ")   
-        pass
-    def test_ensmbel(self, ensembel_model_list, tested_guide_list):
+    
+    def test_ensmbel(self, ensembel_model_list, tested_guide_list,test_on_guides = True):
+        '''This function tests the models in the given ensmble.
+        By defualt it test the models on the tested_guide_list, If test_on_guides is False:
+        it will test on the guides that are not in the tested_guide_list
+        Args:
+        1. ensembel_model_list - list of paths to the models
+        2. tested_guide_list - list of guides to test on
+        3. test_on_guides - boolean to test on the given guides or on the diffrence guides'''
         # Get data
         x_features, y_labels, guides = self.get_features()
-        guides_idx = self.keep_test_guide_indices(guides, tested_guide_list) # keep only the test guides indexes
+        guides_idx = self.keep_intersect_guides_indices(guides, tested_guide_list) # keep only the test guides indexes
         all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
         x_test, y_test = self.split_by_indexes(x_features, y_labels, guides_idx) # split by test indexes
         # init 2d array for y_scores 
@@ -532,9 +533,19 @@ class run_models:
             model_predictions = self.predict_with_model(classifier=classifier,X_test=x_test).ravel() # predict and flatten to 1d
             y_scores_probs[index] = model_predictions
         return y_scores_probs, y_test, all_guides_idx
-    def keep_train_guides_indices(self, guides, test_guides):
+    def keep_diffrence_guides_indices(self, guides, test_guides):
+        '''This function returns the indexes of the guides that are NOT in the given test_guides 
+        Be good to train/test on the guides not presnted in the given guides 
+        Args:
+        1. guides - list of guides
+        2. test_guides - list of guides to keep if exists in guides'''
         return [idx for idx, guide in enumerate(guides) if guide not in test_guides]
-    def keep_test_guide_indices(self,guides, test_guides):
+    def keep_intersect_guides_indices(self,guides, test_guides):
+        '''This function returns the indexes of the guides that are in the given test_guides 
+        Be good to train/test on the guides given 
+        Args:
+        1. guides - list of guides
+        2. test_guides - list of guides to keep if exists in guides'''
         return [idx for idx, guide in enumerate(guides) if guide in test_guides]
     
     def split_by_indexes(self, x_features, y_labels, indices):

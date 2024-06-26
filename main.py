@@ -1,31 +1,41 @@
-from Server_constants import   EPIGENETIC_FOLDER, BIG_WIG_FOLDER, CHANGESEQ_CASO_EPI,CHANGESEQ_GS_EPI
-from Server_constants import DATA_PATH, DATA_REPRODUCIBILITY, MODEL_REPRODUCIBILITY, ALL_REPRODUCIBILITY
-from Server_constants import  ENSMBEL_GUIDES_FOLDER
-from Server_constants import ENSEMBEL_MODELS_FOLDER_LOCAL, ENSEMBEL_RESULTS_FOLDER_LOCAL
-from Server_constants import CS_MODEL_PATH, CS_ML_RESULTS
+from Server_constants import   EPIGENETIC_FOLDER, BIG_WIG_FOLDER
+from Server_constants import HENDEL_DICT,CHANGESEQ_DICT
+
 from constants import FEATURES_COLUMNS
 from multiprocessing import Pool
 
 from file_management import File_management
 #from run_models import run_models
-from utilities import set_epigenetic_features_by_string, split_epigenetic_features_into_groups, create_guides_list, write_2d_array_to_csv, create_paths, keep_only_folders, add_row_to_np_array, extract_scores_labels_indexes_from_files
-from evaluation import eval_all_combinatorical_ensmbel
+from utilities import set_epigenetic_features_by_string, split_epigenetic_features_into_groups, create_guides_list, write_2d_array_to_csv, create_paths, keep_only_folders, add_row_to_np_array, extract_scores_labels_indexes_from_files,get_k_choose_n, find_target_folders, convert_partition_str_to_list
+from evaluation import eval_all_combinatorical_ensmbel, bar_plot_ensembels_feature_performance
 import os
+import random
+
+
+def parse_constants_dict(constants_dict):
+    global VIVO_SILICO,VIVO_VITRO, ML_RESULTS_PATH, MODELS_PATH, TEST_GUIDES, SILICO_VITRO
+    VIVO_SILICO = constants_dict["Vivo-silico"]
+    VIVO_VITRO = constants_dict["Vivo-vitro"]
+    ML_RESULTS_PATH = constants_dict["ML_results"]
+    MODELS_PATH = constants_dict["Model_path"]
+    TEST_GUIDES = constants_dict["Test_guides"]
+    
 
 ## INIT FILE MANAGER
 def init_file_management():
-    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH)
+    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER, VIVO_SILICO ,VIVO_VITRO)
     set_file_manager_files(file_manager)
     return file_manager
 def set_file_manager_files(file_manager):
-    file_manager.set_ml_results_path(ENSEMBEL_RESULTS_FOLDER_LOCAL)
-    file_manager.set_models_path(ENSEMBEL_MODELS_FOLDER_LOCAL)
-    file_manager.set_ensmbel_guides_path(ENSMBEL_GUIDES_FOLDER)
+    file_manager.set_ml_results_path(ML_RESULTS_PATH)
+    file_manager.set_models_path(MODELS_PATH)
+    file_manager.set_ensmbel_guides_path(TEST_GUIDES)
+    set_silico(file_manager)
 
-def set_file_manager_ensmbel_files(file_manager):
-    file_manager.set_ensmbel_train_path(ENSEMBEL_MODELS_FOLDER_LOCAL)
-    file_manager.set_ensmbel_guides_path(ENSMBEL_GUIDES_FOLDER)
-    file_manager.set_ensmbel_result_path(ENSEMBEL_RESULTS_FOLDER_LOCAL)
+def set_silico(file_manager):
+    file_manager.set_silico_vitro_bools(True, False)
+def set_vitro(file_manager):
+    file_manager.set_silico_vitro_bools(False, True)
     
 ## INIT MODEL RUNNER
 def init_run_models(file_manager):
@@ -53,15 +63,14 @@ def set_ensmbel_preferences(file_manager, n_models = None, n_ensmbels = None, pa
     # Pick partition
     if partition_num is None:
         partition_num = input("Enter partition number: ")
-    
-    file_manager.set_partition(int(partition_num))
+        partition_num = list(partition_num)
+    file_manager.set_partition(partition_num)
     # Get guides
     guides_path = file_manager.get_guides_partition()
     guides = []
-    if partition_num == 0: # All guides
-        for guide_path in guides_path:
-            guides += create_guides_list(guide_path, 0) 
-    else: guides = create_guides_list(guides_path, 0)
+    for guide_path in guides_path:
+        guides += create_guides_list(guide_path, 0) 
+    
 
     # Set n_models in each ensmbel:
     if not n_models: 
@@ -75,14 +84,16 @@ def set_ensmbel_preferences(file_manager, n_models = None, n_ensmbels = None, pa
 
 ## ENSMBEL
 # Only sequence
-def create_ensmble_only_seq():
+def create_ensmble_only_seq(partition_num = 0, n_models = 50, n_ensmbels = 10, group_dir = None):
     '''The function will create an ensmbel with only sequence features'''
     runner, file_manager = set_up_model_runner()
     init_cnn(runner)
     init_ensmbel(runner)
     init_only_seq(runner)
     runner.setup_runner()
-    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager,n_models=50, n_ensmbels=10, partition_num=0)
+    if group_dir:
+        file_manager.add_type_to_models_paths(group_dir)
+    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager,n_models=n_models, n_ensmbels=n_ensmbels, partition_num=partition_num)
     create_n_ensembles(n_ensmbels, n_models, guides, file_manager, runner)
 
 
@@ -128,16 +139,17 @@ def create_ensembels_with_epigenetic_features(group, features,n_models=50):
 def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner):
     '''Given number of ensembls to create and n_models to create in each ensmbel
     it will create n_ensembles of n_models'''
-    from multiprocessing import Pool
-    cpu_count = os.cpu_count()
-    num_proceses = min(cpu_count, n_ensembles)
+    if n_ensembles == 1: # No need for multiprocessing
+        output_path = file_manager.create_ensemble_train_folder(1)
+        runner.create_ensemble(n_models, output_path, guides, 10)
+        return
     # Generate argument list for each ensemble
     ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10)) for i in range(1, n_ensembles+1)]
     # Create_ensmbel accpets - n_models, output_path, guides, additional_seed for reproducibility
     # Create a pool of processes
-    
+    cpu_count = os.cpu_count()
+    num_proceses = min(cpu_count, n_ensembles)
     with Pool(processes=num_proceses) as pool:
-        # Use starmap to map the worker function to the arguments list
         pool.starmap(runner.create_ensemble, ensemble_args_list)
     # for i in range(1,n_ensembles+1):
     #     output_path = file_manager.create_ensemble_train_folder(i)
@@ -183,22 +195,29 @@ def test_ensemble_via_epi_feature(model_path, different_test_folder_path):
         pool.starmap(test_enmsbel_scores, args)
    
 
-def test_ensemble_via_onlyseq_feature(n_models=50,different_test_folder_path = None):
+def test_ensemble_via_onlyseq_feature(n_models=50,partition_num = 0,n_ensembels = 10,different_test_folder_path = None, different_test_path = None, group_dir = None, if_multi_process = False):
     runner, file_manager = set_up_model_runner()
     if different_test_folder_path: # Not None
         file_manager.set_ml_results_path(different_test_folder_path)
+    if different_test_path:
+        file_manager.set_seperate_test_data(different_test_path[0],different_test_path[1])    
     init_cnn(runner)
     init_ensmbel(runner)
     init_only_seq(runner)
+    if group_dir:
+        file_manager.add_type_to_models_paths(group_dir)
     runner.setup_runner()
-    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager, n_models=n_models, n_ensmbels=10, partition_num=0)
+    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager, n_models=n_models, n_ensmbels=n_ensembels, partition_num=partition_num)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
     args = [(runner, ensmbel, guides, score_path) for ensmbel in ensmbels_paths]
-    with Pool(processes=10) as pool:
-        pool.starmap(test_enmsbel_scores, args)
-    
+    if if_multi_process:
+        with Pool(processes=10) as pool:
+            pool.starmap(test_enmsbel_scores, args)
+    else:
+        for ensmbel in ensmbels_paths:
+            test_enmsbel_scores(runner, ensmbel, guides, score_path)
 def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
     '''Given a path to an ensmbel, a list of test guides and a score path
     the function will test the ensmbel on the test guides and save the scores in the score path.
@@ -225,7 +244,7 @@ def process_all_ensembels_scores_in_folder(ensmbel_folder):
         process_single_ensemble_scores(*path)
     # with Pool(processes=2) as pool:
     #     pool.starmap(process_ensmbel_scores, ensmbel_paths)
-def process_single_ensemble_scores(scores_path):
+def process_single_ensemble_scores(scores_path,if_multi_process = False):
     '''This function will process all the ensmbel scores in the given path
 Given a score csv file it will extract from the scores diffrenet combinations of the scores and evaluate them 
 vs the labels. The results will be saved in the combi path for the same ensmbel.'''
@@ -233,18 +252,20 @@ vs the labels. The results will be saved in the combi path for the same ensmbel.
     file_manager = init_file_management()
     file_manager.set_ml_results_path(scores_path)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
-    
     ensmbel_scores_paths = create_paths(score_path) # Get a list of paths for each ensmbel scores
-   
-    # Number of processes in the pool
-    num_cores = os.cpu_count()
-    num_processes = min(num_cores, len(ensmbel_scores_paths))
     # Add the combi path to ensmbel paths for the process function
     ensmbel_scores_paths = [(score_path, combi_path) for score_path in ensmbel_scores_paths]
-    # Create a multiprocessing pool
-    with Pool(processes=num_processes) as pool:
-        # Map the function to the list of paths
-        pool.starmap(process_score_path, ensmbel_scores_paths)
+    if if_multi_process:
+        # Number of processes in the pool
+        num_cores = os.cpu_count()
+        num_processes = min(num_cores, len(ensmbel_scores_paths))
+        # Create a multiprocessing pool
+        with Pool(processes=num_processes) as pool:
+            # Map the function to the list of paths
+            pool.starmap(process_score_path, ensmbel_scores_paths)
+    else:
+        for path in ensmbel_scores_paths:
+            process_score_path(*path)
         
 
 def process_score_path(score_path,combi_path):
@@ -277,37 +298,120 @@ def run_model_seq_nd_epigenetic(run_models, model_name):
 def run_model_seperate_epigenetics(run_models, model_name):
     run_models.run(True, 4, model_name)
 def run_reproducibility_data(run_models, model_name, file_manager, k_times):
-    set_reproducibility_data(file_manager, run_models, DATA_REPRODUCIBILITY)
+    #set_reproducibility_data(file_manager, run_models, DATA_REPRODUCIBILITY)
     for i in range(k_times):
         temp_model_name = f"{model_name}_{i}"
         run_model_only_seq(run_models, temp_model_name)
 def run_reproducibility_models(run_models, model_name, file_manager, k_times):
-    set_reproducibility_models(file_manager, run_models, MODEL_REPRODUCIBILITY)
+    #set_reproducibility_models(file_manager, run_models, MODEL_REPRODUCIBILITY)
     for i in range(k_times):
         temp_model_name = f"{model_name}_{i}"
         run_model_only_seq(run_models, temp_model_name)
 def run_reproducibility_model_and_data(run_models, model_name, file_manager, k_times):
-    set_reproducibility_data(file_manager, run_models, DATA_REPRODUCIBILITY)
-    set_reproducibility_models(file_manager, run_models, ALL_REPRODUCIBILITY)
+    # set_reproducibility_data(file_manager, run_models, DATA_REPRODUCIBILITY)
+    # set_reproducibility_models(file_manager, run_models, ALL_REPRODUCIBILITY)
     for i in range(k_times):
         temp_model_name = f"{model_name}_{i}"
         run_model_only_seq(run_models, temp_model_name)
 
+def create_performance_by_data(partition_amount = 11,n_models=50,n_ensmbels=1):
+    '''This function creates ensmbel with n_model for partition unions from the partition amount:
+    If partition = N, it will pick up to 10 combinations of N choose i for i in range(1,N+1)
+    Each combination will be sent to a diffrenet process to create the ensmbel.
+    Args:
+    1. partition_amount: int - the amount of partitions to create ensmbels from
+    2. n_models: int - the number of models in each ensmbel
+    3. n_ensmbels: int - the number of ensmbels in each partition
+    ----------------
+    Saves the ensmbels in Model path, each partition will have a diffrenet folder named group_{i}.
+    Inside that folder there will be a folder for each combination for that partition choose i.'''
+    for i in range(1,partition_amount+1):
+        indices = get_k_choose_n(partition_amount,i)
+        if len(indices) > 10: # Pick up to 10 random indices
+            indices = random.sample(indices,10)
+        group_dir = f"{i}_group"
+        args = [(list(partition),n_models,n_ensmbels,group_dir) for partition in indices]
+        processes = min(os.cpu_count(), len(args))
+        
+        with Pool(processes=processes) as pool:
+            pool.starmap(create_ensmble_only_seq, args)
+   
 
+def test_performance_by_data(partition_amount = 11, n_models=50, n_ensmbels=1, Models_folder = None, test_path = None, test_guides = None):
+    '''The function will test the performance of the ensmbels created by the create_performance_by_data function.
+    If the Models_folder is given, the function will test the ensmbels in that folder.
+    If the test_path/test_guides is given, the function will test the models on that test path.
+    Args:
+        partition_amount: int - the amount of partitions created by the create_performance_by_data function
+        n_models: int - the number of models in each ensmbel
+        n_ensmbels: int - the number of ensmbels each partition holds
+        Models_folder: str - the path to the folder containing the ensmbels
+        test_path: str - the path to the test data
+        test_guides: str - the path to the test guides
+        ----------------
+        Saves the results in corresponding folder in ML_results path given to the file manager'''
+    if Models_folder is not None:
+        # Get all the groups in the folder:
+        groups =  os.listdir(Models_folder) ## Partitions
+        for group in groups:
+            # Get all the partitions in the group
+            partitions = [convert_partition_str_to_list(partition) for partition in os.listdir(os.path.join(Models_folder,group))] 
+            args = [(n_models,partition,n_ensmbels,None,(test_path,test_guides),group) for partition in partitions]
+            num_processes = min(os.cpu_count(), len(args))
+            with Pool(processes=num_processes) as pool:
+                pool.starmap(test_ensemble_via_onlyseq_feature, args)
+    else:
+        for i in range(1,partition_amount+1):
+            indices = get_k_choose_n(partition_amount,i)
+            if len(indices) > 10: # Pick up to 10 random indices
+                indices = random.sample(indices,10)
+            group_dir = f"{i}_group"
+            args = [(n_models,partition,n_ensmbels,None,(test_path,test_guides),group_dir) for partition in indices]
+
+            
+
+def performance_by_data(train, test, evalute):
+    '''This function run the analysis to evaluate the performance of models/ensmbels while increasing the data amount.
+    Args:
+        Each arg is a dict with the following: 
+        train: {"if_create": bool, "partition_amount": int, "n_models": int, "n_ensmbels": int}
+        test: {"If_test": bool, "partition_amount": int, "n_models": int, "n_ensmbels": int, 
+                "Models_folder": str, "test_path": str, "test_guides": str}
+        evalute: bool - if True will evaluate the ensmbels'''
+    if train["if_create"]:
+        create_performance_by_data(True)
+def combiscore_by_folder(base_path):
+    scores_nd_combi_paths = find_target_folders(base_path, ["Scores", "Combi"])
+    
+    # turn the list into list of tuples (for multi process)
+    scores_nd_combi_paths = [(path,) for path in scores_nd_combi_paths]
+    with Pool(processes=10) as pool:
+        pool.starmap(process_single_ensemble_scores,scores_nd_combi_paths)
 ### With creation of ensemble i seed is *100 and not 10! need to change back!
 def only_seq_ensemble_pipe():
-    create_ensmble_only_seq()
+    create_ensmble_only_seq(partition_num=[0],n_models=50,n_ensmbels=10)
     #test_ensemble_via_onlyseq_feature(n_models=50,different_test_folder_path="/localdata/alon/ML_results/Train_vitro_test_genome")
     #process_single_ensemble_scores("/localdata/alon/ML_results/Train_vitro_test_genome/CNN/Ensemble/Only_sequence/1_partition/1_partition_50")
     pass
 def epigeneitc_ensemble_pipe():
     from Server_constants import LOCAL_RESULTS_EPIGENETICS, LOCAL_MODELS_EPIGENETICS
-    #create_ensembels_by_feature_columns()
+    create_ensembels_by_feature_columns()
     #test_ensembles_via_epi_features_in_folder(LOCAL_MODELS_EPIGENETICS,"/localdata/alon/ML_results/Train_vitro_test_genome")
-    process_all_ensembels_scores_in_folder("/localdata/alon/ML_results/Train_vitro_test_genome/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary")
+    #process_all_ensembels_scores_in_folder("/localdata/alon/ML_results/Train_vitro_test_genome/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary")
     pass
 
 
 if __name__ == "__main__":
+    parse_constants_dict(CHANGESEQ_DICT)
     #epigeneitc_ensemble_pipe()
-    only_seq_ensemble_pipe()
+    #only_seq_ensemble_pipe()
+    #create_performance_by_data()
+    # test_performance_by_data(Models_folder="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence",
+    #                          test_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
+    #                          test_guides="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/tested_guides_12_partition.txt")
+    #combiscore_by_folder("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence")
+    # bar_plot_ensembels_feature_performance(only_seq_combi_path="/localdata/alon/ML_results/Change-seq/Train_vitro_test_genome/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi",
+    #                                        epigenetics_path="/localdata/alon/ML_results/Change-seq/Train_vitro_test_genome/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary",
+    #                                        n_models_in_ensmbel=50,output_path="/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq/train_vitro_test_silico",
+    #                                        title="Train_vitro_test_silico")
+    create_ensmble_only_seq(partition_num=[7],n_models=50,n_ensmbels=1)
