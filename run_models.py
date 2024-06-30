@@ -165,7 +165,7 @@ class run_models:
         class_weight_dict = dict(enumerate(class_weights))
         self.hyper_params['class_weight'] = class_weight_dict
     
-    def set_model(self, model_num_answer = None):
+    def set_model(self, model_num_answer = None ,add_path = True):
         if self.model_type_initiaded:
             return # model was already set
         model_num_answer = validate_dictionary_input(model_num_answer, self.model_dict)
@@ -178,9 +178,10 @@ class run_models:
                 self.init_deep_hyper_params()
             self.ml_name = self.model_dict[model_num_answer]
             self.model_type_initiaded = True
-            self.file_manager.add_type_to_models_paths(self.ml_name) # add model name to models and results path
+            if add_path:
+                self.file_manager.add_type_to_models_paths(self.ml_name) # add model name to models and results path
 
-    def set_cross_validation(self, cross_val_answer = None):
+    def set_cross_validation(self, cross_val_answer = None, add_path = True):
         if not self.model_type_initiaded:
             raise RuntimeError("Model type need to be setted before cross val type")
         if self.cross_val_init:
@@ -195,10 +196,11 @@ class run_models:
             self.k = int(input("Set K (int): "))
         elif cross_val_answer == 3:
             self.cross_validation_method = "Ensemble"
-        self.file_manager.add_type_to_models_paths(self.cross_validation_method) # add cross_val to models and results path
+        if add_path:
+            self.file_manager.add_type_to_models_paths(self.cross_validation_method) # add cross_val to models and results path
         self.cross_val_init = True
     
-    def set_features_method(self, feature_method_answer = None):  
+    def set_features_method(self, feature_method_answer = None, add_path = True):  
         if not self.model_type_initiaded and not self.cross_val_init:
             raise RuntimeError("Model type and cross val need to be setted before features method")
         if self.method_init:
@@ -212,7 +214,8 @@ class run_models:
             4: self.set_epi_window_booleans
         }   
         booleans_dict[feature_method_answer]()
-        self.file_manager.add_type_to_models_paths(self.features_methods_dict[feature_method_answer]) # add method to models and results path
+        if add_path:
+            self.file_manager.add_type_to_models_paths(self.features_methods_dict[feature_method_answer]) # add method to models and results path
         self.method_init = True
 
     '''Set features columns for the model'''

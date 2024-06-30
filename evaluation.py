@@ -2,16 +2,16 @@ import numpy as np
 import pandas as pd
 from itertools import combinations
 import os
-from sklearn.metrics import roc_curve, auc, average_precision_score
-from utilities import create_paths, find_target_folders,get_X_random_indices, fill_tprs_fpr_by_max_length
-from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc
-from ml_statistics import get_ensmbels_stats, get_mean_std_from_ensmbel_results
+from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve
+from utilities import create_paths, find_target_folders,get_X_random_indices, extract_scores_labels_indexes_from_files
+from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr
+from ml_statistics import get_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
 
 
 def get_tpr_by_n_expriments(predicted_vals,y_test,n):
-    '''get the true positive rate for up to n expriemnets by calculating:
-the first n prediction values, what the % of positive predcition out of the the TP amount.
-calculate auc value for 1-n'''
+    '''This function gets the true positive rate for n expriemnets by calculating:
+for each 1 <= n' <= n prediction values, what the % of positive predcition out of the the whole TP amount.
+for example: '''
     # valid that test amount is more then n
     if n > len(y_test):
         print(f"n expriments: {n} is bigger then data points amount: {len(y_test)}, n set to data points")
@@ -51,7 +51,43 @@ def evaluate_model( y_test, y_pos_scores_probs):
     auprc = average_precision_score(y_test, y_pos_scores_probs)
     return (auroc,auprc)
 
-
+def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_title):
+    '''This function plots multiple rocs and pr curves togther for multiple models.
+    It iterates the score paths given in the score paths list and plots the roc/pr curve for each model.
+    The titles list should contain the title for each model.
+    Args:
+    1. score_paths - list of paths to the scores files.
+    2. titles - list of titles for each model.
+    3. output_path - path to save the plot.
+    4. plot_title - title for the plot.
+    -----------
+    Returns: None
+    Example: 
+    scores_path = ["/localdata/alon/ML_results/Hendel/vivo-silico/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
+                   "/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6/Scores/ensemble_1.csv"]
+    titles = ["Hendel on CHANGE-seq","CHANGE-seq on Hendel"]
+    plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","Models_6_intersect")'''
+    if len(score_paths) != len(titles):
+        raise ValueError("The amount of score paths should be equal to the amount of titles")
+    fprs = []
+    tprs = []
+    aucs = []
+    percs = []
+    auprcs = []
+    recalls = []
+    for test_path in score_paths:
+        y_scores, y_test, indexes = extract_scores_labels_indexes_from_files([test_path])
+        y_scores = np.mean(y_scores, axis = 0)
+        fpr, tpr, tresholds = roc_curve(y_test, y_scores)
+        precision, recall, thresholds = precision_recall_curve(y_test, y_scores)
+        fprs.append(fpr)
+        tprs.append(tpr)
+        aucs.append(auc(fpr, tpr))
+        percs.append(precision)
+        recalls.append(recall)
+        auprcs.append((average_precision_score(y_test, y_scores),np.sum(y_test[y_test > 0]) / len(y_test)))
+    plot_roc(fprs,tprs,aucs,titles,output_path,f'{plot_title}_roc')
+    plot_pr(recall_list=recalls,precision_list=percs,auprcs=auprcs,titles=titles,output_path=output_path,general_title=f'{plot_title}_pr')
 def evaluate_n_combinatorical_models(n_models, n_y_scores, y_test, k):
     '''This function aasses all the possible combinatorical options for k given.
 N choose K options.
@@ -236,7 +272,7 @@ def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, data_
     plot_ensemeble_preformance(y_values=[val[1] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUPRC {data_name}",y_label="AUPRC",x_label="Data points",stds=[val[1] for val in y_stds],output_path=output_path)
     plot_ensemeble_preformance(y_values=[val[2] for val in y_vals],x_values=x_vals,title=f"Performance by data points N-rank {data_name}",y_label="N-rank",x_label="Data points",stds=[val[2] for val in y_stds],output_path=output_path)
 
-def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, job, guides_list = None,
+def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, job, output_path, guides_list = None,
                                features_columns = ['target','offtarget_sequence','chrom','chromStart','chromEnd']):
     '''This function will evaluate the concurence between 2 off target data sets. 
     The function will extract the matching guides from both data sets. 
@@ -251,7 +287,12 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
     4. features_columns - columns with the features.
     5. label_column - column with the labels.
     6. job - binary classification/ regression.
-    7. guides_list - list of guides to evaluate.
+    7. output_path - path to save the plots.
+    8. guides_list - list of guides to evaluate.
+    Example:
+    gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
+    gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
+    evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","CHANGE-seq"), "Read_count", "binary","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq")
     '''
     assert job in ['binary','regression'], "Job must be binary or regression"
     # Read the data
@@ -266,17 +307,30 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
     merged_df = merge_ots_replicates_values(guide_data_1, guide_data_2, label_column, features_columns, job)
     # Rank the data 1 model,2 lables
     if job == 'binary':
-        tpr,fpr = convert_label_to_tpr_fpr(merged_df, 'label_df1', 'label_df2')
-        tpr_2,fpr_2 = convert_label_to_tpr_fpr(merged_df, 'label_df2', 'label_df1')
+        tpr,fpr,percision,baseline = convert_label_to_tpr_fpr_percision(merged_df, 'label_df1', 'label_df2')
+        tpr_2,fpr_2,percision_2,baseline_2 = convert_label_to_tpr_fpr_percision(merged_df, 'label_df2', 'label_df1')
         # Aucs
         aucs = [auc(fpr,tpr),auc(fpr_2,tpr_2)]
+        auprcs = [(auc(tpr,percision),baseline),(auc(tpr_2,percision_2),baseline_2)]
         # Fprs
         fprs = [fpr,fpr_2]
         tprs = [tpr,tpr_2]
-        # Fill the lists by the max length list
-        tprs,fprs = fill_tprs_fpr_by_max_length(tprs,fprs)
-        plot_roc(fpr_list=fprs,tpr_list=tprs,aurocs=aucs,titles=title,output_path="/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq",general_title="intersect_6")
-
+        percs = [percision,percision_2]
+        # Create title list
+        title = [f"{title[0]} vs {title[1]}", f"{title[1]} vs {title[0]}" ]
+        plot_roc(fpr_list=fprs,tpr_list=tprs,aurocs=aucs,titles=title,output_path=output_path,general_title="intersect_6_roc")
+        plot_pr(recall_list=tprs,precision_list=percs,auprcs=auprcs,titles=title,output_path=output_path,general_title="intersect_6_pr")
+    else : # Job is regression
+        x_labels,y_labels = merged_df['label_df1'].values,merged_df['label_df2'].values
+        x_lables_log = x_labels + 1 # add 1 to avoid log(0)
+        y_labels_log = y_labels + 1
+        x_lables_log,y_labels_log = np.log(x_lables_log),np.log(y_labels_log)
+        r,p = pearson_correlation(x_labels,y_labels)
+        r_log,p_log = pearson_correlation(x_lables_log,y_labels_log)
+        title = f"{title[0]} vs {title[1]}"
+        plot_correlation(x=x_labels,y=y_labels,r_coeff=r,p_value=p,title=title,output_path=output_path)
+        plot_correlation(x=x_lables_log,y=y_labels_log,r_coeff=r_log,p_value=p_log,title=f'{title} - Log',output_path=output_path)
+        pass
 def off_target_data_by_intersecting_guides(ots_data_1, ots_data_2, guide_column, guide_list = None):
     '''This function takes two off target data frames and returns only the rows with guides presented in both data frames.
     If guide list given is returns rows with guides presented in the list.
@@ -331,47 +385,52 @@ def merge_ots_replicates_values(ots_data_1, ots_data_2, label_column, features_c
     merged_df['label_df2'].fillna(0, inplace=True)
     print(f'df1 features: {len(ots_data_1)}, df2 features: {len(ots_data_2)}, intersecting features: {intersecting_length}\nvalues only in df1: {only_df1}, values only in df2: {only_df2}')
     return merged_df
-def convert_label_to_tpr_fpr(merged_df, label_1, label_2):
-    '''This function converts the labels in the merged data frame to TPR and FPR values.
+def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
+    '''This function converts the labels in the merged data frame to TPR, FPR, Percisions values and tp baseline.
     Args:
     1. merged_df - merged off target data frame.
     2. label_1 - label column from the first data frame.
     3. label_2 - label column from the second data frame.
     ------------
-    Returns: two tuples of TPR, FPR values for the labels.
-    first tuple as 1 - model 2- label, second tuple as 1 - label 2 - model'''
+    Returns: TPR, FPR, Percision values and tp baseline.
+    TP baseline - Total positive/ total population.'''
     # Create 2d np array - first row predictions, 2'd row labels
     pred_label_array = np.array([merged_df[label_1].values, merged_df[label_2].values])
     # Get the total amount of actual positives
     total_positives = np.sum(pred_label_array[1] > 0)
     total_negatives = np.sum(pred_label_array[1] == 0)
+    perc_baseline = total_positives / (total_positives + total_negatives)
     # Sort the array in descending order by the first row
     sorted_indices = np.argsort(pred_label_array[0])[::-1]
-    last_index = None ## find the last index where the prediction is positive
-    for j,idx in enumerate(sorted_indices):
-        if pred_label_array[0][idx] > 0:
-            last_index = j    
+  
     # Initialize variables
     tpr_values = [0]
     fpr_values = [0]
+    precision_values = [1]
     # Calculate TPR and FPR at each threshold
     true_positives = false_positives = 0
 
-    for i in range(last_index):
+    for indice in (sorted_indices):
         # Calculate the number of true positives and false positives up to the current threshold
-        true_positives += (pred_label_array[1][sorted_indices[i]] > 0)
-        false_positives += (pred_label_array[1][sorted_indices[i]] == 0)
+        true_positives += (pred_label_array[1][indice] > 0)
+        false_positives += (pred_label_array[1][indice] == 0)
         # Calculate TPR
         tpr = true_positives / total_positives if total_positives > 0 else 0
         tpr_values.append(tpr)
         # Calculate FPR
         fpr = false_positives / total_negatives if total_negatives > 0 else 0
         fpr_values.append(fpr)
-    return tpr_values, fpr_values
+        if true_positives + false_positives > 0:
+            precision = true_positives / (true_positives + false_positives)
+        else:
+            precision = 0
+        precision_values.append(precision)
+    return tpr_values, fpr_values, precision_values, perc_baseline
    
 if __name__ == "__main__":
     #performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence",50,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts","vivo-silico-hendel")
-    gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
-    gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
-    evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel vs CHANGE-seq","CHANGE-seq vs Hendel"), "Read_count", "binary")
+    scores_path = ["/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/11_group/1-2-3-4-5-6-7-8-9-10-11_partition/1-2-3-4-5-6-7-8-9-10-11_partition_50/Scores/ensemble_1.csv",
+                   "/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50/Scores/ensemble_1.csv"]
+    titles = ["Hendel on Hendel","CHANGE-seq on CHANGE-seq"]
+    plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","Own_Performance")
     

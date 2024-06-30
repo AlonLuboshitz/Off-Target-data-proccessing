@@ -20,9 +20,8 @@ def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
     if len(fpr_list) != len(tpr_list) != len(aurocs) != len(titles):
         raise ValueError('All input lists must have the same length.')
     plt.figure(figsize=(8, 6))
-    
     for i in range(len(fpr_list)):
-        plt.plot(fpr_list[i], tpr_list[i], lw=2, label=f'{titles[i]} (AUC = {aurocs[i]:.2f})')
+        plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.2f})')
     
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
     plt.xlabel('False Positive Rate')
@@ -32,8 +31,49 @@ def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
     plt.grid(True)
     plt.show()
     plt.savefig(output_path + f"/{general_title}.png")
+def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_title):
+    '''This function plots the Precision-Recall curve for 1 or more models.
+    Args:
+    1. recall_list: A list of recall values for each model.
+    2. precision_list: A list of precision values for each model.
+    3. auprcs: A list of AUPRC values for each model with base line value.
+    4. titles: A list of titles for each model.
+    5. output_path: A string representing the output path for saving the plot.
+    6. general_title: A string representing the general title for the plot.
+    ----------
+    Show the figure and saves it.'''
+    if len(recall_list) != len(precision_list) != len(auprcs) != len(titles):
+        raise ValueError('All input lists must have the same length.')
+    plt.figure(figsize=(8, 6))
+    for i in range(len(recall_list)):
+        plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUPRC = {auprcs[i][0]:.2f})\nBaseline = {auprcs[i][1]:.5f}')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
+    plt.legend(loc='lower right')
+    plt.grid(True)
+    plt.show()
+    plt.savefig(output_path + f"/{general_title}.png")
+def plot_correlation(x, y, r_coeff, p_value, title, output_path):
+    '''This function plots a scatter plot with a linear regression line, and adds the correlation coefficient and p-value to the plot.
+    Args:
+    1. x: A numpy array representing the x values.
+    2. y: A numpy array representing the y values.
+    3. r_coeff: A float representing the correlation coefficient.
+    4. p_value: A float representing the p-value.
+    5. title: A string representing the title of the plot.
+    6. output_path: A string representing the output path for saving the plot.
+    ----------
+    Show the figure and saves it.'''
+    plt.figure(figsize=(8, 6))
 
-
+    plt.scatter(x, y, color='blue')
+    plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
+    plt.title(title)
+    plt.grid(True)
+    plt.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}', fontsize=12, ha='center', va='center', transform=plt.gca().transAxes)
+    plt.show()
+    plt.savefig(output_path + f"/{title}.png")
 def draw_averages_epigenetics():
     data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
     file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")

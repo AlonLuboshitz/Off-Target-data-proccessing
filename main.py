@@ -13,12 +13,13 @@ import random
 
 
 def parse_constants_dict(constants_dict):
-    global VIVO_SILICO,VIVO_VITRO, ML_RESULTS_PATH, MODELS_PATH, TEST_GUIDES, SILICO_VITRO
+    global VIVO_SILICO,VIVO_VITRO, ML_RESULTS_PATH, MODELS_PATH, TEST_GUIDES, SILICO_VITRO,TRAIN_GUIDES
     VIVO_SILICO = constants_dict["Vivo-silico"]
     VIVO_VITRO = constants_dict["Vivo-vitro"]
     ML_RESULTS_PATH = constants_dict["ML_results"]
     MODELS_PATH = constants_dict["Model_path"]
     TEST_GUIDES = constants_dict["Test_guides"]
+    TRAIN_GUIDES = constants_dict["Train_guides"]
     
 
 ## INIT FILE MANAGER
@@ -218,6 +219,37 @@ def test_ensemble_via_onlyseq_feature(n_models=50,partition_num = 0,n_ensembels 
     else:
         for ensmbel in ensmbels_paths:
             test_enmsbel_scores(runner, ensmbel, guides, score_path)
+
+def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data, silico):
+    '''This function test one model performance on other data. For example training the model on
+    one data set and testing it on another data set.
+    The function creates the file manager and runner.
+    Args:
+    1. model_path: str - the path to the models folder
+    2. test_folder_path: str - the path to save the prediction of the model
+    3. test_guide_path: str - the path to the test guides
+    4. other_data: list - [paths] paths to the other data [0] silico, [1] vitro
+    5. silico - bool, indicating if the data is silico or vitro'''
+    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER, other_data[0] ,other_data[1])
+    file_manager.set_ml_results_path(test_folder_path)
+    file_manager.set_models_path(model_path)
+    try:
+        set_silico(file_manager) if silico else set_vitro(file_manager)
+    except Exception as e:
+        print(e)
+    runner = init_run_models(file_manager)
+    runner.set_model(4,False)
+    runner.set_cross_validation(3,False)
+    runner.set_features_method(1,False)
+    runner.setup_runner()
+    guides = create_guides_list(test_guide_path, 0)
+    score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
+    ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
+    ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
+    for ensmbel in ensmbels_paths:
+            test_enmsbel_scores(runner, ensmbel, guides, score_path)
+    
+
 def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
     '''Given a path to an ensmbel, a list of test guides and a score path
     the function will test the ensmbel on the test guides and save the scores in the score path.
@@ -277,7 +309,6 @@ def process_score_path(score_path,combi_path):
     header = ["Auroc", "Auprc", "N-rank", "Auroc_std", "Auprc_std", "N-rank_std"]
     temp_output_path = os.path.join(combi_path, f'{score_path.split("/")[-1]}')
     write_2d_array_to_csv(results, temp_output_path, header)
-
 
 
 def set_reproducibility_data(file_manager, run_models, data_path):
@@ -400,7 +431,6 @@ def epigeneitc_ensemble_pipe():
     #process_all_ensembels_scores_in_folder("/localdata/alon/ML_results/Train_vitro_test_genome/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary")
     pass
 
-
 if __name__ == "__main__":
     parse_constants_dict(CHANGESEQ_DICT)
     #epigeneitc_ensemble_pipe()
@@ -414,4 +444,7 @@ if __name__ == "__main__":
     #                                        epigenetics_path="/localdata/alon/ML_results/Change-seq/Train_vitro_test_genome/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary",
     #                                        n_models_in_ensmbel=50,output_path="/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq/train_vitro_test_silico",
     #                                        title="Train_vitro_test_silico")
-    create_ensmble_only_seq(partition_num=[7],n_models=50,n_ensmbels=1)
+    test_on_other_data(model_path="/localdata/alon/Models/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50"
+                       ,test_folder_path="/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6",
+                       test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides/Test_guides/tested_guides_7_partition.txt",
+                       other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None],silico=True)

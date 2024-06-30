@@ -228,6 +228,8 @@ def save_intersect_guides(dataset_1, dataset_2, target_col_1, target_col_2, outp
     intersect_df.to_csv(output_name, index=False)
     print(f"Intersect guides saved at {output_name}")
 
+
+## This function might not be used in the future
 def fill_tprs_fpr_by_max_length(tprs, fprs):
     '''This function find the maximum length of the tprs and fprs and fill the arrays that are shorter with their last value.
     This function is for plotting the tprs,fprs togther on the same plot.

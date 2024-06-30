@@ -2,8 +2,28 @@
 import pandas as pd
 import numpy as np
 import os
-from scipy.stats import wilcoxon
-from scipy.stats import mannwhitneyu
+from scipy.stats import wilcoxon,mannwhitneyu,pearsonr,spearmanr
+
+
+
+def pearson_correlation(x,y):
+    '''This function will return the pearson correlation between x and y.
+    Args:
+    1. x - array
+    2. y - array
+    ----------
+    Returns: r - pearson correlation, p - p value'''
+    r,p = pearsonr(x,y)
+    return r,p
+def spearman_correlation(x,y):
+    '''This function will return the spearman correlation between x and y.
+    Args:
+    1. x - array
+    2. y - array
+    ----------
+    Returns: r - spearman correlation, p - p value'''
+    r,p = spearmanr(x,y)
+    return r,p
 
 '''
 wilxocon test for paired samples, x-y

@@ -93,7 +93,7 @@ class File_management:
         if (suffix_str not in self.models_path) and (suffix_str not in self.ml_results_path):
             self.add_type_to_models_paths(suffix_str)
         else:
-            raise RuntimeError(f"Suffix {suffix_str} already in model or results paths:\n {self.models_path}\n{self.ml_results_path}")
+            raise Exception(f"Suffix {suffix_str} already in model or results paths:\n {self.models_path}\n{self.ml_results_path}")
     def set_model_results_output_path(self, output_path):
         self.validate_path_exsits(output_path)
         self.model_results_output_path = output_path
