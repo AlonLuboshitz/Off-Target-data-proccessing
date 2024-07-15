@@ -9,8 +9,73 @@ import pandas as pd
 
 
 
+def keep_positives_by_ratio(X_data, y_data, ratio = None):
+    '''This function keeps a subset ratio of the positive data points in the data.
+    If ratio is None/<=0/>1 it will through an error.
+    Other wise it will keep the ratio of the positive data points for each guide!
+    For example if ratio = 0.5 it will keep half of the positive data points for each guide keeping the guide amount the same!
+    Args:
+    1. X_data - data points - [n_guides,np.array(datapoints,one_hot_vectors)]
+    2. y_data - labels - [n_guides,np.array(datapoints,labels)]
+    3. ratio - ratio of the positive data points to keep.
+    -----------
+    Returns: X-data*ratio and y_data*ratio'''
+    if ratio is None or ratio <= 0 or ratio >1:
+        raise Exception("Ratio must be a number between 0 and 1")
+    
+    # Sort the data by the labels
+    sorted_indices = [] 
+    X_data_copy = X_data.copy()
+    y_data_copy = y_data.copy()
+    for index,labels_array in enumerate(y_data_copy):
+        labels_array = labels_array.ravel() # flatten the array
+        positive_indices = np.where(labels_array > 0)[0] # keep only the positive labels
+        total_amount = len(positive_indices)
+        sorted_indices = np.argsort(labels_array[positive_indices])[::-1] # get the indices that sort the labels
+        amount_to_keep = int(total_amount*ratio) # amount of positive data points to keep
+        if amount_to_keep <= 2 or total_amount <= 2: # keep at least 2 positive data points
+            sorted_indices = sorted_indices[:2]
+            y_data_copy[index] = y_data_copy[index][sorted_indices] 
+            X_data_copy[index] = X_data_copy[index][sorted_indices] 
+            continue
+        sorted_indices = sorted_indices[:amount_to_keep] # keep the first ratio of the positive data points
+        y_data_copy[index] = y_data_copy[index][sorted_indices] # sort the labels
+        X_data_copy[index] = X_data_copy[index][sorted_indices] # sort the features
+        if len(y_data_copy[index]) != len(X_data_copy[index]):
+            raise Exception("The labels and features must have the same amount of data points")
+        
+    return X_data_copy,y_data_copy
 
-
+def keep_negatives_by_ratio(X_data, y_data, ratio = None):
+    '''This function keeps a subset ratio of the negative data points in the data.
+    If ratio is None/<=0/>1 it will through an error.
+    Other wise it will keep the ratio of the negative data points for each guide!
+    For example if ratio = 0.5 it will keep half of the negative data points for each guide keeping the guide amount the same!
+    Args:
+    1. X_data - data points - [n_guides,np.array(datapoints,one_hot_vectors)]
+    2. y_data - labels - [n_guides,np.array(datapoints,labels)]
+    3. ratio - ratio of the negative data points to keep.
+    -----------
+    Returns: X-data*ratio and y_data*ratio'''
+    if ratio is None or ratio <= 0 or ratio >1:
+        raise Exception("Ratio must be a number between 0 and 1")
+   
+    X_data_copy = X_data.copy()
+    y_data_copy = y_data.copy()
+    for index,labels_array in enumerate(y_data_copy):
+        labels_array = labels_array.ravel() # flatten the array
+        negative_indice = np.where(labels_array==0)[0] # keep only the negative labels indices
+        total_amount = len(negative_indice)
+        amount_to_keep = int(total_amount*ratio) # amount of positive data points to keep
+        
+        if amount_to_keep < 2: # keep at least 2 positive data points
+            continue
+        shuffled_indices = np.random.permutation(negative_indice)[:amount_to_keep] # shuffle the indices and keep the first ratio of the negative data points
+        y_data_copy[index] = y_data_copy[index][shuffled_indices] # sort the labels
+        X_data_copy[index] = X_data_copy[index][shuffled_indices] # sort the features
+        if len(y_data_copy[index]) != len(X_data_copy[index]):
+            raise Exception("The labels and features must have the same amount of data points")
+    return X_data_copy,y_data_copy
 def convert_partition_str_to_list(partition_str):
     '''This function will convert a partition string to a list of integers
     Args:
@@ -251,7 +316,7 @@ def fill_tprs_fpr_by_max_length(tprs, fprs):
     return tprs, fprs
 ### K GROUPS
 
-def bla(dataset, target_column, label_column, k, output_name, seperate_grna_path, y_labels_tup = None, constrained_guides = None):
+def create_k_balanced_groups(dataset, target_column, label_column, k, output_name, seperate_grna_path, y_labels_tup = None, constrained_guides = None):
     '''Given y_labels and k, create k groups with rougly eqaul amount of labels in each group
     Args: 
         dataset - path for the dataset
@@ -261,12 +326,16 @@ def bla(dataset, target_column, label_column, k, output_name, seperate_grna_path
         seperate_grna_path - path to save each group seperatly
         y_labels_tup - list of labels for each guide (optional)
         if y_labels_tup given it should be given the a list of guides!
-        constrained_guides - list of guides need to be kept in one group (Usauly for test set)
+        constrained_guides - list of guides need to be kept in one group (Usauly for test set) - NOTE: They will be kept sololy
         -----------
         Saves the groups in a csv file containing:
         Positives, Negatives, list of guides.
         -----------
         Save each gRNA group separtley in txt file
+        -----------
+        Example:     
+        create_k_balanced_groups("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","target","Label",12,"Hendel-Partition","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides",constrained_guides=cons_guides)
+
         '''
     if y_labels_tup is None: # y_labels not given, load them from the dataset
         dataset = pd.read_csv(dataset)
@@ -276,19 +345,23 @@ def bla(dataset, target_column, label_column, k, output_name, seperate_grna_path
         guides = y_labels_tup[1]
         y_labels = y_labels_tup[0]
     # Get the sum of the labels for each guide and sort it by descending order        
-    sum_labels = [np.sum(array > 0) for array in y_labels]      
+    sum_labels = [np.sum(array > 0) for array in y_labels] 
+    print(f'Total positives: {sum(sum_labels)}')     
     sorted_indices = np.argsort(sum_labels)[::-1]
     guides = list(guides)
+    keep_constrained_sololy = False
     if constrained_guides is not None:
-        constrained_guides = [guides.index(guide) for guide in constrained_guides]
+        if constrained_guides[1]:
+            keep_constrained_sololy = True
+        constrained_guides = [guides.index(guide) for guide in constrained_guides[0]]
         sorted_indices = [i for i in sorted_indices if i not in constrained_guides] # remove the constrained guides from the sorted indices
         
     # init K groups and fill them with features by the sorted indices
-    k_groups = fill_k_groups_indices(k, sum_labels = sum_labels, sorted_indices = sorted_indices, constrained_grna_indices=constrained_guides)
+    k_groups = fill_k_groups_indices(k, sum_labels = sum_labels, sorted_indices = sorted_indices, constrained_grna_indices=constrained_guides,keep_constraied_sololy=keep_constrained_sololy)
     write_guides_seperatley(k_groups, guides, seperate_grna_path)
     save_complete_partition_information(k_groups, y_labels, guides, output_name)
 
-def fill_k_groups_indices(k, sum_labels, sorted_indices, constrained_grna_indices = None):
+def fill_k_groups_indices(k, sum_labels, sorted_indices, constrained_grna_indices = None, keep_constraied_sololy = False):
         '''Greedy approch to fill k groups with ~ equal amount of labels
         Getting sum of labels for each indice and sorted indices by sum, filling the groups
         from the biggest amount to smallest adding to the minimum group
@@ -305,8 +378,9 @@ def fill_k_groups_indices(k, sum_labels, sorted_indices, constrained_grna_indice
         # Create k groups with 1 indice each from the sorted indices in descending order
         if constrained_grna_indices is not None:
             groups = [[sorted_indices[i]] for i in range(k-1)] # create k-1 groups
-            groups.append(constrained_grna_indices) # append the list of the constrained indices for k groups. 
-            k += len(constrained_grna_indices) - 1 # update k value
+            if not keep_constraied_sololy: #  append the list of the constrained indices for k groups. 
+                groups.append(constrained_grna_indices) 
+            k -= 1 # update k value
         else : groups = [[sorted_indices[i]] for i in range(k)] 
         
         for index in sorted_indices[k:]: # Notice [K:] to itreate over the remaining indices
@@ -314,6 +388,8 @@ def fill_k_groups_indices(k, sum_labels, sorted_indices, constrained_grna_indice
             min_sum_group = min(groups, key=lambda group: sum(sum_labels[i] for i in group), default=groups[0])
             # Add the series to the group with the smallest current sum
             min_sum_group.append(index)
+        if keep_constraied_sololy:
+            groups.append(constrained_grna_indices)
         return groups
 def write_guides_seperatley(k_groups, guides, output_path):
     '''Write each guides group to a txt file in the output path
@@ -361,10 +437,10 @@ def calculate_averages_partitions(df, K):
     Args:
         df - data frame with columns: Positives, Negatives, Guides_amount
         K - number of rows to union'''
-    combinations = list(combinations(df.index, K))
+    combinations_results = list(combinations(df.index, K))
     averages = {"Positives": [], "Negatives": [], "Guides_amount": []}
 
-    for combo in combinations:
+    for combo in combinations_results:
         selected_rows = df.loc[list(combo)]
         avg_pos = selected_rows['Positives'].sum()
         avg_neg = selected_rows['Negatives'].sum()
@@ -415,9 +491,10 @@ def concat_change_seq_df():
     merged["Index"] = merged.index
     merged.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed.csv",index=False)
 if __name__ == "__main__":
-    df = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/CHANGE-seq_HENDEL_intersect.csv")
-    cons_guides = df["Intersect_guides"]
-    bla("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","target","Label",12,"Hendel-Partition","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides",constrained_guides=cons_guides)
+   
+    
+
+    union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
     # #list_50 = [i for i in range(2,51)]
     # list_50 = [50]
     # dict_50_only_seq = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/Only_seq/1_partition_50/Combi",list_50)

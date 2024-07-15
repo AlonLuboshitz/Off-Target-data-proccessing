@@ -7,6 +7,7 @@ CHROM_COLUMN = "chrom"
 START_COLUMN = "chromStart"
 END_COLUMN = "chromEnd"
 BINARY_LABEL_COLUMN = "Label"
+READ_COUNT_COLUMN = "Read_count"
 FEATURES_COLUMNS = ["Chromstate_H3K27me3_peaks_binary","Chromstate_H3K27ac_peaks_binary",
                     "Chromstate_H3K9ac_peaks_binary","Chromstate_H3K9me3_peaks_binary"
                      ,"Chromstate_H3K36me3_peaks_binary","Chromstate_ATAC-seq_peaks_binary"

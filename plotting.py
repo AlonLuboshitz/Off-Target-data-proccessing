@@ -54,15 +54,18 @@ def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_ti
     plt.grid(True)
     plt.show()
     plt.savefig(output_path + f"/{general_title}.png")
-def plot_correlation(x, y, r_coeff, p_value, title, output_path):
+def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path):
     '''This function plots a scatter plot with a linear regression line, and adds the correlation coefficient and p-value to the plot.
     Args:
     1. x: A numpy array representing the x values.
     2. y: A numpy array representing the y values.
-    3. r_coeff: A float representing the correlation coefficient.
-    4. p_value: A float representing the p-value.
-    5. title: A string representing the title of the plot.
-    6. output_path: A string representing the output path for saving the plot.
+    3. x_axis_label: A string representing the x-axis label.
+    4. y_axis_label: A string representing the y-axis label.
+    5. r_coeff: A float representing the correlation coefficient.
+    6. p_value: A float representing the p-value.
+    7. title: A string representing the title of the plot.
+    8. output_path: A string representing the output path for saving the plot.
+    
     ----------
     Show the figure and saves it.'''
     plt.figure(figsize=(8, 6))
@@ -71,6 +74,8 @@ def plot_correlation(x, y, r_coeff, p_value, title, output_path):
     plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
     plt.title(title)
     plt.grid(True)
+    plt.xlabel(x_axis_label)
+    plt.ylabel(y_axis_label)
     plt.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}', fontsize=12, ha='center', va='center', transform=plt.gca().transAxes)
     plt.show()
     plt.savefig(output_path + f"/{title}.png")

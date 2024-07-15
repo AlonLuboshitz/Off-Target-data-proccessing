@@ -45,7 +45,7 @@ class run_models:
         self.epigenetic_window_size = 0
         if file_manager: # Not None
             self.file_manager = file_manager
-        else : raise RuntimeError("Trying to init model runner without file manager")
+        else : raise Exception("Trying to init model runner without file manager")
         
         self.features_columns = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
     ## initairs
@@ -496,18 +496,34 @@ class run_models:
             self.write_scores(key,y_test,y_scores_probs,auroc)  
     
     ## ENSEMBLE:
-    def create_ensemble(self, n_models, output_path, guides_train_list, seed_addition = 0):
+    def create_ensemble(self, n_models, output_path, guides_train_list, seed_addition = 0, x_features=None, y_labels=None,guides=None):
+        '''This function create ensemble of n_models and save them in the output path.
+        The models train on the guide list given in guides_train_list.
+        Each model created with diffrenet intitaion seed + a seed addition. This can be usefull to reproduce the model.
+        Positive ratio is the ratio of positive labels in the training set, if None all the positive labels will be used.
+        Args:
+        1. n_models - number of models to create.
+        2. output_path - path to save the models.
+        3. guides_train_list - list of guides to train on.
+        4. seed_addition - int to add to the seed for reproducibility.
+        5. positive_ratio - list of ratios for positive labels in the training set.
+        if positive ratio given, for each ratio a new folder will be created in the output path.
+        6. X_train, y_train - if given will be used for training the models.
+        ----------
+        Saves: n trained models in output_path.
+        Example: create_ensebmle(5,"/models",["ATT...TGG",...],seed_addition=10,positive_ratio=[0.5,0.7,0.9])'''
         if not self.init:
             raise RuntimeError("Trying to run model without setup")
-        # Get data
-        # self.set_data_reproducibility(True)
-        x_features, y_labels, guides = self.get_features()
-        guides_idx = self.keep_intersect_guides_indices(guides, guides_train_list) # keep only the train guides indexes
-        if (len(guides_idx) == len(guides)): # All guides are for training
-            x_train = np.concatenate(x_features, axis= 0)
-            y_train = np.concatenate(y_labels, axis= 0).ravel()
-        else:
-            x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
+        if x_features is None or y_labels is None or guides is None:
+            x_features, y_labels, guides = self.get_features()
+        else: # no data given, extract data from the file manager
+            guides_idx = self.keep_intersect_guides_indices(guides, guides_train_list) # keep only the train guides indexes
+            if (len(guides_idx) == len(guides)): # All guides are for training
+                x_train = np.concatenate(x_features, axis= 0)
+                y_train = np.concatenate(y_labels, axis= 0).ravel()
+            else:
+                x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
+        
         for j in range(n_models):
             self.set_deep_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
             classifier = self.train_model(X_train=x_train,y_train=y_train)

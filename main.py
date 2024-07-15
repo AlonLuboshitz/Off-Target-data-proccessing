@@ -1,16 +1,19 @@
 from Server_constants import   EPIGENETIC_FOLDER, BIG_WIG_FOLDER
-from Server_constants import HENDEL_DICT,CHANGESEQ_DICT
+from Server_constants import HENDEL_DICT,CHANGESEQ_DICT, MERGED_DICT
 
 from constants import FEATURES_COLUMNS
 from multiprocessing import Pool
 
 from file_management import File_management
 #from run_models import run_models
-from utilities import set_epigenetic_features_by_string, split_epigenetic_features_into_groups, create_guides_list, write_2d_array_to_csv, create_paths, keep_only_folders, add_row_to_np_array, extract_scores_labels_indexes_from_files,get_k_choose_n, find_target_folders, convert_partition_str_to_list
+from utilities import set_epigenetic_features_by_string, split_epigenetic_features_into_groups, create_guides_list
+from utilities import write_2d_array_to_csv, create_paths, keep_only_folders, add_row_to_np_array, extract_scores_labels_indexes_from_files
+from utilities import get_k_choose_n, find_target_folders, convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio
 from evaluation import eval_all_combinatorical_ensmbel, bar_plot_ensembels_feature_performance
+from features_engineering import generate_features_and_labels
 import os
 import random
-
+import numpy as np
 
 def parse_constants_dict(constants_dict):
     global VIVO_SILICO,VIVO_VITRO, ML_RESULTS_PATH, MODELS_PATH, TEST_GUIDES, SILICO_VITRO,TRAIN_GUIDES
@@ -229,7 +232,27 @@ def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data
     2. test_folder_path: str - the path to save the prediction of the model
     3. test_guide_path: str - the path to the test guides
     4. other_data: list - [paths] paths to the other data [0] silico, [1] vitro
-    5. silico - bool, indicating if the data is silico or vitro'''
+    5. silico - bool, indicating if the data is silico or vitro
+    ----------
+    example: test_on_other_data(model_path="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive"
+                       ,test_folder_path="/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives",
+                       test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides/tested_guides_12_partition.txt",
+                       other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None],silico=True)
+                       
+                          model_path="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive"
+    test_folder_path="/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives"
+    test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides/tested_guides_12_partition.txt"
+    other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None]
+    silico=True
+    positive_parts = os.listdir(model_path)
+    model_paths = [os.path.join(model_path,part) for part in positive_parts]
+    test_folder_paths = [os.path.join(test_folder_path,part) for part in positive_parts]
+    for test_folder_path in test_folder_paths:
+        if not os.path.exists(test_folder_path):
+            os.makedirs(test_folder_path)
+    args = [(model_path,test_folder_path,test_guide_path,other_data,silico) for model_path,test_folder_path in zip(model_paths,test_folder_paths)]
+    with Pool(processes=10) as pool:
+        pool.starmap(test_on_other_data,args)'''
     file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER, other_data[0] ,other_data[1])
     file_manager.set_ml_results_path(test_folder_path)
     file_manager.set_models_path(model_path)
@@ -246,8 +269,10 @@ def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
+    #ensmbels_paths = file_manager.get_model_path()
     for ensmbel in ensmbels_paths:
             test_enmsbel_scores(runner, ensmbel, guides, score_path)
+    # test_enmsbel_scores(runner,ensmbels_paths,guides,score_path)
     
 
 def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
@@ -386,7 +411,7 @@ def test_performance_by_data(partition_amount = 11, n_models=50, n_ensmbels=1, M
         groups =  os.listdir(Models_folder) ## Partitions
         for group in groups:
             # Get all the partitions in the group
-            partitions = [convert_partition_str_to_list(partition) for partition in os.listdir(os.path.join(Models_folder,group))] 
+            partitions = [convert_partition_str_to_list(partition) for partition in os.listdir(os.path.join(Models_folder,group))]
             args = [(n_models,partition,n_ensmbels,None,(test_path,test_guides),group) for partition in partitions]
             num_processes = min(os.cpu_count(), len(args))
             with Pool(processes=num_processes) as pool:
@@ -399,7 +424,54 @@ def test_performance_by_data(partition_amount = 11, n_models=50, n_ensmbels=1, M
             group_dir = f"{i}_group"
             args = [(n_models,partition,n_ensmbels,None,(test_path,test_guides),group_dir) for partition in indices]
 
+def performance_by_increasing_positives(data_path, model_path, training_guides_path):
+    x_data_points,y_data_points,guides = generate_features_and_labels(data_path=data_path,manager=None,encoded_length=23*6,bp_presenation=6,if_bp=False,
+                                 if_only_seq=True,if_seperate_epi=False,epigenetic_window_size=2000,features_columns=None,
+                                 if_data_reproducibility=False)
+    x_negative_data_points,y_negative_labels = keep_negatives_by_ratio(x_data_points,y_data_points,1)
+    ratios = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1]
+    x_features_by_ratio = []
+    y_labels_by_ratio = []
+    outputs_path_by_ratio = []
+    for ratio in ratios:
+        x_features,y_labels = keep_positives_by_ratio(x_data_points,y_data_points,ratio)
+        # turn y_labels into binary
+        for guide_labels in y_labels:
+            guide_labels[:] = 1
             
+        
+        # concatenate the negative data points
+        merged_x = [np.concatenate((arr1, arr2), axis=0) for arr1, arr2 in zip(x_features, x_negative_data_points)]
+        merged_y = [np.concatenate((arr1, arr2), axis=0) for arr1, arr2 in zip(y_labels, y_negative_labels)]
+        for x,y in zip(merged_x,merged_y):
+            if len(x) != len(y):
+                raise RuntimeError(f"X: {len(x)} Y: {len(y)}")
+
+        x_features_by_ratio.append(merged_x)
+        y_labels_by_ratio.append(merged_y)
+        outputs_path_by_ratio.append(os.path.join(model_path,f"_{ratio}"))
+   
+    # Create multiproccesses args for each ratio
+    test_guides = set(create_guides_list("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides/tested_guides_12_partition.txt",0))
+    train_guides = set(guides) - test_guides
+    train_guides = list(train_guides)
+    
+    args = [(50,path,train_guides,10,x_merged,y_merged,guides) for path,x_merged,y_merged in zip(outputs_path_by_ratio,x_features_by_ratio,y_labels_by_ratio)]
+    
+    min_processes = min(os.cpu_count(),int(len(args)/1))
+    with Pool(processes=min_processes) as pool:
+        pool.starmap(positive_ratio_multi_process,args)
+def positive_ratio_multi_process(n_ensmbels,path,train_guides,seed,x_features,y_labels,all_guides):
+    try:
+        file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,"/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv" , "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv")
+        runner = init_run_models(file_manager)
+    except Exception as e:
+        print(e)
+    runner.set_model(4,False)
+    runner.set_cross_validation(3,False)
+    runner.set_features_method(1,False)
+    runner.setup_runner()
+    runner.create_ensemble(n_ensmbels,path,train_guides,seed,x_features,y_labels,all_guides)
 
 def performance_by_data(train, test, evalute):
     '''This function run the analysis to evaluate the performance of models/ensmbels while increasing the data amount.
@@ -416,6 +488,7 @@ def combiscore_by_folder(base_path):
     
     # turn the list into list of tuples (for multi process)
     scores_nd_combi_paths = [(path,) for path in scores_nd_combi_paths]
+    
     with Pool(processes=10) as pool:
         pool.starmap(process_single_ensemble_scores,scores_nd_combi_paths)
 ### With creation of ensemble i seed is *100 and not 10! need to change back!
@@ -432,19 +505,22 @@ def epigeneitc_ensemble_pipe():
     pass
 
 if __name__ == "__main__":
-    parse_constants_dict(CHANGESEQ_DICT)
+    #parse_constants_dict(MERGED_DICT)
+
+    performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")
     #epigeneitc_ensemble_pipe()
     #only_seq_ensemble_pipe()
+    #create_ensmble_only_seq(partition_num=[1],n_models=50,n_ensmbels=1)
     #create_performance_by_data()
-    # test_performance_by_data(Models_folder="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence",
+    # test_performance_by_data(Models_folder="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive",
     #                          test_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
     #                          test_guides="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/tested_guides_12_partition.txt")
-    #combiscore_by_folder("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence")
+    #combiscore_by_folder("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives")
     # bar_plot_ensembels_feature_performance(only_seq_combi_path="/localdata/alon/ML_results/Change-seq/Train_vitro_test_genome/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi",
     #                                        epigenetics_path="/localdata/alon/ML_results/Change-seq/Train_vitro_test_genome/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary",
     #                                        n_models_in_ensmbel=50,output_path="/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq/train_vitro_test_silico",
     #                                        title="Train_vitro_test_silico")
-    test_on_other_data(model_path="/localdata/alon/Models/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50"
-                       ,test_folder_path="/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6",
-                       test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides/Test_guides/tested_guides_7_partition.txt",
-                       other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None],silico=True)
+    
+ 
+    
+    

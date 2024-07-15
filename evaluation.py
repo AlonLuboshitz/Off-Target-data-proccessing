@@ -37,8 +37,9 @@ for example: '''
 def get_auc_by_tpr(tpr_arr):
     amount_of_points = len(tpr_arr)
     x_values = np.arange(1, amount_of_points + 1) # x values by lenght of tpr_array
+    x_values = x_values / amount_of_points # normalize x values
     calculated_auc = auc(x_values,tpr_arr)
-    calculated_auc = calculated_auc / amount_of_points # normalizied auc
+    #calculated_auc = calculated_auc / amount_of_points # normalizied auc
     return calculated_auc,amount_of_points
 
 
@@ -241,20 +242,21 @@ def bar_plot_ensembels_feature_performance(only_seq_combi_path, epigenetics_path
     feature_scores = get_mean_std_from_ensmbel_results(feature_dict)
     plot_all_ensmbels_means_std(feature_scores,title, feature_stats, output_path, n_models_in_ensmbel)
 
-def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, data_name):
+def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, data_name,x_label = "Data points"):
     '''Given a base path with the results of the ensembles for different amount of data points
     Each amount of data_points is in a different folder
     Retrive the combi results from each folder - combine the combi results from each folder and calculate
     Mean and STD for each amount of data points
     Plot each amount of data points and the mean performance with std'''
     group_dict = {}
-    num_of_groups = len(os.listdir(base_path))
-    for group in range(1,num_of_groups+1):
+    folders_names = os.listdir(base_path)
+    folder_paths = create_paths(base_path)
+    for data_group,data_folder in zip(folders_names,folder_paths):
         
-        group_key = f'{group}_part'
-        if group == num_of_groups:
-            group_key = 'All'
-        group_paths = find_target_folders(os.path.join(base_path,f'{group}_group'),["Combi"])
+        # group_key = f'{group}_part'
+        # if group == num_of_groups:
+        #     group_key = 'All'
+        group_paths = find_target_folders(data_folder,["Combi"])
         group_paths.sort() # sort by partition number
         group_paths = [os.path.join(path,"Combi") for path in group_paths] # Add Combi folder to each path
         partition_num = len(group_paths)
@@ -262,17 +264,17 @@ def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, data_
         values_arr = np.zeros(shape=(partition_num,3)) 
         for partition,path in enumerate(group_paths):
             values_arr[partition] = extract_combinatorical_results(path,[n_models_in_ensmbel])[n_models_in_ensmbel]
-        group_dict[group_key] = values_arr.mean(axis=0),values_arr.std(axis=0)  
+        group_dict[data_group] = values_arr.mean(axis=0),values_arr.std(axis=0)  
     # Sort dict by keys
     # group_dict = dict(sorted(group_dict.items()))   
     x_vals = [key for key in group_dict.keys()]
     y_vals = [value[0]  for value in group_dict.values()] 
     y_stds = [value[1] for value in group_dict.values()]
-    plot_ensemeble_preformance(y_values=[val[0] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUROC {data_name}",y_label="AUROC",x_label="Data points",stds=[val[0] for val in y_stds],output_path=output_path)
-    plot_ensemeble_preformance(y_values=[val[1] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUPRC {data_name}",y_label="AUPRC",x_label="Data points",stds=[val[1] for val in y_stds],output_path=output_path)
-    plot_ensemeble_preformance(y_values=[val[2] for val in y_vals],x_values=x_vals,title=f"Performance by data points N-rank {data_name}",y_label="N-rank",x_label="Data points",stds=[val[2] for val in y_stds],output_path=output_path)
+    plot_ensemeble_preformance(y_values=[val[0] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUROC {data_name}",y_label="AUROC",x_label=x_label,stds=[val[0] for val in y_stds],output_path=output_path)
+    plot_ensemeble_preformance(y_values=[val[1] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUPRC {data_name}",y_label="AUPRC",x_label=x_label,stds=[val[1] for val in y_stds],output_path=output_path)
+    plot_ensemeble_preformance(y_values=[val[2] for val in y_vals],x_values=x_vals,title=f"Performance by data points N-rank {data_name}",y_label="N-rank",x_label=x_label,stds=[val[2] for val in y_stds],output_path=output_path)
 
-def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, job, output_path, guides_list = None,
+def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, job, plot_output_path, data_output_path, guides_list = None,
                                features_columns = ['target','offtarget_sequence','chrom','chromStart','chromEnd']):
     '''This function will evaluate the concurence between 2 off target data sets. 
     The function will extract the matching guides from both data sets. 
@@ -290,9 +292,11 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
     7. output_path - path to save the plots.
     8. guides_list - list of guides to evaluate.
     Example:
+        
     gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
     gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
-    evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","CHANGE-seq"), "Read_count", "binary","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq")
+    evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","CHANGE-seq"), "Read_count", "binary","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")
+
     '''
     assert job in ['binary','regression'], "Job must be binary or regression"
     # Read the data
@@ -305,6 +309,7 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
     guide_data_2 = guide_data_2[guide_data_2[label_column] > 0]
     # Merge the data
     merged_df = merge_ots_replicates_values(guide_data_1, guide_data_2, label_column, features_columns, job)
+    
     # Rank the data 1 model,2 lables
     if job == 'binary':
         tpr,fpr,percision,baseline = convert_label_to_tpr_fpr_percision(merged_df, 'label_df1', 'label_df2')
@@ -318,8 +323,8 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
         percs = [percision,percision_2]
         # Create title list
         title = [f"{title[0]} vs {title[1]}", f"{title[1]} vs {title[0]}" ]
-        plot_roc(fpr_list=fprs,tpr_list=tprs,aurocs=aucs,titles=title,output_path=output_path,general_title="intersect_6_roc")
-        plot_pr(recall_list=tprs,precision_list=percs,auprcs=auprcs,titles=title,output_path=output_path,general_title="intersect_6_pr")
+        plot_roc(fpr_list=fprs,tpr_list=tprs,aurocs=aucs,titles=title,output_path=plot_output_path,general_title="intersect_6_roc")
+        plot_pr(recall_list=tprs,precision_list=percs,auprcs=auprcs,titles=title,output_path=plot_output_path,general_title="intersect_6_pr")
     else : # Job is regression
         x_labels,y_labels = merged_df['label_df1'].values,merged_df['label_df2'].values
         x_lables_log = x_labels + 1 # add 1 to avoid log(0)
@@ -328,9 +333,14 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
         r,p = pearson_correlation(x_labels,y_labels)
         r_log,p_log = pearson_correlation(x_lables_log,y_labels_log)
         title = f"{title[0]} vs {title[1]}"
-        plot_correlation(x=x_labels,y=y_labels,r_coeff=r,p_value=p,title=title,output_path=output_path)
-        plot_correlation(x=x_lables_log,y=y_labels_log,r_coeff=r_log,p_value=p_log,title=f'{title} - Log',output_path=output_path)
-        pass
+        plot_correlation(x=x_labels,y=y_labels,x_axis_label=title[0], y_axis_label=title[1],r_coeff=r,p_value=p,title=title,output_path=plot_output_path)
+        plot_correlation(x=x_lables_log,y=y_labels_log,x_axis_label=title[0], y_axis_label=title[1],r_coeff=r_log,p_value=p_log,title=f'{title} - Log',output_path=plot_output_path)
+    # Save the data
+    columns = {"label_df1" : title[0], "label_df2" : title[1]}
+    merged_df.rename(columns=columns, inplace=True)
+    data_output_path = os.path.join(data_output_path, f"{title[0]}_vs_{title[1]}_{job}.csv")
+    merged_df.to_csv(data_output_path, index = False)
+    
 def off_target_data_by_intersecting_guides(ots_data_1, ots_data_2, guide_column, guide_list = None):
     '''This function takes two off target data frames and returns only the rows with guides presented in both data frames.
     If guide list given is returns rows with guides presented in the list.
@@ -428,9 +438,10 @@ def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
     return tpr_values, fpr_values, precision_values, perc_baseline
    
 if __name__ == "__main__":
-    #performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence",50,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts","vivo-silico-hendel")
-    scores_path = ["/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/11_group/1-2-3-4-5-6-7-8-9-10-11_partition/1-2-3-4-5-6-7-8-9-10-11_partition_50/Scores/ensemble_1.csv",
-                   "/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50/Scores/ensemble_1.csv"]
-    titles = ["Hendel on Hendel","CHANGE-seq on CHANGE-seq"]
-    plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","Own_Performance")
+    # performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives",50,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts","Increasing positives","Positive ratio")
     
+    gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
+    gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
+    evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","CHANGE-seq"), "Read_count", "binary","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")
+    # models_paths=create_paths()
+    # plot_roc_pr_for_ensmble_by_paths()

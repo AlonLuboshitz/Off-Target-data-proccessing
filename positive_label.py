@@ -8,7 +8,6 @@ import time
 from utilities import validate_path, create_folder, remove_dir_recursivly, get_bed_folder
 
 ORDERED_COLUMNS = ['chrom','chromStart','chromEnd','Position','Filename','strand','offtarget_sequence','target','realigned_target','Read_count','missmatches','insertion','deletion','bulges','Label']
-
 #### Identified guideseq preprocessing functions ####
 
 def process_folder(input_folder):
@@ -629,7 +628,39 @@ def remove_exsiting_epigenetics(data,bed_type_nd_paths,full_match=False):
         new_chrom_information.append((chrom_type,paths_list))
     return new_chrom_information
 
-
+def combine_data_from_diffrenet_studies(studies_list, target_column, with_intersecting = False):
+    '''This function combines data from different studies.
+    It assums the data is already divided to positives and negatives or read count is assigned.
+    Further more: NOTE BOTH DATA FRAMES SHOULD HAVE CORRESPONDING COLUMNS
+    Args:
+    1. studies_list - list of data frames with the data from different studies.
+    2. target_column - column with the target sequence.
+    3. with_intersecting - boolean, if True the function will merge the data frame and keep intersecting guides.
+    if False the function will only concat the data frames by removing the intersecting guides from both data frames.
+    ------------
+    Returns: data frame with the combined data.'''
+    if not studies_list:
+        raise ValueError("No data frames given to combine.")
+    guides_set_list = []
+    for data in studies_list:
+        # if not target_column in any(data.columns):
+        #     raise ValueError(f"No target column in the data: {data.info()}")
+        guides_set_list.append(set(data[target_column]))
+    intersecting_guides = set.intersection(*guides_set_list)
+    all_guides = set.union(*guides_set_list)
+    diffrence_guides = all_guides - intersecting_guides
+    # remove intersecting guides from data frames
+    new_data_list = []
+    for data in studies_list:
+        data = data[~data[target_column].isin(intersecting_guides)]
+        new_data_list.append(data)
+    # validate all guides is equal to the guides of the data frames
+    merged_data = pd.concat(new_data_list, axis = 0, ignore_index = True)
+    merged_data_guides = set(merged_data[target_column])
+    if merged_data_guides != diffrence_guides:
+        raise ValueError("Not all guides are in the data frames.")
+    return merged_data
+    
 '''
 function gets path for identified (guideseq output data) folder and calls:
 process_folder function, which creates csv folder named: identified_labeled_sub_only
@@ -642,8 +673,16 @@ if __name__ == '__main__':
     #preprocess_identified_files("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/40_exp","identified",2,"40",True)
     #transform_casofiner_into_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Negatives/sgRNA_caso_output.txt")
     #merge_positive_negative(positives="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_guideseq.csv",negatives="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Negatives/sgRNA_caso_output.csv",output_name="merged_gs_caso",output_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab",target_column="target",remove_bulges=True)
-   
-    
+    # merged_data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies/hendel_changeseq.csv")
+    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Negatives/sgRNA_caso_output.csv")
+    #print(len(set(data['target'])))
+    print(len(data))
+    print(sum(data['Read_count']==0))
+    print(data['Label'].value_counts())
+    data.loc[data['Label'] == 0, 'Read_count'] = 0
+    print(sum(data['Read_count']==0))
+    #data.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed_read_count.csv")
+
     
     
     

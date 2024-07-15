@@ -10,7 +10,7 @@ from pybedtools import BedTool
 #from common_variables import 
 from sklearn.utils import shuffle
 from file_management import File_management
-from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN
+from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN,READ_COUNT_COLUMN
 ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 ## in common variables class there are columns for: 
 '''1. TARGET - gRNA seq column
@@ -48,8 +48,8 @@ Function: Store x and y lists with x features after encoding, and coresponding y
 Iterate on each gRNA : Data frame and extract the Data
 Outputs --> x & y lists with N nd.arrays each of them is for gRNA (N - total number of gRNAs)
 Uses - internal functions for seq encoding, epigentic encoding, and bp intersection of epigenetics with seq'''
-def generate_features_and_labels(data_table, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility):
-    splited_guide_data,guides = create_data_frames_for_features(data_table, if_data_reproducibility)
+def generate_features_and_labels(data_path, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility):
+    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility)
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     ALL_INDEXES.clear() # clear indexes
@@ -74,7 +74,7 @@ def generate_features_and_labels(data_table, manager, encoded_length, bp_presena
         ALL_INDEXES.append(guide_data_frame.index)
         x_data_all.append(x_data)
         
-        y_labels_all.append(guide_data_frame[[BINARY_LABEL_COLUMN]].values) # add label values by extracting from the df by series values.
+        y_labels_all.append(guide_data_frame[[READ_COUNT_COLUMN]].values) # add label values by extracting from the df by series values.
     del splited_guide_data # free memory
     return (x_data_all,y_labels_all,guides)
 
@@ -373,10 +373,12 @@ def get_duplicates(file_manager):
         for ots in otss:
             file.write(f"OTS: {ots[0]}, gRNA: {ots[1]}\n")
 if __name__ == "__main__":
-    from Server_constants import EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH
-    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,CHANGESEQ_GS_EPI , DATA_PATH)
-    x_features, y_labels, guides = generate_features_and_labels(file_manager.get_merged_data_path(), file_manager,
+    from Server_constants import EPIGENETIC_FOLDER, BIG_WIG_FOLDER , DATA_PATH,TESTSSS
+    from utilities import keep_positives_by_ratio
+#    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,TESTSSS , DATA_PATH)
+    x_features, y_labels, guides = generate_features_and_labels(TESTSSS, None,
                                                                  23*6, 6, False, True, False, 2000, [], False)
+    keep_positives_by_ratio(x_features, y_labels, 0.5)
     
     
     
