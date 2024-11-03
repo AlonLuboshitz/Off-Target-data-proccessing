@@ -9,7 +9,9 @@ import os
 from pybedtools import BedTool
 #from common_variables import 
 from sklearn.utils import shuffle
-from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN
+from file_management import File_management
+from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN,READ_COUNT_COLUMN
+ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 ## in common variables class there are columns for: 
 '''1. TARGET - gRNA seq column
    2. OFFTARGET- off-target seq column
@@ -33,14 +35,11 @@ def create_data_frames_for_features(data, if_data_reproducibility):
         guides = sorted(set(data_table[TARGET_COLUMN])) 
     else : 
         guides = list(set(data_table[TARGET_COLUMN]))
-        print(guides)
         guides = shuffle(guides)
-        print(guides)
-    # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
+        # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
     df_dict = {grna: group for grna, group in data_table.groupby(TARGET_COLUMN)}
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
-
     return (result_dataframes, guides)
 
 '''Args:
@@ -49,11 +48,11 @@ Function: Store x and y lists with x features after encoding, and coresponding y
 Iterate on each gRNA : Data frame and extract the Data
 Outputs --> x & y lists with N nd.arrays each of them is for gRNA (N - total number of gRNAs)
 Uses - internal functions for seq encoding, epigentic encoding, and bp intersection of epigenetics with seq'''
-def generate_features_and_labels(data_table, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility):
-    splited_guide_data,guides = create_data_frames_for_features(data_table, if_data_reproducibility)
+def generate_features_and_labels(data_path, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility):
+    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility)
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
-   
+    ALL_INDEXES.clear() # clear indexes
     for guide_data_frame in splited_guide_data.values(): # for every guide get x_features by booleans
         # get seq info - represented in all!
         seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = bp_presenation) #int8
@@ -72,7 +71,7 @@ def generate_features_and_labels(data_table, manager, encoded_length, bp_presena
         else : # add features into 
             x_data = guide_data_frame[features_columns].values
             x_data = np.append(seq_info, x_data, axis = 1)
-        
+        ALL_INDEXES.append(guide_data_frame.index)
         x_data_all.append(x_data)
         
         y_labels_all.append(guide_data_frame[[BINARY_LABEL_COLUMN]].values) # add label values by extracting from the df by series values.
@@ -144,6 +143,26 @@ def seq_to_one_hot(sequence, seq_guide,encoded_length,bp_presenation):
             except ValueError:  # Non-ATCG base found
                 pass
     return onehot
+'''1.2 Reverse one hot encoding to sequence'''
+def reversed_ont_hot_to_seq(one_hot, bp_presenation):
+    bases = ['A', 'T', 'C', 'G']
+    sequence = ''
+    guide_seq = ''
+    for i in range(int(len(one_hot) / bp_presenation)):
+        base_indices = np.nonzero(one_hot[i * bp_presenation:i * bp_presenation + 4])[0] # get indices of 1's
+        # Check mismatchess
+        if one_hot[i*bp_presenation + 4] == 1: # mismatch
+            # First base is ots second is gRNA
+            sequence += bases[base_indices[0]]
+            guide_seq += bases[base_indices[1]]
+        elif one_hot[i*bp_presenation + 5] == 1: # mismatch
+             # First base is gRNA second is ots
+            sequence += bases[base_indices[1]]
+            guide_seq += bases[base_indices[0]]
+        else : # no mismatch add to both sequences the same value
+            sequence += bases[base_indices[0]]
+            guide_seq += bases[base_indices[0]]
+    return sequence, guide_seq
 
 '''2. bigwig (base pair epigentics) to one hot
 Fill vector sized |encoded length| with values from bigwig file. 
@@ -241,7 +260,13 @@ def update_y_values_by_intersect(intersect_tmp, start, window_size):
     return y_values
 
 ## Data and features manipulation
-
+'''Function to extract the guides indexes given which guides to keep.
+The guides to keep are given as a list of indexes.
+The function take the guides_indexes and return from ALL_INDEXES and spesific guide indexes'''
+def get_guides_indexes(guide_idxs):
+    choosen_indexes = [index for idx in guide_idxs for index in ALL_INDEXES[idx]]
+    choosen_indexes = np.array(choosen_indexes)
+    return choosen_indexes
 
 '''given feature list, label list split them into
 test and train data.
@@ -325,3 +350,35 @@ def get_tp_tn(y_test,y_train):
         print("error")
     tp_ratio = tp_test / (tp_test + tn_test)
     return (tp_ratio,tp_test,tn_test,tp_train,tn_train)
+def get_duplicates(file_manager):
+    x_features, y_labels, guides = generate_features_and_labels(file_manager.get_merged_data_path(), file_manager,
+                                                                 23*6, 6, False, True, False, 2000, [], False)
+    # Check if there are duplicates in x_features
+    x_features = np.concatenate(x_features, axis=0)
+    unique_ele,counts = np.unique(x_features, axis=0, return_counts=True)
+    duplicates = unique_ele[counts > 1]
+    unuiq = len(unique_ele)
+    not_un = len(x_features)
+    print("len(duplicates):", len(duplicates))
+    print("not_un - unuiq:", not_un - unuiq)
+    print("Unique elements:", unique_ele)
+    print("Counts:", counts)
+    otss = []
+    if unuiq < not_un:
+        print("There are duplicates in x_features")
+        for ele in duplicates:
+            otss.append(reversed_ont_hot_to_seq(ele, 6))
+    # save otss to txt file
+    with open("otss.txt", "w") as file:
+        for ots in otss:
+            file.write(f"OTS: {ots[0]}, gRNA: {ots[1]}\n")
+if __name__ == "__main__":
+    from Server_constants import EPIGENETIC_FOLDER, BIG_WIG_FOLDER , DATA_PATH,TESTSSS
+    from utilities import keep_positives_by_ratio
+#    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,TESTSSS , DATA_PATH)
+    x_features, y_labels, guides = generate_features_and_labels(TESTSSS, None,
+                                                                 23*6, 6, False, True, False, 2000, [], False)
+    keep_positives_by_ratio(x_features, y_labels, 0.5)
+    
+    
+    

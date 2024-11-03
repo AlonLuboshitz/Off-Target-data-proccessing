@@ -6,23 +6,22 @@
 
 FORCE_USE_CPU = False
 
-from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features
+from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features, get_guides_indexes
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
-from input_validation import validate_dictionary_input
+from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import RandomOverSampler, SMOTE
-from test import keep_groups
 import pandas as pd
 import numpy as np
-import sys
 import time
 import logging
 import os
 if FORCE_USE_CPU:
     os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
-#os.environ["CUDA_VISIBLE_DEVICES"]="1"  
+os.environ["CUDA_VISIBLE_DEVICES"]="1"  
 import tensorflow as tf
+
 logger = tf.get_logger()
 logger.setLevel(logging.ERROR)
 
@@ -35,52 +34,113 @@ class run_models:
         self.ml_task = "" # class/reg
         self.shuffle = True
         self.if_os = False
+        self.os_valid = False
         self.bp_presntation = 6
         self.guide_length = 23
         self.encoded_length =  self.guide_length * self.bp_presntation
         self.init_booleans()
-        self.init_deep_hyper_params()
+        self.init_model_dict()
+        self.init_cross_val_dict()
+        self.init_features_methods_dict()
         self.epigenetic_window_size = 0
         if file_manager: # Not None
             self.file_manager = file_manager
+        else : raise Exception("Trying to init model runner without file manager")
         
         self.features_columns = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
     ## initairs
     def init_booleans(self):
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_epi_features = False  
+        self.method_init = False
+    
     def init_deep_hyper_params(self):
         self.hyper_params = {'epochs': 5, 'batch_size': 1024, 'verbose' : 2}# Add any other fit parameters you need
-    def setup_runner(self):
-        self.set_model()  # set model (xgb, cnn, rnn)
-        self.set_over_sampling() # set over sampling
-        self.set_cross_validation() # set method
+    
+    def init_model_dict(self):
+        ''' Create a dictionary for ML models'''
+        self.model_dict = {
+            1: "LOGREG",
+            2: "XGBOOST",
+            3: "XGBOOST_CW",
+            4: "CNN",
+            5: "RNN"
+        }
+        self.model_type_initiaded = False
+    
+    def init_cross_val_dict(self):
+        ''' Create a dictionary for cross validation methods'''
+        self.cross_val_dict = {
+            1: "Leave_one_out",
+            2: "K_cross",
+            3: "Ensmbel"
+        }
+        self.cross_val_init = False
+    
+    def init_features_methods_dict(self):
+        ''' Create a dictionary for running methods'''
+        self.features_methods_dict = {
+            1: "Only_sequence",
+            2: "Epigenetics_by_features",
+            3: "Base_pair_epigenetics_in_Sequence",
+            4: "Spatial_epigenetics"
+        }
+        self.method_init = False
+    
+    def validate_initiation(self):
+        if not self.model_type_initiaded:
+            raise RuntimeError("Model type was not set")
+        elif not self.method_init:
+            raise RuntimeError("Method type was not set")
+        elif not self.cross_val_init:
+            raise RuntimeError("Cross validation type was not set")
+        elif not self.os_valid:
+            raise RuntimeError("Over sampling was not set")
+        
+
+    def setup_runner(self, model_num = None, cross_val = None, features_method = None, over_sampling = None):
+        self.set_model(model_num)
+        self.set_cross_validation(cross_val)
+        self.set_features_method(features_method)
+        self.set_over_sampling('n') # set over sampling
         self.set_data_reproducibility(False) # set data, model reproducibility
         self.set_model_reproducibility(False)
         self.set_functions_dict()
+        self.validate_initiation()
         self.init = True
-
+    
+    # def setup_ensmbel_runner(self):
+    #     self.set_model()
+    #     self.set_boleans_method()
+    #     self.set_over_sampling()
+    #     self.set_data_reproducibility(False)
+    #     self.set_model_reproducibility(False)
+    #     self.init = True
     '''Set reproducibility for data and model'''
     def set_data_reproducibility(self, bool):
         self.data_reproducibility = bool
     def set_model_reproducibility(self, bool):
-        self.random_state = np.random.randint(100) # set random state for model
         self.model_reproducibility = bool
         if self.model_reproducibility:
             if self.ml_type == "DEEP":
                 self.set_deep_seeds()
             else : 
                 self.set_ml_seeds()
+        else : # set randomness
+            self.set_random_seeds(False)
     '''Set seeds for reproducibility'''
-    def set_deep_seeds(self):
-        tf.random.set_seed(42) # Set seed for Python's random module (used by TensorFlow internally)
-        tf.keras.utils.set_random_seed(42)  # sets seeds for base-python, numpy and tf
+    def set_deep_seeds(self,seed=42):
+        tf.random.set_seed(seed) # Set seed for Python's random module (used by TensorFlow internally)
+        tf.keras.utils.set_random_seed(seed)  # sets seeds for base-python, numpy and tf
         tf.config.experimental.enable_op_determinism()
     def set_ml_seeds(self):
         #np.random.seed(42) # set np seed
         self.random_state = 42
-    def set_random_seeds(self):
-        tf.random.set_seed(seed=int(time.time())) # Set seed for Python's random module (used by TensorFlow internally)
-        tf.keras.utils.set_random_seed(seed=int(time.time()))  # sets seeds for base-python, numpy and tf
+    def set_random_seeds(self,seed):
+        loc_seed =int(time.time())
+        if seed:
+            loc_seed = seed
+        tf.random.set_seed(loc_seed) # Set seed for Python's random module (used by TensorFlow internally)
+        tf.keras.utils.set_random_seed(loc_seed)  # sets seeds for base-python, numpy and tf
 
     ## Features booleans setters
     def set_only_seq_booleans(self):
@@ -98,55 +158,89 @@ class run_models:
     def set_epigenetic_feature_booleans(self):
         self.if_only_seq = self.if_bp = self.if_seperate_epi = False
         self.if_epi_features = True
+
     ## Model setters
     def set_hyper_params_class_wieghting(self, y_train):
         class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
         class_weight_dict = dict(enumerate(class_weights))
         self.hyper_params['class_weight'] = class_weight_dict
     
-    ''' Set cross validation method and k value if needed.'''
-    def set_cross_validation(self):
-        answer = input("Set cross validation method:\n1. Leave one out\n2. K cross validation\n")
-        if answer == "1":
+    def set_model(self, model_num_answer = None ,add_path = True):
+        if self.model_type_initiaded:
+            return # model was already set
+        model_num_answer = validate_dictionary_input(model_num_answer, self.model_dict)
+        '''Given an answer - model number, set the ml_type and ml name'''
+        if model_num_answer > 0 and model_num_answer < len(self.model_dict):
+            if model_num_answer < 4: # ML models
+                self.ml_type = "ML"
+            else : # Deep models
+                self.ml_type = "DEEP"
+                self.init_deep_hyper_params()
+            self.ml_name = self.model_dict[model_num_answer]
+            self.model_type_initiaded = True
+            if add_path:
+                self.file_manager.add_type_to_models_paths(self.ml_name) # add model name to models and results path
+
+    def set_cross_validation(self, cross_val_answer = None, add_path = True):
+        if not self.model_type_initiaded:
+            raise RuntimeError("Model type need to be setted before cross val type")
+        if self.cross_val_init:
+            return # cross val was already set
+        ''' Set cross validation method and k value if needed.'''
+        cross_val_answer = validate_dictionary_input(cross_val_answer, self.cross_val_dict)
+        if cross_val_answer == 1:
             self.cross_validation_method = "Leave_one_out"
             self.k = ""
-        elif answer == "2":
+        elif cross_val_answer == 2:
             self.cross_validation_method = "K_cross"
             self.k = int(input("Set K (int): "))
+        elif cross_val_answer == 3:
+            self.cross_validation_method = "Ensemble"
+        if add_path:
+            self.file_manager.add_type_to_models_paths(self.cross_validation_method) # add cross_val to models and results path
+        self.cross_val_init = True
     
-    ''' Create a dictionary for ML models and ask for input to choose from.'''
-    def set_model(self):
-        self.model_dict = {
-            1: "LOGREG",
-            2: "XGBOOST",
-            3: "XGBOOST_CW",
-            4: "CNN",
-            5: "RNN"
-        }
-        answer = input(f"Please enter ML type: {self.model_dict}\n") # ask for ML model
-        answer = int(answer)
-        validate_dictionary_input(answer, self.model_dict) # validate input by model dictionary
-        if answer < 4:
-            self.ml_type = "ML"
-        else : 
-            self.ml_type = "DEEP"
-        self.ml_name = self.model_dict[answer]
-    
-    
-    
-      
+    def set_features_method(self, feature_method_answer = None, add_path = True):  
+        if not self.model_type_initiaded and not self.cross_val_init:
+            raise RuntimeError("Model type and cross val need to be setted before features method")
+        if self.method_init:
+            return # method was already set
+        '''Set running method'''
+        feature_method_answer = validate_dictionary_input(feature_method_answer, self.features_methods_dict)
+        booleans_dict = {
+            1: self.set_only_seq_booleans,
+            2: self.set_epigenetic_feature_booleans,
+            3: self.set_bp_in_seq_booleans,
+            4: self.set_epi_window_booleans
+        }   
+        booleans_dict[feature_method_answer]()
+        if add_path:
+            self.file_manager.add_type_to_models_paths(self.features_methods_dict[feature_method_answer]) # add method to models and results path
+        self.method_init = True
+
+    '''Set features columns for the model'''
+    def set_features_columns(self, features_columns):
+        if features_columns:
+            self.features_columns = features_columns
+        else: raise RuntimeError("Trying to set features columns for model where no features columns were given")
         
 
                
     ## Over sampling setter
-    def set_over_sampling(self):
-        if_os = input("press y/Y to oversample, any other for more\n")
+    def set_over_sampling(self, over_sampling):
+        if self.os_valid:
+            return # over sampling was already set
+        if not over_sampling:
+            if_os = input("press y/Y to oversample, any other for more\n")
+        else : if_os = over_sampling
         if if_os.lower() == "y":
             self.sampler = self.get_sampler('auto')
             self.if_os = True
+            
         else: 
             self.sampler_type = ""
             self.sampler = None
+        self.os_valid = True
     '''Tp are minority class, set the inverase ratio for xgb_cw
         args are 5 element tuple from get_tp_tn()'''
     def set_inverase_ratio(self, tps_tns):
@@ -158,7 +252,7 @@ class run_models:
     Create a feature description list'''
     def set_features_output_description(self):
         if self.if_only_seq: # only seq
-            self.features_description  = ["Only_Seq"]
+            self.features_description  = ["Only-Seq"]
         elif self.if_bp: # with base pair to gRNA bases or epigenetic window
             self.features_description = [file_name[0] for file_name in self.file_manager.get_bigwig_files()]
         elif self.if_seperate_epi: # window size epenetics
@@ -218,7 +312,7 @@ class run_models:
     Use generate_features_and_lables from feature_engineering.py
     returns x_features, y_features, guide set'''
     def get_features(self): 
-        self.set_random_seeds()
+        self.set_random_seeds(False)
         return  generate_features_and_labels(self.file_manager.get_merged_data_path() , self.file_manager, self.encoded_length, self.bp_presntation, 
                                                                         self.if_bp, self.if_only_seq,self.if_seperate_epi,
                                                                         self.epigenetic_window_size,self.features_columns, self.data_reproducibility)
@@ -238,7 +332,7 @@ class run_models:
     '''1. GET MODEL'''
     def get_model(self):
         if self.ml_name == "LOGREG":
-            return get_logreg(self.random_state)
+            return get_logreg(self.random_state, self.data_reproducibility)
         elif self.ml_name == "XGBOOST":
             return get_xgboost(self.random_state)
         elif self.ml_name == "XGBOOST_CW":
@@ -268,7 +362,29 @@ class run_models:
             y_scores_probs = classifier.predict_proba(X_test)
             y_pos_scores_probs = y_scores_probs[:,1] # probalities for positive label (1 column for positive)
         return y_pos_scores_probs
-    
+    ## Train model: if Deep learning set class wieghting and extract features
+    def train_model(self,X_train, y_train):
+        classifier = self.get_model()
+        if self.ml_type == "DEEP":
+            self.set_hyper_params_class_wieghting(y_train= y_train)
+            if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)): 
+                # if seperate epi/ only_seq=bp=false --> features added to seq encoding
+                # extract featuers/epi window from sequence enconding 
+                X_train = extract_features(X_train, self.encoded_length)
+            classifier.fit(X_train,y_train,**self.hyper_params)
+        else :
+            classifier.fit(X_train,y_train)
+        return classifier
+    ## Predict on classifier
+    def predict_with_model(self, classifier, X_test):
+        if self.ml_type == "DEEP":
+            if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)):
+                X_test = extract_features(X_test,self.encoded_length)
+            y_pos_scores_probs = classifier.predict(X_test,verbose = 2,batch_size=self.hyper_params['batch_size'])
+        else :
+            y_scores_probs = classifier.predict_proba(X_test)
+            y_pos_scores_probs = y_scores_probs[:,1]
+        return y_pos_scores_probs
 
     ## RUNNERS:
     # LEAVE OUT OUT
@@ -341,11 +457,14 @@ class run_models:
         y_train = np.concatenate(y_train, axis= 0).ravel()
         return x_train, y_train, x_test, y_test, test_guides
 
-    '''2. Greedy approch to fill k groups with ~ equal amount of labels
+    
+    def fill_k_groups_indices(self, k, sum_labels, sorted_indices):
+        '''2. Greedy approch to fill k groups with ~ equal amount of labels
         Getting sum of labels for each indice and sorted indices by sum filling the groups
         from the biggest amount to smallest adding to the minimum group'''
-    def fill_k_groups_indices(self, k, sum_labels, sorted_indices):
         # Create k groups with 1 indice each from the sorted indices in descending order
+        if k < len(sorted_indices):
+            raise RuntimeError("K value is smaller than the amount of guides")
         groups = [[sorted_indices[i]] for i in range(k)]
         
         
@@ -364,7 +483,10 @@ class run_models:
         self.set_inverase_ratio(tps_tns)
         self.set_model_reproducibility(self.model_reproducibility)
         # predict and evaluate model
-        y_scores_probs = self.predict_with_model(X_train=x_train,y_train=y_train,X_test=x_test,y_test=y_test)
+        classifier = self.train_model(X_train=x_train,y_train=y_train)
+        
+        y_scores_probs = self.predict_with_model(classifier=classifier,X_test=x_test)
+       
         auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
         print(f"Ith: {i_iter}\{iterations} split is done")
@@ -373,6 +495,91 @@ class run_models:
         if auroc <= 0.5:
             self.write_scores(key,y_test,y_scores_probs,auroc)  
     
+    ## ENSEMBLE:
+    def create_ensemble(self, n_models, output_path, guides_train_list, seed_addition = 0, x_features=None, y_labels=None,guides=None):
+        '''This function create ensemble of n_models and save them in the output path.
+        The models train on the guide list given in guides_train_list.
+        Each model created with diffrenet intitaion seed + a seed addition. This can be usefull to reproduce the model.
+        Positive ratio is the ratio of positive labels in the training set, if None all the positive labels will be used.
+        Args:
+        1. n_models - number of models to create.
+        2. output_path - path to save the models.
+        3. guides_train_list - list of guides to train on.
+        4. seed_addition - int to add to the seed for reproducibility.
+        5. positive_ratio - list of ratios for positive labels in the training set.
+        if positive ratio given, for each ratio a new folder will be created in the output path.
+        6. X_train, y_train - if given will be used for training the models.
+        ----------
+        Saves: n trained models in output_path.
+        Example: create_ensebmle(5,"/models",["ATT...TGG",...],seed_addition=10,positive_ratio=[0.5,0.7,0.9])'''
+        if not self.init:
+            raise RuntimeError("Trying to run model without setup")
+        if x_features is None or y_labels is None or guides is None:
+            x_features, y_labels, guides = self.get_features()
+        else: # no data given, extract data from the file manager
+            guides_idx = self.keep_intersect_guides_indices(guides, guides_train_list) # keep only the train guides indexes
+            if (len(guides_idx) == len(guides)): # All guides are for training
+                x_train = np.concatenate(x_features, axis= 0)
+                y_train = np.concatenate(y_labels, axis= 0).ravel()
+            else:
+                x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
+        
+        for j in range(n_models):
+            self.set_deep_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
+            classifier = self.train_model(X_train=x_train,y_train=y_train)
+            temp_path = os.path.join(output_path,f"model_{j+1}.keras")
+            classifier.save(temp_path)
+    
+    def test_ensmbel(self, ensembel_model_list, tested_guide_list,test_on_guides = True):
+        '''This function tests the models in the given ensmble.
+        By defualt it test the models on the tested_guide_list, If test_on_guides is False:
+        it will test on the guides that are not in the tested_guide_list
+        Args:
+        1. ensembel_model_list - list of paths to the models
+        2. tested_guide_list - list of guides to test on
+        3. test_on_guides - boolean to test on the given guides or on the diffrence guides'''
+        # Get data
+        x_features, y_labels, guides = self.get_features()
+        guides_idx = self.keep_intersect_guides_indices(guides, tested_guide_list) # keep only the test guides indexes
+        all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
+        x_test, y_test = self.split_by_indexes(x_features, y_labels, guides_idx) # split by test indexes
+        # init 2d array for y_scores 
+        # Row - model, Column - probalities
+        y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
+        for index,model_path in enumerate(ensembel_model_list): # iterate on models and predict y_scores
+            classifier = tf.keras.models.load_model(model_path)
+            # self.set_random_seeds(seed = (index+1+additional_seed))
+            model_predictions = self.predict_with_model(classifier=classifier,X_test=x_test).ravel() # predict and flatten to 1d
+            y_scores_probs[index] = model_predictions
+        return y_scores_probs, y_test, all_guides_idx
+    def keep_diffrence_guides_indices(self, guides, test_guides):
+        '''This function returns the indexes of the guides that are NOT in the given test_guides 
+        Be good to train/test on the guides not presnted in the given guides 
+        Args:
+        1. guides - list of guides
+        2. test_guides - list of guides to keep if exists in guides'''
+        return [idx for idx, guide in enumerate(guides) if guide not in test_guides]
+    def keep_intersect_guides_indices(self,guides, test_guides):
+        '''This function returns the indexes of the guides that are in the given test_guides 
+        Be good to train/test on the guides given 
+        Args:
+        1. guides - list of guides
+        2. test_guides - list of guides to keep if exists in guides'''
+        return [idx for idx, guide in enumerate(guides) if guide in test_guides]
+    
+    def split_by_indexes(self, x_features, y_labels, indices):
+        x_, y_ = [], [] 
+        
+        for idx in indices:
+            x_.append(x_features[idx])
+            y_.append(y_labels[idx])
+        # Concatenate into np array and flatten the y arrays
+        x_ = np.concatenate(x_, axis= 0)
+        y_ = np.concatenate(y_, axis= 0).ravel()
+        return x_, y_
+
+        
+
     ## RUN TYPES:
     # only seq
         
@@ -478,14 +685,7 @@ class run_models:
 
 
 ## Epigenetic features helper
-def split_epigenetic_features_into_groups(features_columns):
-    # Create a dictionary to store groups based on endings
-    groups = {}
-    # Group strings based on their endings
-    for feature in features_columns:
-        ending = feature.split("_")[-1]  # last part after _ "can be score, enrichment, etc.."
-        groups.setdefault(ending, []).append(feature)
-    return groups
+
     
 
 
@@ -534,6 +734,5 @@ def balance_data(x_train,y_train,data_points) -> tuple:
 
 
 
-
      
-    
+

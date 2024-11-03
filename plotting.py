@@ -1,26 +1,93 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from file_management import File_management
-from feature_engineering import get_epi_data_bw,get_epi_data_bed
+#from file_management import File_management
+#from features_engineering import get_epi_data_bw,get_epi_data_bed
 
-'''given a x data and y data draws a auc curve.
-add marking lines to x_pinpoint and y_points - i.a y = 0.5 draw a line there to mark this value
-y_data is a dictionary - key: (expirement name\guide rna), value: ascending rates
-plot all keys through the x data
-x data is a dictionary with one key: name of label, value: data '''
-def draw_auc_curve(x_data,y_data,x_pinpoints,y_pinpoints,title):
-    # Plot the AUC curve
-    plt.figure()
 
-    for key_x,ranks in x_data.items():   
-        for key_y,rates in y_data.items():
-            plt.plot(ranks, rates,label=key_y)
-    plt.xlabel(key_x)
-    plt.ylabel("TPR")
-    plt.title(title)
-    plt.legend()
+
+def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
+    '''This function plots the ROC curve for 1 or more models.
+    Args:
+    1. fpr_list: A list of false positive rates for each model.
+    2. tpr_list: A list of true positive rates for each model.
+    3. aurocs: A list of AUROC values for each model.
+    4. titles: A list of titles for each model.
+    5. output_path: A string representing the output path for saving the plot.
+    6. general_title: A string representing the general title for the plot.
+    ----------
+    Show the figure and saves it.'''
+    if len(fpr_list) != len(tpr_list) != len(aurocs) != len(titles):
+        raise ValueError('All input lists must have the same length.')
+    plt.figure(figsize=(8, 6))
+    for i in range(len(fpr_list)):
+        plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.2f})')
+    
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
+    plt.xlabel('False Positive Rate', fontsize=14)
+    plt.xticks(fontsize=12)
+    plt.ylabel('True Positive Rate', fontsize=14)
+    plt.yticks(fontsize=12)
+    plt.title('Receiver Operating Characteristic (ROC) Curve')
+    plt.legend(loc='lower right',fontsize=11)
+    plt.grid(True)
     plt.show()
+    plt.savefig(output_path + f"/{general_title}.png")
+def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_title):
+    '''This function plots the Precision-Recall curve for 1 or more models.
+    Args:
+    1. recall_list: A list of recall values for each model.
+    2. precision_list: A list of precision values for each model.
+    3. auprcs: A list of AUPRC values for each model with base line value.
+    4. titles: A list of titles for each model.
+    5. output_path: A string representing the output path for saving the plot.
+    6. general_title: A string representing the general title for the plot.
+    ----------
+    Show the figure and saves it.'''
+    if len(recall_list) != len(precision_list) != len(auprcs) != len(titles):
+        raise ValueError('All input lists must have the same length.')
+    plt.figure(figsize=(8, 6))
+    for i in range(len(recall_list)):
+        plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUC = {auprcs[i][0]:.2f})')
+    plt.plot([], [], ' ', label=f'Baseline = {auprcs[0][1]:.5f}')  # Empty plot for baseline legend entry
+    plt.xlabel('Recall', fontsize=14)
+    plt.xticks(fontsize=12)
+    plt.ylabel('Precision', fontsize=14)
+    plt.yticks(fontsize=12)
+    plt.title('Precision-Recall Curve')
+    
+    plt.legend(loc='upper right',fontsize=11)
+    plt.grid(True)
+    plt.show()
+    plt.savefig(output_path + f"/{general_title}.png")
+def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path):
+    '''This function plots a scatter plot with a linear regression line, and adds the correlation coefficient and p-value to the plot.
+    Args:
+    1. x: A numpy array representing the x values.
+    2. y: A numpy array representing the y values.
+    3. x_axis_label: A string representing the x-axis label.
+    4. y_axis_label: A string representing the y-axis label.
+    5. r_coeff: A float representing the correlation coefficient.
+    6. p_value: A float representing the p-value.
+    7. title: A string representing the title of the plot.
+    8. output_path: A string representing the output path for saving the plot.
+    
+    ----------
+    Show the figure and saves it.'''
+    plt.figure(figsize=(8, 6))
+
+    plt.scatter(x, y, color='blue')
+    plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
+    plt.title(title)
+    plt.grid(True)
+    plt.xlabel(x_axis_label,fontsize=12)
+    plt.xticks(fontsize=12)
+    plt.ylabel(y_axis_label,fontsize=12)
+    plt.yticks(fontsize=12)
+    num_of_points = len(x)
+    plt.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}\nn = {num_of_points}', fontsize=12, ha='center', va='center', transform=plt.gca().transAxes)
+    plt.show()
+    plt.savefig(output_path + f"/{title}.png")
 def draw_averages_epigenetics():
     data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
     file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
@@ -189,11 +256,145 @@ def draw_histogram_bigwig(file_manager):
 
     # Save the entire figure to a file
     plt.savefig('epigenetics_histograms.png')
+'''Draw a bar plot. y- metric\premonace, x - num of models in the ensemble'''
+def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,output_path,if_scaling = True):
+    plt.clf()
+    # clear underscores from the x_values
+    x_positions = np.arange(len(x_values))
+    plt.scatter(x_positions, y_values)
+    plt.errorbar(x_positions, y_values, yerr=stds, fmt='none', capsize=5, elinewidth=2, markeredgewidth=2, color='blue')
+    
+    plt.title(title)
+    if if_scaling:
+        x_values = [int(x/100) for x in x_values]
+        x_label = x_label + " (× 10²)"
+    plt.xticks(ticks=x_positions,labels=x_values, fontsize=12)
+    plt.yticks(fontsize=12)
+    
+    plt.xlabel(x_label,fontsize=14)
+    plt.ylabel(y_label,fontsize=14)
+    output_path = output_path + f"/{title}.png"
+    plt.savefig(output_path)
 
+def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, title, y_label, path):
+    plt.clf()
+    # Sort indices based on mean values
+    sorted_indices = np.argsort(mean_values)
+    mean_values_sorted = [mean_values[i] for i in sorted_indices]
+    x_values_sorted = [x_values[i] for i in sorted_indices]
+    std_sorted = [std_values[i] for i in sorted_indices]
+    # get amount of models and set widgth of bars
+    num_models = len(mean_values_sorted)
+    ind = np.arange(num_models)  # the y locations for the groups
+    width = 0.8  # the width of the bars
+    # Get the longest label to determine the figure size
+    x_singel_labels = [x for x in x_values_sorted if "_" not in x]
+    longest_label = max(x_singel_labels, key=len) # Get longest label without considering the subset labels
+    label_width = len(longest_label) * 0.2  # Adjust the multiplier as needed for proper spacing
 
+    # Set the figure size based on the width required for the longest label
+    fig_width = 8 + label_width  # Adjust the initial figure width as needed
+    fig_height = 6  # Adjust the initial figure height as needed
 
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        # create plt
+    fig.tight_layout(pad=5)
+    bars = ax.barh(ind, mean_values_sorted, width, xerr=std_sorted)
+    multi = False
+    min_x = min(mean_values_sorted) - 3 * (max(std_values)) if min(mean_values_sorted) > 0 else 0
+    max_x = max(mean_values_sorted) + 2 * (max(std_values))
+    # Add p-value annotations
+    if p_values: # not empty
+        for i, bar in enumerate(bars):
+            model = x_values_sorted[i]
+            if model == "Only-seq":
+                plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.3f}', va='center', fontsize=10, color='white')
+                continue
+            else :
+                p_val = p_values[model]
+                annotation = p_val_annotation(p_val)
+            plt.text(bar.get_width() + std_sorted[i] + 0.001 , bar.get_y() + (width/2), annotation, va='center', fontsize=8)
+            plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.3f}', va='center', fontsize=10,color='white')
+
+            if "_" in model or model == "All":
+                multi = True
+                bar.set_color('red')
+          
+       
+
+    ax.set_ylabel('Epigenetic marks', fontsize=12)
+    ax.set_xlabel(y_label, fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.set_yticks(ind)
+    
+    # Initialize variables
+    subset_count = 1
+    y_labels = []
+    subset_mapping = {}
+    # Iterate through each model in x_values_sorted
+    for model in x_values_sorted:
+        if "_" in model:
+            subset_label = f'Subset {subset_count}'
+            y_labels.append(subset_label)
+            subset_mapping[subset_label] = model.split("_")
+            subset_count += 1
+        else:
+            y_labels.append(model)
+
+    ax.set_yticklabels( y_labels,fontsize = 12)
+    
+    fig.subplots_adjust(left=label_width/fig_width)
+    if multi:
+        ax.plot([], label='Epigenetic subsets', color='red')
+        for subset_label, subset_models in subset_mapping.items():
+            ax.plot([], label=f'{subset_label}: {", ".join(subset_models)}', color='none')
+    
+    ax.legend(loc='lower right',bbox_to_anchor=(1.05, 0.0),fontsize = 'small',borderaxespad=0.05,ncol=1)
+    
+    ax.set_xlim(min_x, max_x)
+    # Remove right and upper spines
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+
+    plt.show()
+
+    path = path + f"/{title}.png"
+    plt.savefig(path)
+def add_pval_legend(plt):
+    pval_dict = define_pval_dict()
+    for key, value in pval_dict.items():
+        plt.plot([], label=f'{key}: {value}', color='none')  # Create an empty plot just for the legend entry
+    return plt
+def define_pval_dict():
+    pval_dict = {}
+    pval_dict['***'] = '<0.001'
+    pval_dict['**'] = '<0.01'
+    pval_dict['*'] = '<0.05'
+    pval_dict['ns'] = 'ns'
+    return pval_dict
+def p_val_annotation(p_val):
+    '''Function returns annotation for a given p-value.'''
+    if p_val < 0.001:
+        annotation = "***"
+    elif p_val < 0.01:
+        annotation = "**"
+    elif p_val < 0.05:
+        annotation = "*"
+    else:
+        annotation = ""
+    return annotation
 if __name__ == "__main__":
-    file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
-    run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
-    #draw_averages_epigenetics()
-    #draw_histogram_bigwig(file_manager)
+#     #file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
+#     #run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
+#     #draw_averages_epigenetics()
+#     #draw_histogram_bigwig(file_manager)
+#     import numpy as np
+    scores = np.genfromtxt("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_50/Combi/ensemble_1.csv", delimiter=',')
+    y_auroc = scores[2:,0]
+    y_auprc = scores[2:,1]
+    y_nrank = scores[2:,2]
+    x = np.arange(2,51)
+    output_ath = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq"
+    plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
+    plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
+    plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)
