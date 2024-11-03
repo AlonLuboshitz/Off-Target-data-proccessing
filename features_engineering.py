@@ -74,7 +74,7 @@ def generate_features_and_labels(data_path, manager, encoded_length, bp_presenat
         ALL_INDEXES.append(guide_data_frame.index)
         x_data_all.append(x_data)
         
-        y_labels_all.append(guide_data_frame[[READ_COUNT_COLUMN]].values) # add label values by extracting from the df by series values.
+        y_labels_all.append(guide_data_frame[[BINARY_LABEL_COLUMN]].values) # add label values by extracting from the df by series values.
     del splited_guide_data # free memory
     return (x_data_all,y_labels_all,guides)
 

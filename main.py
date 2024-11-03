@@ -239,7 +239,7 @@ def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data
                        test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides/tested_guides_12_partition.txt",
                        other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None],silico=True)
                        
-                          model_path="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive"
+    model_path="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive"
     test_folder_path="/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives"
     test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides/tested_guides_12_partition.txt"
     other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None]
@@ -267,12 +267,12 @@ def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data
     runner.setup_runner()
     guides = create_guides_list(test_guide_path, 0)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
-    ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
-    ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
-    #ensmbels_paths = file_manager.get_model_path()
-    for ensmbel in ensmbels_paths:
-            test_enmsbel_scores(runner, ensmbel, guides, score_path)
-    # test_enmsbel_scores(runner,ensmbels_paths,guides,score_path)
+    #ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
+    #ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
+    ensmbels_paths = file_manager.get_model_path()
+    #for ensmbel in ensmbels_paths:
+            #test_enmsbel_scores(runner, ensmbel, guides, score_path)
+    test_enmsbel_scores(runner,ensmbels_paths,guides,score_path)
     
 
 def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
@@ -404,6 +404,7 @@ def test_performance_by_data(partition_amount = 11, n_models=50, n_ensmbels=1, M
         Models_folder: str - the path to the folder containing the ensmbels
         test_path: str - the path to the test data
         test_guides: str - the path to the test guides
+        if_partitions: bool - where there are multiple partitions in each group. If true in each group there will be multiple partitions.
         ----------------
         Saves the results in corresponding folder in ML_results path given to the file manager'''
     if Models_folder is not None:
@@ -487,7 +488,7 @@ def combiscore_by_folder(base_path):
     scores_nd_combi_paths = find_target_folders(base_path, ["Scores", "Combi"])
     
     # turn the list into list of tuples (for multi process)
-    scores_nd_combi_paths = [(path,) for path in scores_nd_combi_paths]
+    scores_nd_combi_paths = [(path,False) for path in scores_nd_combi_paths]
     
     with Pool(processes=10) as pool:
         pool.starmap(process_single_ensemble_scores,scores_nd_combi_paths)
@@ -505,9 +506,9 @@ def epigeneitc_ensemble_pipe():
     pass
 
 if __name__ == "__main__":
-    #parse_constants_dict(MERGED_DICT)
+    parse_constants_dict(MERGED_DICT)
 
-    performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")
+    #performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")
     #epigeneitc_ensemble_pipe()
     #only_seq_ensemble_pipe()
     #create_ensmble_only_seq(partition_num=[1],n_models=50,n_ensmbels=1)
@@ -522,5 +523,5 @@ if __name__ == "__main__":
     #                                        title="Train_vitro_test_silico")
     
  
-    
-    
+    #process_score_path("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives/_1/Scores/_1.csv","/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives/_1/Combi")
+   

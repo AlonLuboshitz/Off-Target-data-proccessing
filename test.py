@@ -35,22 +35,15 @@
 #     print("The lists have the same strings.")
 # else:
 #     print("The lists do not have the same strings.")
-import pandas as pd
-def keep_groups(groups, sum , guides, k, name):
-    columns = ["TP","target","NUM"]
-    auc_table = pd.DataFrame(columns=columns)
-    #guides = list(guides)
-    for i in range(k):
-        indices_list = groups[i]
-        tot_sum = 0
-        guide_list = []
-        for idx in indices_list:
-            tot_sum += sum[idx]
-            guide_list.append(guides[idx])
 
-        auc_table.loc[i] = tot_sum,guide_list,i+1
-    auc_table = auc_table.sort_values(by="NUM")
-    auc_table.to_csv(name, index=False)
 
-        
+def count_sgrnas_in_rows(filename):
+    with open(filename, 'r') as file:
+        for idx, line in enumerate(file):
+            # Split each row by commas to get individual sgRNAs
+            sgrnas = line.strip().split(',')
+            # Count the number of sgRNAs in this row
+            sgrna_count = len(sgrnas)
+            print(f"Row {idx + 1}: {sgrna_count} sgRNAs")
 
+count_sgrnas_in_rows("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/5k_ensmbels_change.txt")

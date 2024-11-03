@@ -24,10 +24,12 @@ def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
         plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.2f})')
     
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
+    plt.xlabel('False Positive Rate', fontsize=14)
+    plt.xticks(fontsize=12)
+    plt.ylabel('True Positive Rate', fontsize=14)
+    plt.yticks(fontsize=12)
     plt.title('Receiver Operating Characteristic (ROC) Curve')
-    plt.legend(loc='lower right')
+    plt.legend(loc='lower right',fontsize=11)
     plt.grid(True)
     plt.show()
     plt.savefig(output_path + f"/{general_title}.png")
@@ -46,11 +48,15 @@ def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_ti
         raise ValueError('All input lists must have the same length.')
     plt.figure(figsize=(8, 6))
     for i in range(len(recall_list)):
-        plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUPRC = {auprcs[i][0]:.2f})\nBaseline = {auprcs[i][1]:.5f}')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
+        plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUC = {auprcs[i][0]:.2f})')
+    plt.plot([], [], ' ', label=f'Baseline = {auprcs[0][1]:.5f}')  # Empty plot for baseline legend entry
+    plt.xlabel('Recall', fontsize=14)
+    plt.xticks(fontsize=12)
+    plt.ylabel('Precision', fontsize=14)
+    plt.yticks(fontsize=12)
     plt.title('Precision-Recall Curve')
-    plt.legend(loc='lower right')
+    
+    plt.legend(loc='upper right',fontsize=11)
     plt.grid(True)
     plt.show()
     plt.savefig(output_path + f"/{general_title}.png")
@@ -74,9 +80,12 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
     plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
     plt.title(title)
     plt.grid(True)
-    plt.xlabel(x_axis_label)
-    plt.ylabel(y_axis_label)
-    plt.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}', fontsize=12, ha='center', va='center', transform=plt.gca().transAxes)
+    plt.xlabel(x_axis_label,fontsize=12)
+    plt.xticks(fontsize=12)
+    plt.ylabel(y_axis_label,fontsize=12)
+    plt.yticks(fontsize=12)
+    num_of_points = len(x)
+    plt.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}\nn = {num_of_points}', fontsize=12, ha='center', va='center', transform=plt.gca().transAxes)
     plt.show()
     plt.savefig(output_path + f"/{title}.png")
 def draw_averages_epigenetics():
@@ -248,14 +257,22 @@ def draw_histogram_bigwig(file_manager):
     # Save the entire figure to a file
     plt.savefig('epigenetics_histograms.png')
 '''Draw a bar plot. y- metric\premonace, x - num of models in the ensemble'''
-def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,output_path):
+def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,output_path,if_scaling = True):
     plt.clf()
-    plt.scatter(x_values, y_values)
-    plt.errorbar(x_values, y_values, yerr=stds, fmt='none', capsize=5, elinewidth=2, markeredgewidth=2, color='blue')
-
+    # clear underscores from the x_values
+    x_positions = np.arange(len(x_values))
+    plt.scatter(x_positions, y_values)
+    plt.errorbar(x_positions, y_values, yerr=stds, fmt='none', capsize=5, elinewidth=2, markeredgewidth=2, color='blue')
+    
     plt.title(title)
-    plt.xlabel(x_label)
-    plt.ylabel(y_label)
+    if if_scaling:
+        x_values = [int(x/100) for x in x_values]
+        x_label = x_label + " (× 10²)"
+    plt.xticks(ticks=x_positions,labels=x_values, fontsize=12)
+    plt.yticks(fontsize=12)
+    
+    plt.xlabel(x_label,fontsize=14)
+    plt.ylabel(y_label,fontsize=14)
     output_path = output_path + f"/{title}.png"
     plt.savefig(output_path)
 
@@ -270,8 +287,10 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     num_models = len(mean_values_sorted)
     ind = np.arange(num_models)  # the y locations for the groups
     width = 0.8  # the width of the bars
-    longest_label = max(x_values_sorted, key=len)
-    label_width = len(longest_label) * 0.1  # Adjust the multiplier as needed for proper spacing
+    # Get the longest label to determine the figure size
+    x_singel_labels = [x for x in x_values_sorted if "_" not in x]
+    longest_label = max(x_singel_labels, key=len) # Get longest label without considering the subset labels
+    label_width = len(longest_label) * 0.2  # Adjust the multiplier as needed for proper spacing
 
     # Set the figure size based on the width required for the longest label
     fig_width = 8 + label_width  # Adjust the initial figure width as needed
@@ -289,13 +308,13 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
         for i, bar in enumerate(bars):
             model = x_values_sorted[i]
             if model == "Only-seq":
-                plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.4f}', va='center', fontsize=8, color='white')
+                plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.3f}', va='center', fontsize=10, color='white')
                 continue
             else :
                 p_val = p_values[model]
                 annotation = p_val_annotation(p_val)
             plt.text(bar.get_width() + std_sorted[i] + 0.001 , bar.get_y() + (width/2), annotation, va='center', fontsize=8)
-            plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.4f}', va='center', fontsize=8,color='white')
+            plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.3f}', va='center', fontsize=10,color='white')
 
             if "_" in model or model == "All":
                 multi = True
@@ -307,18 +326,30 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     ax.set_xlabel(y_label, fontsize=12)
     ax.set_title(title, fontsize=14)
     ax.set_yticks(ind)
-    # If models in x_values_sorted are with _ in them turn into list of strings
-    y_labels = [model.split("_") if "_" in model else model for model in x_values_sorted]
-    y_labels_joined = ['\n'.join(label) if isinstance(label, list) else label for label in y_labels]
-    ax.set_yticklabels( y_labels_joined,fontsize = 8)  # Use the sorted x_values as labels
     
+    # Initialize variables
+    subset_count = 1
+    y_labels = []
+    subset_mapping = {}
+    # Iterate through each model in x_values_sorted
+    for model in x_values_sorted:
+        if "_" in model:
+            subset_label = f'Subset {subset_count}'
+            y_labels.append(subset_label)
+            subset_mapping[subset_label] = model.split("_")
+            subset_count += 1
+        else:
+            y_labels.append(model)
 
-    
+    ax.set_yticklabels( y_labels,fontsize = 12)
     
     fig.subplots_adjust(left=label_width/fig_width)
     if multi:
         ax.plot([], label='Epigenetic subsets', color='red')
-    ax.legend(loc='lower right')
+        for subset_label, subset_models in subset_mapping.items():
+            ax.plot([], label=f'{subset_label}: {", ".join(subset_models)}', color='none')
+    
+    ax.legend(loc='lower right',bbox_to_anchor=(1.05, 0.0),fontsize = 'small',borderaxespad=0.05,ncol=1)
     
     ax.set_xlim(min_x, max_x)
     # Remove right and upper spines
@@ -352,18 +383,18 @@ def p_val_annotation(p_val):
     else:
         annotation = ""
     return annotation
-# if __name__ == "__main__":
+if __name__ == "__main__":
 #     #file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
 #     #run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
 #     #draw_averages_epigenetics()
 #     #draw_histogram_bigwig(file_manager)
 #     import numpy as np
-#     scores = np.genfromtxt("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_50/Combi/ensemble_1.csv", delimiter=',')
-#     y_auroc = scores[2:,0]
-#     y_auprc = scores[2:,1]
-#     y_nrank = scores[2:,2]
-#     x = np.arange(2,51)
-#     output_ath = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq"
-#     plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
-#     plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
-#     plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)
+    scores = np.genfromtxt("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_50/Combi/ensemble_1.csv", delimiter=',')
+    y_auroc = scores[2:,0]
+    y_auprc = scores[2:,1]
+    y_nrank = scores[2:,2]
+    x = np.arange(2,51)
+    output_ath = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq"
+    plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
+    plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
+    plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)

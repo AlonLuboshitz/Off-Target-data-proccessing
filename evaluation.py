@@ -64,9 +64,17 @@ def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_titl
     -----------
     Returns: None
     Example: 
-    scores_path = ["/localdata/alon/ML_results/Hendel/vivo-silico/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
-                   "/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6/Scores/ensemble_1.csv"]
-    titles = ["Hendel on CHANGE-seq","CHANGE-seq on Hendel"]
+    ### Test on LAZARATO
+    scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50/Scores/ensemble_1.csv",
+                    "/localdata/alon/ML_results/Hendel/vivo-silico/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
+                    "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_changeseq/6_intersecting/all_6/Scores/ensemble_1.csv"]
+    ### Test on HENDEL
+    scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6/Scores/ensemble_1.csv",
+    "/localdata/alon/ML_results/Hendel/vivo-silico/Performance-increasing-OTSs-gRNAs/11_group/1-2-3-4-5-6-7-8-9-10-11_partition/1-2-3-4-5-6-7-8-9-10-11_partition_50/Scores/ensemble_1.csv",
+    "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_hendel/6_intersecting/all_6/Scores/ensemble_1.csv"]
+    titles = ["L","H","H + L"]
+
+    
     plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","Models_6_intersect")'''
     if len(score_paths) != len(titles):
         raise ValueError("The amount of score paths should be equal to the amount of titles")
@@ -209,6 +217,14 @@ def plot_all_ensmbels_std(ensmbel_mean_std_dict,features):
     plot_ensemeble_preformance(n_ranks_stds,x_values,f"N-rank stds by ensmbels - {features}","N-rank",f"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq")
 
 def get_subset_dict(subsets_path, feature_dict, n_models_in_ensmbel):
+    '''This function extract results for each subset in the subsets folder AND for each single feature in the subset
+    Args:
+    1. subsets_path - path to the subsets folder.
+    2. feature_dict - dictionary with the results for each singel feature.
+    3. n_models_in_ensmbel - number of models in the ensmbel.
+    ------------
+    Returns: dictionary with the results for each subset and each single feature in the subset.
+    '''
     picked_dict = eval_ensembles_in_folder(subsets_path,n_models_in_ensmbel,True)
     picked_dict['Only-seq'] = feature_dict["Only-seq"]
     picked_dict['All'] = feature_dict["All"]
@@ -221,7 +237,7 @@ def get_subset_dict(subsets_path, feature_dict, n_models_in_ensmbel):
         picked_dict[key] = feature_dict[key]
     return picked_dict
 
-def bar_plot_ensembels_feature_performance(only_seq_combi_path, epigenetics_path, n_models_in_ensmbel, output_path, title,  add_subsets = None):
+def bar_plot_ensembels_feature_performance(only_seq_combi_path, epigenetics_path, n_models_in_ensmbel, plots_output_path, data_output_path, title,  add_subsets = None):
     '''This function will plot the performance of the ensembles for the given features compared with only sequence
     Will create 3 diffrenet plots for AUROC,AUPRC,N-rank each with the performance of the ensembles for the given features
     The bar plots will be created and statistical test between only sequence and the other features will be calculated
@@ -229,33 +245,107 @@ def bar_plot_ensembels_feature_performance(only_seq_combi_path, epigenetics_path
     ------------
     If add subsets is given - subsets - path for subsets folders , the function will add the performance of the subsets
     and each single feature in the subset to the plot
+    Args:
+    1. only_seq_combi_path - path to the only sequence combinatorical folder.
+    2. epigenetics_path - path to the epigenetics folder with all marks/features - each feature is a folder with combinatorical folder.
+    3. n_models_in_ensmbel - number of models in the ensmbel.
+    4. plots_output_path - path to save the plots.
+    5. data_output_path - path to save the data for future tasks.
+    6. title - title for the plot.
+    7. add_subsets - path to the subsets marks/features folder.
+    -------------
+    Returns: None
+    Saves: 3 bar plots for AUROC,AUPRC,N-rank and the data for the plots. The plots are:
+        1. single features.
+        2. subset features if given.
+        3. combination of all features.
+    Example:
+    only_seq_path = "/localdata/alon/ML_results/Change-seq/vivo-vitro/Change_seq/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi"
+    epigenetic_path = "/localdata/alon/ML_results/Change-seq/vivo-vitro/Change_seq/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/binary"
+    n_models = 50
+    plots_output_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq/epigenetics"
+    data_output_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/ensembles/change_seq/epigenetics"
+    title = "Only-seq vs Epigenetics"
+    add_subsets = "/localdata/alon/ML_results/Change-seq/vivo-silico/Change_seq/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/picked_marks"
+    bar_plot_ensembels_feature_performance(only_seq_path, epigenetic_path, n_models, output_path, title, add_subsets)
     '''
     feature_dict = eval_ensembles_in_folder(epigenetics_path, n_models_in_ensmbel, True)
     dict_50_only_seq = extract_combinatorical_results(only_seq_combi_path, [n_models_in_ensmbel])
     feature_dict["Only-seq"] = dict_50_only_seq
-    if add_subsets:
-        subsets_dict = get_subset_dict(add_subsets, feature_dict, n_models_in_ensmbel)
-        subsets_stats = get_ensmbels_stats(subsets_dict,n_models_in_ensmbel)
-        subsets_scores = get_mean_std_from_ensmbel_results(subsets_dict)
-        plot_all_ensmbels_means_std(subsets_scores,f"{title}Subsets",subsets_stats, output_path, n_models_in_ensmbel)
     feature_stats = get_ensmbels_stats(feature_dict,50)
     feature_scores = get_mean_std_from_ensmbel_results(feature_dict)
-    plot_all_ensmbels_means_std(feature_scores,title, feature_stats, output_path, n_models_in_ensmbel)
+    # Plot single features
+    plot_all_ensmbels_means_std(feature_scores,f'{title}_singel_features', feature_stats, plots_output_path, n_models_in_ensmbel)
+    if add_subsets:
+        subsets_dict =  eval_ensembles_in_folder(add_subsets,n_models_in_ensmbel,True)
+        subsets_dict['All'] = feature_dict['All']
+        subsets_dict['Only-seq'] = feature_dict['Only-seq']
+        subsets_stats = get_ensmbels_stats(subsets_dict,n_models_in_ensmbel)
+        subsets_scores = get_mean_std_from_ensmbel_results(subsets_dict)
+        # Plot only subsets
+        plot_all_ensmbels_means_std(subsets_scores,f"{title}_just_subsets",subsets_stats, plots_output_path, n_models_in_ensmbel)
+        feature_dict.update(subsets_dict)
+        feature_stats.update(subsets_stats)
+        feature_scores.update(subsets_scores)
+    # Plot all features
+    plot_all_ensmbels_means_std(feature_scores,f'{title}_all_features', feature_stats, plots_output_path, n_models_in_ensmbel)
+    # Save the data
+    save_bar_plot_data(feature_scores, feature_stats, data_output_path, title)
+def save_bar_plot_data(scores_dict, stats_dict, output_path, title):
+    '''This function save the raw data used to create the bar plot for future tasks such as:
+    reproducing the bar plot without running the whole code, statistical tests and more.
+    It will create a csv file with the scores (mean,std) for each feature and the statistical tests results.
+    Args:
+    1. scores_dict - dictionary with the scores for each feature. {key: feature, value: dict{key: n_models,val: np.array([auroc,auprc,n-rank],[stds])}}
+    2. stats_dict - dictionary with the statistical tests results. {key: feature, value: np.array([auroc_pval,auprc_pval,n-rank_pval])}
+    3. output_path - path to save the data.
+    4. title - title for the data.
+    --------------
+    Returns: None
+    '''
+    data = []
+    # Iterate through each feature and populate the list with rows of data
+    for feature, score_data in scores_dict.items():
+        n_models, scores_stds = list(score_data.items())[0]
+        scores, stds = scores_stds[0], scores_stds[1]
+        pvals = stats_dict[feature] if feature in stats_dict else [0,0,0]
+        
+        # Append a row with the feature name and corresponding data
+        data.append([feature, scores[0], stds[0],pvals[0], scores[1], stds[1],pvals[1], scores[2], stds[2],pvals[2]])
 
-def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, data_name,x_label = "Data points"):
-    '''Given a base path with the results of the ensembles for different amount of data points
-    Each amount of data_points is in a different folder
-    Retrive the combi results from each folder - combine the combi results from each folder and calculate
-    Mean and STD for each amount of data points
-    Plot each amount of data points and the mean performance with std'''
+    # Create the DataFrame with columns specified
+    df = pd.DataFrame(data, columns=['feature', 'auroc', 'auroc_std','auroc_pval', 'auprc', 'auprc_std','auprc_pval', 'n-rank', 'n-rank_std','n-rank_pval'])
+
+    # Save the DataFrame to a CSV file
+    df.to_csv(os.path.join(output_path,f'{title}_data.csv'), index=False)
+def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, counts_path =  None, counts_sgRNA = False, counts_OTSs = False):
+    '''This function calculate the prediction performance evaluations over diffrenet number of training data points
+    and plot the metric in y axis over data points in the x axis.
+    Given a base path with results of ensembles tested on different number of data points (sgRNA, or OTSs)
+    Where different number of data_points located in different folders the function will:
+    Retrive the combi results from each folder - combine them and calculate the 
+    Mean and STD AUPRC, AUROC, N-rank for each amount of data point.
+    Plot each amount of data points and the mean performance with std.
+    Args:
+    1. base_path - path to the base folder with the results.
+    2. n_models_in_ensmbel - number of models in the ensmbel.
+    3. output_path - path to save the plots.
+    4. counts_path - path for the counts per group
+    5. counts_sgRNA - boolean if the counts are for sgRNA or OTSs. defualt is False.
+    6. counts_OTSS - boolean if the counts are for OTSs. default is False.
+    
+    Example:
+    ### Test on LAZARATO
+    # performance_by_data_points("/localdata/alon/ML_results/Change-seq/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence",50,
+                               "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq/vivo-silico/performance",
+                               "vivo-silico","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/Changeseq_sgRNA_counts.csv","Number of sgRNAs")
+    ### Test on HENDEL'''
     group_dict = {}
     folders_names = os.listdir(base_path)
     folder_paths = create_paths(base_path)
     for data_group,data_folder in zip(folders_names,folder_paths):
         
-        # group_key = f'{group}_part'
-        # if group == num_of_groups:
-        #     group_key = 'All'
+      
         group_paths = find_target_folders(data_folder,["Combi"])
         group_paths.sort() # sort by partition number
         group_paths = [os.path.join(path,"Combi") for path in group_paths] # Add Combi folder to each path
@@ -264,15 +354,56 @@ def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, data_
         values_arr = np.zeros(shape=(partition_num,3)) 
         for partition,path in enumerate(group_paths):
             values_arr[partition] = extract_combinatorical_results(path,[n_models_in_ensmbel])[n_models_in_ensmbel]
+        data_group = data_group.replace("group","") # Remove the group notation
+        data_group = data_group.replace("_"," ") # Remove the underscore notation
+        data_group = float(data_group) # convert to float
         group_dict[data_group] = values_arr.mean(axis=0),values_arr.std(axis=0)  
     # Sort dict by keys
-    # group_dict = dict(sorted(group_dict.items()))   
-    x_vals = [key for key in group_dict.keys()]
+    group_dict = dict(sorted(group_dict.items()))
+    x_vals = [key for key in group_dict.keys()] # defualt x values by group number
+    x_label = "Group number" # defualt x label
+    title = "increasing by group number" # defualt title
+    scaling = False # Defualt scaling is False
+    if counts_path: # if counts given
+        if counts_sgRNA:
+            x_vals = increasing_points(counts_path, True)
+            x_label = "Number of sgRNAs"
+            title = "increasing-sgRNAs"
+        elif counts_OTSs:
+            x_vals = increasing_points(counts_path, False)
+            x_label = "Number of OTSs"
+            title = "increasing-OTSs"
+            scaling = True
+        else: # count path is given but not spesified for OTS/sgRNA
+            print("Count path is given but no bool for sgRNA/OTSs, setting the x axis values to the group numbers")
+            
+
+    else: 
+        print ("No count path is given, setting the x axis values to the group numbers")
+        
+    if len(x_vals) != len(group_dict): # if the amount of x values is not equal to the amount of groups then one group used for testing
+        x_vals = x_vals[:-1]
     y_vals = [value[0]  for value in group_dict.values()] 
     y_stds = [value[1] for value in group_dict.values()]
-    plot_ensemeble_preformance(y_values=[val[0] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUROC {data_name}",y_label="AUROC",x_label=x_label,stds=[val[0] for val in y_stds],output_path=output_path)
-    plot_ensemeble_preformance(y_values=[val[1] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUPRC {data_name}",y_label="AUPRC",x_label=x_label,stds=[val[1] for val in y_stds],output_path=output_path)
-    plot_ensemeble_preformance(y_values=[val[2] for val in y_vals],x_values=x_vals,title=f"Performance by data points N-rank {data_name}",y_label="N-rank",x_label=x_label,stds=[val[2] for val in y_stds],output_path=output_path)
+    plot_ensemeble_preformance(y_values=[val[0] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUROC {title}",y_label="AUROC",x_label=x_label,stds=[val[0] for val in y_stds],output_path=output_path,if_scaling=scaling)
+    plot_ensemeble_preformance(y_values=[val[1] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUPRC {title}",y_label="AUPRC",x_label=x_label,stds=[val[1] for val in y_stds],output_path=output_path,if_scaling=scaling)
+    plot_ensemeble_preformance(y_values=[val[2] for val in y_vals],x_values=x_vals,title=f"Performance by data points N-rank {title}",y_label="N-rank",x_label=x_label,stds=[val[2] for val in y_stds],output_path=output_path,if_scaling=scaling)
+
+def increasing_points(path_to_counts, sgRNA = False):
+    '''This function gets path to eather sgRNA counts or OTSs counts per group and returns for each group its amount
+    If sgRNA so sums the sgRNAs in increasing order. 
+    If OTSs so just return the amount of OTSs in each group
+    Args:
+    1. path_to_counts - path to the file with the counts in it.
+    2. sgRNA_OTS_bool - boolean if the counts are for sgRNA or OTSs.
+    True - sgRNA, False - OTSs'''
+    counts = []
+    if sgRNA: # sgRNA
+        counts = pd.read_csv(path_to_counts)["sgRNA Count"].values
+        counts = np.cumsum(counts)
+    else: # OTSs
+        counts = pd.read_csv(path_to_counts)["OTSs count"].values
+    return counts
 
 def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, job, plot_output_path, data_output_path, guides_list = None,
                                features_columns = ['target','offtarget_sequence','chrom','chromStart','chromEnd']):
@@ -332,9 +463,9 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
         x_lables_log,y_labels_log = np.log(x_lables_log),np.log(y_labels_log)
         r,p = pearson_correlation(x_labels,y_labels)
         r_log,p_log = pearson_correlation(x_lables_log,y_labels_log)
-        title = f"{title[0]} vs {title[1]}"
-        plot_correlation(x=x_labels,y=y_labels,x_axis_label=title[0], y_axis_label=title[1],r_coeff=r,p_value=p,title=title,output_path=plot_output_path)
-        plot_correlation(x=x_lables_log,y=y_labels_log,x_axis_label=title[0], y_axis_label=title[1],r_coeff=r_log,p_value=p_log,title=f'{title} - Log',output_path=plot_output_path)
+        complete_title = f"{title[0]} vs {title[1]}"
+        plot_correlation(x=x_labels,y=y_labels,x_axis_label=f'{title[0]} - read count', y_axis_label=f'{title[1]} - read count',r_coeff=r,p_value=p,title=complete_title,output_path=plot_output_path)
+        plot_correlation(x=x_lables_log,y=y_labels_log,x_axis_label=f'{title[0]} - read count', y_axis_label=f'{title[1]} - read count',r_coeff=r_log,p_value=p_log,title=f'{complete_title} - Log',output_path=plot_output_path)
     # Save the data
     columns = {"label_df1" : title[0], "label_df2" : title[1]}
     merged_df.rename(columns=columns, inplace=True)
@@ -438,10 +569,19 @@ def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
     return tpr_values, fpr_values, precision_values, perc_baseline
    
 if __name__ == "__main__":
-    # performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives",50,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts","Increasing positives","Positive ratio")
+    performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-increasing-sgRNAs",50,
+                               "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts",
+                               "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel_sgRNA_counts.csv",counts_sgRNA=True,counts_OTSs=False)
     
-    gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
-    gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
-    evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","CHANGE-seq"), "Read_count", "binary","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")
+    #  gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
+    #  gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
+    #  evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","Lazzarotto et. Al"), "Read_count", "regression","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")
     # models_paths=create_paths()
     # plot_roc_pr_for_ensmble_by_paths()
+    # scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50/Scores/ensemble_1.csv",
+    #                 "/localdata/alon/ML_results/Hendel/vivo-silico/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
+    #                 "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_changeseq/6_intersecting/all_6/Scores/ensemble_1.csv"]
+    # titles = ["L","H","H + L"]
+
+    # plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","Test_on_Lazzarotto")
+    
