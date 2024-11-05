@@ -137,8 +137,12 @@ def combine_external_model_outputs(model_output_path, original_data_path, model_
     Args:
     1. model_output_path: path to the model output scores
     2. original_data: data frame with the original OTS data
-    3. model_output_columns: list of columns need to be added to the original data frame'''
+    3. model_output_columns: list of columns need to be added to the original data frame
 
+    combine_external_model_outputs("/home/dsi/lubosha/Off-Target-data-proccessing/External_models_predictions/MOFF/MOFF_scores/hendel_only_mism_MOFF_completed.csv",
+                               "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
+                               ["GMT","MOFF"])'''
+    
     model_scores = pd.read_csv(model_output_path)
     original_data = pd.read_csv(original_data_path)
     if len(original_data) != len(model_scores):
@@ -150,6 +154,3 @@ def combine_external_model_outputs(model_output_path, original_data_path, model_
     new_output = original_data_path.split(".")[0] + "_with_model_scores.csv"
     original_data.to_csv(new_output, index=False)  # Save the updated data frame
 
-combine_external_model_outputs("/home/dsi/lubosha/Off-Target-data-proccessing/External_models_predictions/MOFF/MOFF_scores/hendel_only_mism_MOFF_completed.csv",
-                               "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
-                               ["GMT","MOFF"])
