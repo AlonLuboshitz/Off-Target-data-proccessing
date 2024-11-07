@@ -1,6 +1,11 @@
-
+External_models_predictions
 Data
+ML_results
 Epigenetics
 Plots
 __pycache__
 *.pyc
+*.csv
+*.txt
+*.keras
+y_scores_output

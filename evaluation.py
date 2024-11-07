@@ -318,6 +318,9 @@ def save_bar_plot_data(scores_dict, stats_dict, output_path, title):
 
     # Save the DataFrame to a CSV file
     df.to_csv(os.path.join(output_path,f'{title}_data.csv'), index=False)
+
+### ENSEMBLE AND MODEL EVALUATIONS ###
+
 def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, counts_path =  None, counts_sgRNA = False, counts_OTSs = False):
     '''This function calculate the prediction performance evaluations over diffrenet number of training data points
     and plot the metric in y axis over data points in the x axis.
@@ -339,7 +342,11 @@ def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, count
     # performance_by_data_points("/localdata/alon/ML_results/Change-seq/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence",50,
                                "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq/vivo-silico/performance",
                                "vivo-silico","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/Changeseq_sgRNA_counts.csv","Number of sgRNAs")
-    ### Test on HENDEL'''
+    
+    ### Test on HENDEL
+    performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-increasing-sgRNAs",50,
+                               "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts",
+                               "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel_sgRNA_counts.csv",counts_sgRNA=True,counts_OTSs=False)'''
     group_dict = {}
     folders_names = os.listdir(base_path)
     folder_paths = create_paths(base_path)
@@ -404,7 +411,7 @@ def increasing_points(path_to_counts, sgRNA = False):
     else: # OTSs
         counts = pd.read_csv(path_to_counts)["OTSs count"].values
     return counts
-
+### DIFFERENET DATASETS EVALUATIONS###
 def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, job, plot_output_path, data_output_path, guides_list = None,
                                features_columns = ['target','offtarget_sequence','chrom','chromStart','chromEnd']):
     '''This function will evaluate the concurence between 2 off target data sets. 
@@ -471,7 +478,7 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
     merged_df.rename(columns=columns, inplace=True)
     data_output_path = os.path.join(data_output_path, f"{title[0]}_vs_{title[1]}_{job}.csv")
     merged_df.to_csv(data_output_path, index = False)
-    
+
 def off_target_data_by_intersecting_guides(ots_data_1, ots_data_2, guide_column, guide_list = None):
     '''This function takes two off target data frames and returns only the rows with guides presented in both data frames.
     If guide list given is returns rows with guides presented in the list.
@@ -526,6 +533,60 @@ def merge_ots_replicates_values(ots_data_1, ots_data_2, label_column, features_c
     merged_df['label_df2'].fillna(0, inplace=True)
     print(f'df1 features: {len(ots_data_1)}, df2 features: {len(ots_data_2)}, intersecting features: {intersecting_length}\nvalues only in df1: {only_df1}, values only in df2: {only_df2}')
     return merged_df
+
+### FEATURE EVALUTION ###
+def feature_correlation(data_path, features_columns, label_column, log_feature = False, log_label = False):
+    '''This function will calculate the correlation between the features and the label.
+    The function will calculate the pearson correlation and the p value for each feature.
+    Args:
+    1. data_path - path to the data.
+    2. features_columns - columns with the features.
+    3. label_column - column with the label.
+    4. log_feature - boolean if to log the feature.
+    5. log_label - boolean if to log the label.
+    ------------
+    Returns: dictionary with the features as keys and the (pearson correlation ,p value, x_values, y_values).'''
+    # Read the data
+    data = pd.read_csv(data_path)
+    # Calculate the pearson correlation and p value for each feature
+    correlation_dict = {}
+    label_values = data[label_column].values
+    if log_label:
+        label_values_log = np.log(label_values + 1)
+    for feature in features_columns:
+        feature_values = data[feature].values
+        r, p = pearson_correlation(feature_values, label_values)
+        correlation_dict[(feature,label_column)] = (r, p, feature_values, label_values)
+        if log_label:
+            r_log, p_log = pearson_correlation(feature_values, label_values_log)
+            correlation_dict[(feature,f'Log {label_column.lower()}')] = (r_log, p_log, feature_values, label_values_log)
+    return correlation_dict
+def plot_feature_correlation(data_path, output_path,  feature_columns, label_column):
+    '''This function will plot the correlation between the features and the label.
+    The function will plot the scatter plot for each feature and the label.
+    Args:
+    1. data_path - path to the data.
+    2. output_path - path to save the plots.
+    3. feature_columns - columns with the features.
+    4. label_column - column with the label.
+    ------------
+    Returns: None
+    
+    plot_feature_correlation("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
+                             "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Feature_correlation/MOFF",["MOFF","GMT"],"Label")'''
+    if label_column == "Label":
+        log = False
+    else: log = True
+    # Calculate the correlation
+    correlation_dict = feature_correlation(data_path, feature_columns, label_column, log_label = log)
+    # Plot the correlation
+    for feature_nd_label, values in correlation_dict.items():
+        r, p, x_values, y_values = values
+        feature,label = feature_nd_label
+        feature = feature.replace("_"," ")
+        label = label.replace("_"," ")
+        plot_correlation(x=x_values, y=y_values, x_axis_label=feature + " score", y_axis_label=label, r_coeff=r, p_value=p, title=feature + " " + label, output_path=output_path)
+### METRICS HELPER FUNCTIONS ###
 def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
     '''This function converts the labels in the merged data frame to TPR, FPR, Percisions values and tp baseline.
     Args:
@@ -569,10 +630,9 @@ def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
     return tpr_values, fpr_values, precision_values, perc_baseline
    
 if __name__ == "__main__":
-    performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-increasing-sgRNAs",50,
-                               "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts",
-                               "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel_sgRNA_counts.csv",counts_sgRNA=True,counts_OTSs=False)
     
+    plot_feature_correlation("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
+                             "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Feature_correlation/MOFF",["MOFF","GMT"],"Read_count")
     #  gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
     #  gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
     #  evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","Lazzarotto et. Al"), "Read_count", "regression","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")
