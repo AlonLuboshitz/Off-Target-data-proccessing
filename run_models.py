@@ -7,7 +7,7 @@
 FORCE_USE_CPU = False
 
 from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features, get_guides_indexes
-from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_model
+from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_auroc_auprc, evaluate_model, save_model_results
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
 from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
 from sklearn.utils.class_weight import compute_class_weight
@@ -17,6 +17,8 @@ import numpy as np
 import time
 import logging
 import os
+import argparse
+
 if FORCE_USE_CPU:
     os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
 os.environ["CUDA_VISIBLE_DEVICES"]="1"  
@@ -31,7 +33,7 @@ class run_models:
     def __init__(self, file_manager) -> None:
         self.ml_type = "" # String inputed by user
         self.ml_name = ""
-        self.ml_task = "" # class/reg
+        self.ml_task = None # class/reg
         self.shuffle = True
         self.if_os = False
         self.os_valid = False
@@ -48,12 +50,19 @@ class run_models:
         else : raise Exception("Trying to init model runner without file manager")
         
         self.features_columns = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
-    ## initairs
+    ## initairs ###
+    # This functions are used to init necceseray parameters in order to run a model.
+    # If the parameters are not setted before running the model, the program will raise an error.
+
+   
+
     def init_booleans(self):
+        '''Features booleans'''
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_epi_features = False  
         self.method_init = False
     
     def init_deep_hyper_params(self):
+        '''Deep learning hyper parameters'''
         self.hyper_params = {'epochs': 5, 'batch_size': 1024, 'verbose' : 2}# Add any other fit parameters you need
     
     def init_model_dict(self):
@@ -95,10 +104,13 @@ class run_models:
             raise RuntimeError("Cross validation type was not set")
         elif not self.os_valid:
             raise RuntimeError("Over sampling was not set")
+        elif not self.ml_task:
+            raise RuntimeError("ML task - classification/regression was not set")
         
 
-    def setup_runner(self, model_num = None, cross_val = None, features_method = None, over_sampling = None):
+    def setup_runner(self, model_num = None, cross_val = None, features_method = None, over_sampling = None, task = None):
         self.set_model(model_num)
+        self.set_model_task(task)
         self.set_cross_validation(cross_val)
         self.set_features_method(features_method)
         self.set_over_sampling('n') # set over sampling
@@ -108,13 +120,6 @@ class run_models:
         self.validate_initiation()
         self.init = True
     
-    # def setup_ensmbel_runner(self):
-    #     self.set_model()
-    #     self.set_boleans_method()
-    #     self.set_over_sampling()
-    #     self.set_data_reproducibility(False)
-    #     self.set_model_reproducibility(False)
-    #     self.init = True
     '''Set reproducibility for data and model'''
     def set_data_reproducibility(self, bool):
         self.data_reproducibility = bool
@@ -159,7 +164,8 @@ class run_models:
         self.if_only_seq = self.if_bp = self.if_seperate_epi = False
         self.if_epi_features = True
 
-    ## Model setters
+    ## Model setters ###
+    # This functions are used to set the model parameters.
     def set_hyper_params_class_wieghting(self, y_train):
         class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
         class_weight_dict = dict(enumerate(class_weights))
@@ -180,6 +186,18 @@ class run_models:
             self.model_type_initiaded = True
             if add_path:
                 self.file_manager.add_type_to_models_paths(self.ml_name) # add model name to models and results path
+    
+    def set_model_task(self, task):
+        '''This function set the model Task - classification or regression'''
+        if self.ml_task:
+            return # task was already set
+        if not self.model_type_initiaded:
+            raise RuntimeError("Model type need to be setted before the task")
+        if task.lower() == "classification":
+            self.ml_task = "Classification"
+        elif task.lower() == "regression":
+            self.ml_task = "Regression"
+        else : raise ValueError("Task must be classification or regression")
 
     def set_cross_validation(self, cross_val_answer = None, add_path = True):
         if not self.model_type_initiaded:
@@ -247,10 +265,12 @@ class run_models:
         tprr, tp_test, tn_test, tp_train, tn_train = tps_tns # unpack tuple
         self.inverse_ratio = tn_train / tp_train
 
-    ## Output setters
-    '''1. File description based on booleans.
-    Create a feature description list'''
+    ## Output setters: Features used, file name, model evalution and results table ##
+
+    ## 1. File description based on booleans.
+   
     def set_features_output_description(self):
+        '''Create a feature description list'''
         if self.if_only_seq: # only seq
             self.features_description  = ["Only-Seq"]
         elif self.if_bp: # with base pair to gRNA bases or epigenetic window
@@ -259,19 +279,28 @@ class run_models:
             self.features_description = [file_name[0] for file_name in self.file_manager.get_bigwig_files()]
             self.features_description.append(f'window_{self.epigenetic_window_size}')
         else : self.features_description = self.features_columns.copy() # features are added separtley
-    '''2. Create file output name with .csv from:
-    self: task - reg\clas, ml- cnn,rnn,etc.., sampler - ros,syntetic, features, ending - type of data'''
-    def set_file_output_name(self, ending):
+    
+    ## 2. Create file output name with .csv from:
+    # self: task - reg\clas, ml- cnn,rnn,etc.., sampler - ros,syntetic, features, data set name
+    def set_file_output_name(self, data_set_name):
         self.set_features_output_description()
         # create feature f1_f2_f3...
         feature_str = "_".join(self.features_description)
-        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.k}{self.cross_validation_method}_{self.sampler_type}_{feature_str}_{ending}'
+        self.file_name = f'{self.ml_task}_{self.ml_name}_{self.k}{self.cross_validation_method}_{self.sampler_type}_{feature_str}_{data_set_name}'
 
-    '''3. Write results to output table:
+    ## 3. Set output table
+    def set_output_table(self):
+        if self.ml_task == "Classification":
+            results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+        elif self.ml_task == "Regression":
+            results_table = pd.DataFrame(columns=['ML_type', 'R_pearson','P.pearson','R_spearman','P.spearman','MSE','OTSs','N', 'Features', 'File_out'])
+        return results_table
+    ## 4. Write results to output table:
+    def write_to_table(self,auroc,auprc,file_left_out,table,Tpn_tuple,n_rank):
+        '''This function writes the results to the results table.
     includes: ml type, auroc, auprc, unpacks 4 element tuple - tp,tn test, tp,tn train.
     features included for training the model
     what file/gRNA was left out.'''
-    def write_to_table(self,auroc,auprc,file_left_out,table,Tpn_tuple,n_rank):
         try:
             new_row_index = len(table)  # Get the index for the new row
             table.loc[new_row_index] = [self.ml_name, auroc, auprc,*n_rank,*Tpn_tuple, self.features_description, file_left_out]  # Add data to the new row
@@ -329,7 +358,7 @@ class run_models:
 
     
     ## MODELS:
-    '''1. GET MODEL'''
+    '''1. GET MODEL - from models.py'''
     def get_model(self):
         if self.ml_name == "LOGREG":
             return get_logreg(self.random_state, self.data_reproducibility)
@@ -339,60 +368,45 @@ class run_models:
             return get_xgboost_cw(self.inverse_ratio, self.random_state,self.data_reproducibility)
         elif self.ml_name == "CNN":
             return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
-                           self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.file_manager.get_number_of_bigiwig())
+                           self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.file_manager.get_number_of_bigiwig(), self.ml_task)
 
-    '''2. PREDICT'''
-    def predict_with_model(self,X_train, y_train, X_test, y_test): # to run timetest unfold "#"
-        # time_test(X_train,y_train)
-        # exit(0)
-        # train
-        classifier = self.get_model()
-        if self.ml_type == "DEEP":
-            self.set_hyper_params_class_wieghting(y_train= y_train)
-            if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)): 
-                # if seperate epi/ only_seq=bp=false --> features added to seq encoding
-                # extract featuers/epi window from sequence enconding 
-                X_train = extract_features(X_train, self.encoded_length)
-                X_test = extract_features(X_test,self.encoded_length)
-            
-            classifier.fit(X_train,y_train,**self.hyper_params)
-            y_pos_scores_probs = classifier.predict(X_test,verbose = 2)
-        else :
-            classifier.fit(X_train,y_train)
-            y_scores_probs = classifier.predict_proba(X_test)
-            y_pos_scores_probs = y_scores_probs[:,1] # probalities for positive label (1 column for positive)
-        return y_pos_scores_probs
+    '''2. Training and Predicting with model:'''
     ## Train model: if Deep learning set class wieghting and extract features
     def train_model(self,X_train, y_train):
-        classifier = self.get_model()
+        if not self.init:
+            raise RuntimeError("Trying to trian a model without a setup - please re run the code and use setup_runner function")
+        # time_test(X_train,y_train)
+        model = self.get_model()
         if self.ml_type == "DEEP":
             self.set_hyper_params_class_wieghting(y_train= y_train)
             if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)): 
                 # if seperate epi/ only_seq=bp=false --> features added to seq encoding
                 # extract featuers/epi window from sequence enconding 
                 X_train = extract_features(X_train, self.encoded_length)
-            classifier.fit(X_train,y_train,**self.hyper_params)
+            model.fit(X_train,y_train,**self.hyper_params)
         else :
-            classifier.fit(X_train,y_train)
-        return classifier
-    ## Predict on classifier
-    def predict_with_model(self, classifier, X_test):
+            model.fit(X_train,y_train)
+        return model
+    
+    def predict_with_model(self, model, X_test):
+        if not self.init:
+            raise RuntimeError("Trying to predict with a model without a setup - please re run the code and use setup_runner function")
         if self.ml_type == "DEEP":
             if self.if_seperate_epi or (not (self.if_only_seq or self.if_bp)):
                 X_test = extract_features(X_test,self.encoded_length)
-            y_pos_scores_probs = classifier.predict(X_test,verbose = 2,batch_size=self.hyper_params['batch_size'])
+            y_pos_scores_probs = model.predict(X_test,verbose = 2,batch_size=self.hyper_params['batch_size'])
         else :
-            y_scores_probs = classifier.predict_proba(X_test)
+            y_scores_probs = model.predict_proba(X_test)
             y_pos_scores_probs = y_scores_probs[:,1]
         return y_pos_scores_probs
 
-    ## RUNNERS:
+    ## RUNNERS: LEAVE ONE OUT, K-CROSS VALIDATION, ENSEMBLE
     # LEAVE OUT OUT
-    def leave_one_out(self):
+    def leave_one_out(self, x_features = None, y_labels = None, guides = None,  ):
         # Set File output name
         self.set_file_output_name(self.out_put_name)
         # Set result table 
-        results_table = pd.DataFrame(columns=['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out'])
+        results_table = self.set_output_table()
         # Get data
         x_features, y_labels, guides = self.get_features()
         print("Starting Leave-One-Out")
@@ -400,7 +414,7 @@ class run_models:
             # split data to i and ~ i
             x_train,y_train,x_test,y_test = order_data(x_features,y_labels,i+1,if_shuffle=True,if_print=False,sampler=self.sampler,if_over_sample=self.if_os)
             # get tps, tns and set inverse ratio
-            self.pipe_line_model(x_train= x_train, y_train= y_train, x_test= x_test, y_test= y_test,
+            self.train_and_evaluate_model(x_train= x_train, y_train= y_train, x_test= x_test, y_test= y_test,
                                  iterations= len(guides), i_iter= i, key= gRNA, results_table= results_table)        
         
         results_table = results_table.sort_values(by="File_out")
@@ -428,7 +442,7 @@ class run_models:
         print("Starting K cross validation")
         for i in range(self.k): # iterate over the k groups, split to test/train by indices in I group
             x_train, y_train, x_test, y_test, test_guides = self.split_by_group(x_features, y_labels, k_groups, i, guides) 
-            self.pipe_line_model(x_train, y_train, x_test, y_test, self.k, i+1 , test_guides, results_table)
+            self.train_and_evaluate_model(x_train, y_train, x_test, y_test, self.k, i+1 , test_guides, results_table)
         results_table = results_table.sort_values(by="File_out")
         self.file_manager.save_ml_results(results_table, self.file_name)
 
@@ -476,18 +490,25 @@ class run_models:
         return groups
     
     
-    '''Run the model for each split, write the results to the table and if auc < 0.5 write the scores to a file'''
-    def pipe_line_model(self, x_train, y_train, x_test, y_test, iterations, i_iter, key, results_table):
-    # get tps, tns and set inverse ratio
+    
+    def train_and_evaluate_model(self, x_train, y_train, x_test, y_test, iterations, i_iter, key, results_table = None):
+        '''Run the model for each split. 
+        If results table is given write the results to the table.
+        If no table is given return the score made by the model. 
+        '''
+        # get tps, tns and set inverse ratio
         tps_tns = get_tp_tn(y_test=y_test,y_train=y_train)
         self.set_inverase_ratio(tps_tns)
         self.set_model_reproducibility(self.model_reproducibility)
         # predict and evaluate model
-        classifier = self.train_model(X_train=x_train,y_train=y_train)
-        
-        y_scores_probs = self.predict_with_model(classifier=classifier,X_test=x_test)
-       
-        auroc,auprc = evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
+        model = self.train_model(X_train=x_train,y_train=y_train)
+        y_scores_probs = self.predict_with_model(model = model, X_test = x_test)
+        if results_table is None:
+            print(f"Ith: {i_iter}\{iterations} split is done")
+            return y_scores_probs
+        else: 
+            evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
+        auroc,auprc = evaluate_auroc_auprc(y_test = y_test, y_pos_scores_probs = y_scores_probs)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
         print(f"Ith: {i_iter}\{iterations} split is done")
         # write scores
@@ -512,8 +533,7 @@ class run_models:
         ----------
         Saves: n trained models in output_path.
         Example: create_ensebmle(5,"/models",["ATT...TGG",...],seed_addition=10,positive_ratio=[0.5,0.7,0.9])'''
-        if not self.init:
-            raise RuntimeError("Trying to run model without setup")
+        
         if x_features is None or y_labels is None or guides is None:
             x_features, y_labels, guides = self.get_features()
         else: # no data given, extract data from the file manager
@@ -526,9 +546,9 @@ class run_models:
         
         for j in range(n_models):
             self.set_deep_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
-            classifier = self.train_model(X_train=x_train,y_train=y_train)
+            model = self.train_model(X_train=x_train,y_train=y_train)
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
-            classifier.save(temp_path)
+            model.save(temp_path)
     
     def test_ensmbel(self, ensembel_model_list, tested_guide_list,test_on_guides = True):
         '''This function tests the models in the given ensmble.
@@ -547,9 +567,9 @@ class run_models:
         # Row - model, Column - probalities
         y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
         for index,model_path in enumerate(ensembel_model_list): # iterate on models and predict y_scores
-            classifier = tf.keras.models.load_model(model_path)
+            model = tf.keras.models.load_model(model_path)
             # self.set_random_seeds(seed = (index+1+additional_seed))
-            model_predictions = self.predict_with_model(classifier=classifier,X_test=x_test).ravel() # predict and flatten to 1d
+            model_predictions = self.predict_with_model(model=model,X_test=x_test).ravel() # predict and flatten to 1d
             y_scores_probs[index] = model_predictions
         return y_scores_probs, y_test, all_guides_idx
     def keep_diffrence_guides_indices(self, guides, test_guides):

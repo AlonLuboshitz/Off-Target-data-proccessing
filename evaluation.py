@@ -2,11 +2,14 @@ import numpy as np
 import pandas as pd
 from itertools import combinations
 import os
-from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve
+from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve, mean_squared_error
 from utilities import create_paths, find_target_folders,get_X_random_indices, extract_scores_labels_indexes_from_files
 from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr
 from ml_statistics import get_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
 
+
+
+### Metrics evaluations: AUC, AUPRC, N-rank, 
 
 def get_tpr_by_n_expriments(predicted_vals,y_test,n):
     '''This function gets the true positive rate for n expriemnets by calculating:
@@ -42,15 +45,101 @@ def get_auc_by_tpr(tpr_arr):
     #calculated_auc = calculated_auc / amount_of_points # normalizied auc
     return calculated_auc,amount_of_points
 
+def evaluate_model(y_test, y_scores, task = None):
+    '''This function evaluate the model given its task.
+    Args:
+    1. y_test - the actual labels.
+    2. y_scores - the predicted scores.
+    3. task - the task of the model. (classification, regression)
+    ----------
+    returns: dict of the evaluation metrics in regression or auroc,auprc in classification.
+    '''
+    if task.lower() == "classification":
+        return evaluate_auroc_auprc(y_test, y_scores)
+    elif task.lower() == "regression":
+        return evalaute_regression(y_test, y_scores)
+    else:
+        raise RuntimeError(f"Task {task} is not supported")
 
-
-def evaluate_model( y_test, y_pos_scores_probs):
+def evaluate_auroc_auprc( y_test, y_pos_scores_probs):
     # # Calculate AUROC,AUPRC
     fpr, tpr, tresholds = roc_curve(y_test, y_pos_scores_probs)
     auroc = auc(fpr, tpr)
     # Calculate AUPRC
     auprc = average_precision_score(y_test, y_pos_scores_probs)
     return (auroc,auprc)
+
+def evalaute_regression(y_test, y_scores):
+    '''This function evaluate the regression model by calculating the pearson and spearman correlations, it also reports the MSE.
+    The evaluation is between all data points, and between only the positive OTSs with label > 0.
+
+    Args:
+    1. y_test - the actual labels.
+    2. y_scores - the predicted scores.
+    ------------   
+    Returns: tuple of dicts of {pearson: (correlation,p.value), spearman: (correlation,p.value), MSE: mse}
+    (all_data_points, positive_data_points)
+    '''
+    all_data_points = {"pearson": pearson_correlation(y_test, y_scores), "spearman": spearman_correlation(y_test, y_scores), "MSE": mean_squared_error(y_test , y_scores)}
+    pos_y_test = y_test[y_test > 0] # get only the positive OTSs
+    pos_y_scores = y_scores[y_test > 0] # get only the predicted positive OTSs
+    positive_data_points = {"pearson": pearson_correlation(pos_y_test, pos_y_scores), "spearman": spearman_correlation(pos_y_test, pos_y_scores), "MSE": mean_squared_error(pos_y_test , pos_y_scores)}
+    return all_data_points, positive_data_points
+
+## Saving the evaluations results
+def save_model_results(classification_tuple = None, regression_dict = None, table = None, ml_feature_key_tuple = None, n_rank = None, tpn_tuple = None, task = None):
+    if classification_tuple or regression_dict is None:
+        raise RuntimeError("No results to save")
+    if table is None:
+        raise RuntimeError("No table to save the results")
+    if ml_feature_key_tuple is None:
+        raise RuntimeError("No model, features, key_left_out given to save the results")
+    ml_type, features_description, file_left_out = ml_feature_key_tuple
+    if task.lower() == "classification":
+        if n_rank is None:
+            n_rank = (0,0) # default n_rank
+        if tpn_tuple is None:
+            tpn_tuple = (0,0,0,0) # default tpn_tuple
+        auroc, auprc = classification_tuple
+        table = save_classification_results(auroc,auprc,file_left_out,table,tpn_tuple,n_rank,ml_type,features_description)
+        return table
+    elif task.lower() == "regression":
+        pearson = regression_dict["pearson"]
+        spearman = regression_dict["spearman"]
+        mse = regression_dict["MSE"]
+        ots_type,ots_amount = tpn_tuple
+        table = saving_regression_results(pearson, spearman, mse, file_left_out, table, ml_type, features_description, ots_type, ots_amount)
+        return table
+    else:
+        raise RuntimeError(f"Task: {task} is not supported")
+                
+        
+def save_classification_results(auroc,auprc,file_left_out,table,Tpn_tuple,n_rank,ml_type,features_description):
+        '''This function writes the results of the classification task.
+    includes: ml type, auroc, auprc, unpacks 4 element tuple - tp,tn test, tp,tn train.
+    features included for training the model
+    what file/gRNA was left out.'''
+        if list(table.columns) != ['ML_type', 'Auroc', 'Auprc','N-rank','N','Tp-ratio','T.P_test','T.N_test','T.P_train','T.N_train', 'Features', 'File_out']:
+            raise RuntimeError("The table columns are not as expected")
+        try:
+            new_row_index = len(table)  # Get the index for the new row
+            table.loc[new_row_index] = [ml_type, auroc, auprc,*n_rank,*Tpn_tuple, features_description, file_left_out]  # Add data to the new row
+        except: # empty data frame
+            table.loc[0] = [ml_type , auroc, auprc,*n_rank,*Tpn_tuple , features_description , file_left_out]
+        return table
+
+def saving_regression_results(pearson, spearman, mse, file_left_out, table, ml_type, features_description, OTSs_type, OTSs_amount):
+    '''This function writes the results of the regression task.
+    includes: 'ML_type', 'R_pearson','P.pearson','R_spearman','P.spearman','MSE','OTSs','N', 'Features', 'File_out'.
+    Where OTS is positive OTSs or all OTSs.'''
+    if list(table.columns) != ['ML_type', 'R_pearson','P.pearson','R_spearman','P.spearman','MSE','OTSs','N', 'Features', 'File_out']:
+        raise RuntimeError("The table columns are not as expected")
+    try:
+        new_row_index = len(table)  # Get the index for the new row
+        table.loc[new_row_index] = [ml_type, pearson[0], pearson[1], spearman[0], spearman[1], mse,OTSs_type, OTSs_amount, features_description, file_left_out]  # Add data to the new row
+    except: # empty data frame
+        table.loc[0] = [ml_type, pearson[0], pearson[1], spearman[0], spearman[1], mse,OTSs_type, OTSs_amount, features_description, file_left_out]
+    return table
 
 def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_title):
     '''This function plots multiple rocs and pr curves togther for multiple models.
@@ -121,7 +210,7 @@ The function will return the average of the aurpc,auroc and std over all the com
         # average the scores
         y_scores = np.mean(y_scores, axis = 0)
         # evaluate the model
-        auroc, auprc = evaluate_model(y_test, y_scores)
+        auroc, auprc = evaluate_auroc_auprc(y_test, y_scores)
         n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_scores,y_test,1000))[0]
         all_combination_results[index] = [auroc, auprc, n_rank]
     return all_combination_results

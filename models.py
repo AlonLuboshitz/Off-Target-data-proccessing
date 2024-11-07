@@ -8,8 +8,8 @@ from tensorflow import keras
 from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape
 
 ## No random state is initialized, np.random.seed(42) is used in the model runner file if needed
-def get_cnn(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number):
-        return create_convolution_model(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number)   
+def get_cnn(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number, task = None):
+        return create_convolution_model(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number, task)   
 def get_xgboost_cw(scale_pos_weight, random_state, if_data_reproducibility):
     sub_sample = 1
     if if_data_reproducibility:
@@ -53,7 +53,7 @@ def create_conv_epi_layer(epi_input,kernal_size,strides,epigenetic_window_size,e
     epi_seq_flatten = Flatten()(epi_max_pool_3)
     return epi_seq_flatten
 
-def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,if_seperate_epi,num_of_additional_features,epigenetic_window_size,epigenetic_number):
+def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,if_seperate_epi,num_of_additional_features,epigenetic_window_size,epigenetic_number, task=None):
     # set seq conv layers
     seq_input = Input(shape=(sequence_length * bp_presenation))
     seq_flatten = create_conv_seq_layers(seq_input=seq_input,sequence_length=sequence_length,bp_presenation=bp_presenation)
@@ -77,8 +77,18 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
     seq_drop_4 = keras.layers.Dropout(0.2)(seq_dense_3)
     seq_dense_4 = Dense(40, activation='relu')(seq_drop_4)
     seq_drop_5 = keras.layers.Dropout(0.2)(seq_dense_4)
-
-    output = Dense(1, activation='sigmoid')(seq_drop_5)
+    
+    # Set loss and last neuron for the task
+    if task == "Classification":
+        loss = keras.losses.BinaryCrossentropy()
+        metrics = ['binary_accuracy']
+        output = Dense(1, activation='sigmoid')(seq_drop_5)
+    elif task == "Regression":
+        loss = keras.losses.MeanSquaredError()
+        metrics = ['mean_absolute_error']
+        output = Dense(1, activation='linear')(seq_drop_5)
+    else : RuntimeError("Task must be set to 'Classification' or 'Regression'")
+    ## Set inputs and outputs sizes for the model to accepet.
     if (only_seq_info or if_bp):
         model = keras.Model(inputs=seq_input, outputs=output)
     elif if_seperate_epi:
@@ -86,7 +96,9 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
 
     else:
         model = keras.Model(inputs=[seq_input, feature_input], outputs=output)
-    model.compile(loss=keras.losses.BinaryCrossentropy(), optimizer= keras.optimizers.Adam(learning_rate=1e-3), metrics=['binary_accuracy'])
+    
+    
+    model.compile(loss=loss, optimizer= keras.optimizers.Adam(learning_rate=1e-3), metrics=metrics)
     print(model.summary())
     return model
 

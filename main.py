@@ -12,17 +12,93 @@ from utilities import get_k_choose_n, find_target_folders, convert_partition_str
 from evaluation import eval_all_combinatorical_ensmbel, bar_plot_ensembels_feature_performance
 from features_engineering import generate_features_and_labels
 import os
+import argparse
+import json
 import random
 import numpy as np
 
+TASK = "Classification"
+FEATURE_TYPE = "Only_seq"
+MODEL_TYPE = "CNN"
+
+
+
+
+### I want to remove the dependece on file_manager from the run_models, and maybe feature engeriing. 
+# The main should accpect the following:
+### MOVE ALL PATHS ADDITION FROM RUN_MODELS TO MAIN
+
+
+# 1. Path to the data and external features data paths. - The main will init file manager to handle the data paths. It will use the 
+# file manager to pass the needed arguments to the feature engineering.
+# 2. Features to run the model with.
+# 2. Type of task for the model - classification, regression. 
+# 3. Type of model - CNN,XGboost etc..
+# 
+# With respect to data path, external feature paths ###
+
+def argparser():
+    parser = argparse.ArgumentParser(description='''Python script to init a model and train it on off-target dataset.
+                                     Different models, feature types, cross_validations and tasks can be created.
+                                     ''')
+    parser.add_argument('--model','-m', type=int, 
+                        help='''Model number: 1 - LogReg, 2 - XGBoost,
+                          3 - XGBoost with class weights, 4 - CNN, 5 - RNN''',
+                         required=True, default=4)
+    parser.add_argument('--cross_val','-cv', type=int,
+                         help='''Cross validation type: 1 - Leave one out, 
+                         2 - K cross validation, 3 - Ensmbel''',
+                         required=True, default=1)
+    parser.add_argument('--features_method','-fm', type=int,
+                         help='''Features method: 1 - Only_sequence, 2 - Epigenetics_by_features, 
+                         3 - Base_pair_epigenetics_in_Sequence, 4 - Spatial_epigenetics''', 
+                        required=True, default = 1)
+    parser.add_argument('--features_columns','fc',type=list,
+                         help='Features columns - list of string of the features columns in the data', required=False)
+    parser.add_argument('--epigenetic_window_size','-ew', type=int, 
+                        help='Epigenetic window size - 100,200,500,2000', required=False)
+    parser.add_argument('--epigenetic_bigwig','-eb', type=str,
+                         help='Path for epigenetic folder with bigwig files for each mark.', required=False)
+    parser.add_argument('--task','-t', type=str, help='Task: classification/regression', required=True, default='classification')
+    parser.add_argument('--over_sampling','-os', type=str, help='Over sampling: y/n', required=False)
+    parser.add_argument('--seed','-s', type=int, help='Seed for reproducibility', required=False)
+    parser.add_argument('--data_columns_config','-dcc', type=str, 
+                        help='''Path to a json config file with the next columns:
+                        target_column, offtarget_column, chrom_column, start_column, end_column, binary_label_column, regression_label_column''',
+                         required=True)
+    args = parser.parse_args()
+    return args
+
+def validate_args(args):
+    if args.features_method == 2 and args.features_columns is None:
+        raise ValueError("Features columns must be given for epigenetic features")
+    if args.features_method == 3 and args.epigenetic_bigwig is None:
+        raise ValueError("Epigenetic bigwig folder must be given for base pair epigenetics in sequence")
+    if args.features_method == 4 and (args.epigenetic_bigwig is None or args.epigenetic_window_size is None):
+        raise ValueError("Epigenetic bigwig folder and epigenetic window size must be given for spatial epigenetics")
+    if args.dcc 
+def parse_data_columns(json_columns):
+    '''This function parse the json columns.'''
+    with open(json_columns, 'r') as file:
+        config = json.load(file)
+        # Access constants from the dictionary
+        TARGET_COLUMN = config["TARGET_COLUMN"]
+        OFFTARGET_COLUMN = config["OFFTARGET_COLUMN"]
+        CHROM_COLUMN = config["CHROM_COLUMN"]
+        START_COLUMN = config["START_COLUMN"]
+        END_COLUMN = config["END_COLUMN"]
+        BINARY_LABEL_COLUMN = config["BINARY_LABEL_COLUMN"]
+        REGRESSION_LABEL_COLUMN = config["REGRESSION_LABEL_COLUMN"]
+    print(f"Columns: {TARGET_COLUMN}, {OFFTARGET_COLUMN}, {CHROM_COLUMN}, {START_COLUMN}, {END_COLUMN}, {BINARY_LABEL_COLUMN}, {REGRESSION_LABEL_COLUMN}")
 def parse_constants_dict(constants_dict):
-    global VIVO_SILICO,VIVO_VITRO, ML_RESULTS_PATH, MODELS_PATH, TEST_GUIDES, SILICO_VITRO,TRAIN_GUIDES
+    global VIVO_SILICO,VIVO_VITRO, ML_RESULTS_PATH, MODELS_PATH, TEST_GUIDES, SILICO_VITRO,TRAIN_GUIDES, DATA_NAME
     VIVO_SILICO = constants_dict["Vivo-silico"]
     VIVO_VITRO = constants_dict["Vivo-vitro"]
     ML_RESULTS_PATH = constants_dict["ML_results"]
     MODELS_PATH = constants_dict["Model_path"]
     TEST_GUIDES = constants_dict["Test_guides"]
     TRAIN_GUIDES = constants_dict["Train_guides"]
+    DATA_NAME = constants_dict["Data_name"]
     
 
 ## INIT FILE MANAGER
@@ -507,7 +583,6 @@ def epigeneitc_ensemble_pipe():
 
 if __name__ == "__main__":
     parse_constants_dict(MERGED_DICT)
-
     #performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")
     #epigeneitc_ensemble_pipe()
     #only_seq_ensemble_pipe()
