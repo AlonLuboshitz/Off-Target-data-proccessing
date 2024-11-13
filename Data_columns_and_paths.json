@@ -1,0 +1,39 @@
+{
+"Columns_dict" : {
+    "TARGET_COLUMN": "target",
+    "OFFTARGET_COLUMN": "offtarget_sequence",
+    "CHROM_COLUMN": "chrom",
+    "START_COLUMN": "chromStart",
+    "END_COLUMN": "chromEnd",
+    "BINARY_LABEL_COLUMN": "Label",
+    "REGRESSION_LABEL_COLUMN": "Read_count"
+},
+"Change_seq" : {
+    "Train_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides_78/Train_guides",
+    "Test_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides_78/Tested_guides",
+    "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv",
+    "Vivo-vitro" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed.csv",
+    "Model_path" : "/localdata/alon/Models/Change-seq",
+    "ML_results_path" : "/localdata/alon/ML_results/Change-seq",
+    "Data_name" : "Lazzarotto"
+   
+},
+"Hendel" : {
+    "Train_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/train_guides",
+    "Test_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides",
+    "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
+    "Vivo-vitro" : "Null",
+    "Model_path" : "/localdata/alon/Models/Hendel",
+    "ML_results_path" : "/localdata/alon/ML_results/Hendel",
+    "Data_name" : "Hendel"
+},
+"Hendel_Changeseq" : {
+    "Train_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies/train_guides/hendel_changeseq",
+    "Test_guides" : "Null",
+    "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies/hendel_changeseq.csv",
+    "Vivo-vitro" : "Null",
+    "Model_path" : "/localdata/alon/Models/Hendel_Changeseq",
+    "ML_results_path" : "/localdata/alon/ML_results/Hendel_Changeseq",
+    "Data_name" : "Hendel_Changeseq"
+    }
+}

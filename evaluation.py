@@ -56,7 +56,7 @@ def evaluate_model(y_test, y_scores, task = None):
     '''
     if task.lower() == "classification":
         return evaluate_auroc_auprc(y_test, y_scores)
-    elif task.lower() == "regression":
+    elif task.lower() == "regression" or task.lower() == "t_regression":
         return evalaute_regression(y_test, y_scores)
     else:
         raise RuntimeError(f"Task {task} is not supported")
@@ -67,7 +67,9 @@ def evaluate_auroc_auprc( y_test, y_pos_scores_probs):
     auroc = auc(fpr, tpr)
     # Calculate AUPRC
     auprc = average_precision_score(y_test, y_pos_scores_probs)
-    return (auroc,auprc)
+    # Calculate N-rank
+    n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_pos_scores_probs,y_test,1000))[0]
+    return (auroc,auprc,n_rank)
 
 def evalaute_regression(y_test, y_scores):
     '''This function evaluate the regression model by calculating the pearson and spearman correlations, it also reports the MSE.
@@ -81,8 +83,10 @@ def evalaute_regression(y_test, y_scores):
     (all_data_points, positive_data_points)
     '''
     all_data_points = {"pearson": pearson_correlation(y_test, y_scores), "spearman": spearman_correlation(y_test, y_scores), "MSE": mean_squared_error(y_test , y_scores)}
-    pos_y_test = y_test[y_test > 0] # get only the positive OTSs
-    pos_y_scores = y_scores[y_test > 0] # get only the predicted positive OTSs
+    ## to get only positive OTSs deteced zero and remove them to avoid floating point errors
+    zero_y_test = np.where(y_test == 0)[0] # zero indices
+    pos_y_test = np.delete(y_test,zero_y_test) # get only the positive OTSs
+    pos_y_scores = np.delete(y_scores,zero_y_test) # get only the predicted positive OTSs
     positive_data_points = {"pearson": pearson_correlation(pos_y_test, pos_y_scores), "spearman": spearman_correlation(pos_y_test, pos_y_scores), "MSE": mean_squared_error(pos_y_test , pos_y_scores)}
     return all_data_points, positive_data_points
 
@@ -186,7 +190,7 @@ def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_titl
         auprcs.append((average_precision_score(y_test, y_scores),np.sum(y_test[y_test > 0]) / len(y_test)))
     plot_roc(fprs,tprs,aucs,titles,output_path,f'{plot_title}_roc')
     plot_pr(recall_list=recalls,precision_list=percs,auprcs=auprcs,titles=titles,output_path=output_path,general_title=f'{plot_title}_pr')
-def evaluate_n_combinatorical_models(n_models, n_y_scores, y_test, k):
+def evaluate_n_combinatorical_models(n_models, n_y_scores, y_test, k, task = None):
     '''This function aasses all the possible combinatorical options for k given.
 N choose K options.
 For exmaple: if there are 10 models and n = 3, the function will average 
@@ -201,21 +205,25 @@ The function will return the average of the aurpc,auroc and std over all the com
     else :
         indices_combinations = get_X_random_indices(n_models, k, 200)    
     
-    # Create np array for each indice combination average auroc,auprc,n_rank
-    # Row - combination, Column - auroc,auprc,n_rank
-    all_combination_results = np.zeros(shape=(len(indices_combinations),3))
+    # Create np array for each indice combination for the averaged model evaluations.
+    if task.lower() == "classification":# Row - combination, Column - auroc,auprc,n_rank
+        all_combination_results = np.zeros(shape=(len(indices_combinations),3))
+    elif task.lower() == "regression" or task.lower() == 't_regression': # Row - combination, Column - Pearson_r, Pearson_p, Spearman_r, Spearman_p, MSE
+        all_combination_results = np.zeros(shape=(len(indices_combinations),5))
+    
     for index,indices in enumerate(indices_combinations):
         # get the scores for the models in the combination
         y_scores = n_y_scores[indices]
         # average the scores
         y_scores = np.mean(y_scores, axis = 0)
         # evaluate the model
-        auroc, auprc = evaluate_auroc_auprc(y_test, y_scores)
-        n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_scores,y_test,1000))[0]
-        all_combination_results[index] = [auroc, auprc, n_rank]
+        model_scores = evaluate_model(y_test, y_scores, task)
+        # auroc, auprc = evaluate_auroc_auprc(y_test, y_scores)
+        # n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_scores,y_test,1000))[0]
+        all_combination_results[index] = [*model_scores]
     return all_combination_results
 
-def eval_all_combinatorical_ensmbel(y_scores, y_test, header = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]):
+def eval_all_combinatorical_ensmbel(y_scores, y_test, header = None, task = None):
     '''Evaluate all the possible combinatorical options for an ensmbel
 y_scores is 2d array (N_models, scores), y_test is the accautal labels'''
     # Get amount of models
@@ -225,7 +233,7 @@ y_scores is 2d array (N_models, scores), y_test is the accautal labels'''
     # first row k = 1 no ensmble to calculate
     for k in range(1,n_models): # 1 
         print(f"Check combinations of {k + 1} models out of {n_models}")
-        k_combination_result = evaluate_n_combinatorical_models(n_models, y_scores, y_test, k + 1) 
+        k_combination_result = evaluate_n_combinatorical_models(n_models, y_scores, y_test, k + 1, task) 
         # Average the k_combination_results over the 2d dimension
         k_combination_result_mean = np.mean(k_combination_result, axis = 0)
         k_combination_result_std = np.std(k_combination_result, axis = 0)
@@ -640,15 +648,27 @@ def feature_correlation(data_path, features_columns, label_column, log_feature =
     # Calculate the pearson correlation and p value for each feature
     correlation_dict = {}
     label_values = data[label_column].values
+    positive_indices = np.where(label_values > 0)[0]
+    positive_label_values = label_values[positive_indices] # only positive values
     if log_label:
         label_values_log = np.log(label_values + 1)
+        positive_label_values_log = label_values_log[positive_indices]
     for feature in features_columns:
+        # All values
         feature_values = data[feature].values
         r, p = pearson_correlation(feature_values, label_values)
         correlation_dict[(feature,label_column)] = (r, p, feature_values, label_values)
+        # Positive values
+        positive_feature_values = feature_values[positive_indices]
+        r_pos, p_pos = pearson_correlation(positive_feature_values, positive_label_values)
+        correlation_dict[(feature,f'Positive {label_column}')] = (r_pos, p_pos, positive_feature_values, positive_label_values)
         if log_label:
+            # All values log
             r_log, p_log = pearson_correlation(feature_values, label_values_log)
             correlation_dict[(feature,f'Log {label_column.lower()}')] = (r_log, p_log, feature_values, label_values_log)
+            # Positive values log
+            r_pos_log, p_pos_log = pearson_correlation(positive_feature_values, positive_label_values_log)
+            correlation_dict[(feature,f'Positive Log {label_column.lower()}')] = (r_pos_log, p_pos_log, positive_feature_values, positive_label_values_log)
     return correlation_dict
 def plot_feature_correlation(data_path, output_path,  feature_columns, label_column):
     '''This function will plot the correlation between the features and the label.
@@ -674,7 +694,8 @@ def plot_feature_correlation(data_path, output_path,  feature_columns, label_col
         feature,label = feature_nd_label
         feature = feature.replace("_"," ")
         label = label.replace("_"," ")
-        plot_correlation(x=x_values, y=y_values, x_axis_label=feature + " score", y_axis_label=label, r_coeff=r, p_value=p, title=feature + " " + label, output_path=output_path)
+        y_label = label.replace("Positive","") # remove positive from the label
+        plot_correlation(x=x_values, y=y_values, x_axis_label=feature + " score", y_axis_label=y_label, r_coeff=r, p_value=p, title=feature + " " + label, output_path=output_path)
 ### METRICS HELPER FUNCTIONS ###
 def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
     '''This function converts the labels in the merged data frame to TPR, FPR, Percisions values and tp baseline.
@@ -721,7 +742,7 @@ def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
 if __name__ == "__main__":
     
     plot_feature_correlation("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
-                             "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Feature_correlation/MOFF",["MOFF","GMT"],"Read_count")
+                             "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Feature_correlation/MOFF",["MOFF","GMT"],"Label")
     #  gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
     #  gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
     #  evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","Lazzarotto et. Al"), "Read_count", "regression","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")

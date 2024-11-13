@@ -45,9 +45,9 @@ class run_models:
         self.init_cross_val_dict()
         self.init_features_methods_dict()
         self.epigenetic_window_size = 0
-        if file_manager: # Not None
-            self.file_manager = file_manager
-        else : raise Exception("Trying to init model runner without file manager")
+        # if file_manager: # Not None
+        #     self.file_manager = file_manager
+        # else : raise Exception("Trying to init model runner without file manager")
         
         self.features_columns = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
     ## initairs ###
@@ -108,9 +108,9 @@ class run_models:
             raise RuntimeError("ML task - classification/regression was not set")
         
 
-    def setup_runner(self, model_num = None, cross_val = None, features_method = None, over_sampling = None, task = None):
+    def setup_runner(self, ml_task = None, model_num = None, cross_val = None, features_method = None, over_sampling = None):
+        self.set_model_task(ml_task)
         self.set_model(model_num)
-        self.set_model_task(task)
         self.set_cross_validation(cross_val)
         self.set_features_method(features_method)
         self.set_over_sampling('n') # set over sampling
@@ -164,16 +164,30 @@ class run_models:
         self.if_only_seq = self.if_bp = self.if_seperate_epi = False
         self.if_epi_features = True
 
+    def get_model_booleans(self):
+        '''Return the booleans for the model
+        ----------
+        Tuple of - only_seq, bp, seperate_epi, epi_features, data_reproducibility, model_reproducibility'''
+        return self.if_only_seq, self.if_bp, self.if_seperate_epi, self.if_epi_features, self.data_reproducibility, self.model_reproducibility
+    def get_encoding_parameters(self):
+        '''Return the encoded length and bp presentation
+        ----------
+        Tuple of - encoded_length, bp_presntation'''
+        return self.encoded_length, self.bp_presntation
     ## Model setters ###
     # This functions are used to set the model parameters.
     def set_hyper_params_class_wieghting(self, y_train):
-        class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
-        class_weight_dict = dict(enumerate(class_weights))
-        self.hyper_params['class_weight'] = class_weight_dict
+        if self.ml_task == "Classification":
+            class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
+            class_weight_dict = dict(enumerate(class_weights))
+            self.hyper_params['class_weight'] = class_weight_dict
+        else :  return # no class wieghting for regression
     
-    def set_model(self, model_num_answer = None ,add_path = True):
+    def set_model(self, model_num_answer = None ):
         if self.model_type_initiaded:
             return # model was already set
+        if not self.ml_task:
+            raise RuntimeError("Model task need to be setted before the model")
         model_num_answer = validate_dictionary_input(model_num_answer, self.model_dict)
         '''Given an answer - model number, set the ml_type and ml name'''
         if model_num_answer > 0 and model_num_answer < len(self.model_dict):
@@ -184,22 +198,19 @@ class run_models:
                 self.init_deep_hyper_params()
             self.ml_name = self.model_dict[model_num_answer]
             self.model_type_initiaded = True
-            if add_path:
-                self.file_manager.add_type_to_models_paths(self.ml_name) # add model name to models and results path
+            
     
     def set_model_task(self, task):
         '''This function set the model Task - classification or regression'''
         if self.ml_task:
             return # task was already set
-        if not self.model_type_initiaded:
-            raise RuntimeError("Model type need to be setted before the task")
         if task.lower() == "classification":
             self.ml_task = "Classification"
-        elif task.lower() == "regression":
+        elif task.lower() == "regression" or task.lower() == "t_regression":
             self.ml_task = "Regression"
         else : raise ValueError("Task must be classification or regression")
 
-    def set_cross_validation(self, cross_val_answer = None, add_path = True):
+    def set_cross_validation(self, cross_val_answer = None):
         if not self.model_type_initiaded:
             raise RuntimeError("Model type need to be setted before cross val type")
         if self.cross_val_init:
@@ -214,11 +225,9 @@ class run_models:
             self.k = int(input("Set K (int): "))
         elif cross_val_answer == 3:
             self.cross_validation_method = "Ensemble"
-        if add_path:
-            self.file_manager.add_type_to_models_paths(self.cross_validation_method) # add cross_val to models and results path
         self.cross_val_init = True
     
-    def set_features_method(self, feature_method_answer = None, add_path = True):  
+    def set_features_method(self, feature_method_answer = None):  
         if not self.model_type_initiaded and not self.cross_val_init:
             raise RuntimeError("Model type and cross val need to be setted before features method")
         if self.method_init:
@@ -232,8 +241,7 @@ class run_models:
             4: self.set_epi_window_booleans
         }   
         booleans_dict[feature_method_answer]()
-        if add_path:
-            self.file_manager.add_type_to_models_paths(self.features_methods_dict[feature_method_answer]) # add method to models and results path
+        self.feature_type = self.features_methods_dict[feature_method_answer]
         self.method_init = True
 
     '''Set features columns for the model'''
@@ -241,8 +249,15 @@ class run_models:
         if features_columns:
             self.features_columns = features_columns
         else: raise RuntimeError("Trying to set features columns for model where no features columns were given")
-        
 
+    def set_big_wig_number(self, number):
+        if isinstance(number,int) and number >= 0:
+            self.bigwig_numer = number 
+        else : raise ValueError("Number of bigwig files must be a non negative integer")
+    def get_parameters_by_names(self):
+        '''This function returns the following atributes by their names:
+        Ml_name, Cross_validation_method, Features_type'''
+        return self.ml_name, self.cross_validation_method, self.feature_type
                
     ## Over sampling setter
     def set_over_sampling(self, over_sampling):
@@ -368,7 +383,7 @@ class run_models:
             return get_xgboost_cw(self.inverse_ratio, self.random_state,self.data_reproducibility)
         elif self.ml_name == "CNN":
             return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
-                           self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.file_manager.get_number_of_bigiwig(), self.ml_task)
+                           self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.bigwig_numer, self.ml_task)
 
     '''2. Training and Predicting with model:'''
     ## Train model: if Deep learning set class wieghting and extract features
@@ -550,7 +565,7 @@ class run_models:
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
             model.save(temp_path)
     
-    def test_ensmbel(self, ensembel_model_list, tested_guide_list,test_on_guides = True):
+    def test_ensmbel(self, ensembel_model_list, tested_guide_list,x_features=None, y_labels=None,guides=None):
         '''This function tests the models in the given ensmble.
         By defualt it test the models on the tested_guide_list, If test_on_guides is False:
         it will test on the guides that are not in the tested_guide_list
@@ -559,10 +574,12 @@ class run_models:
         2. tested_guide_list - list of guides to test on
         3. test_on_guides - boolean to test on the given guides or on the diffrence guides'''
         # Get data
-        x_features, y_labels, guides = self.get_features()
+        if x_features is None or y_labels is None or guides is None:
+            x_features, y_labels, guides = self.get_features()
         guides_idx = self.keep_intersect_guides_indices(guides, tested_guide_list) # keep only the test guides indexes
         all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
         x_test, y_test = self.split_by_indexes(x_features, y_labels, guides_idx) # split by test indexes
+        
         # init 2d array for y_scores 
         # Row - model, Column - probalities
         y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 

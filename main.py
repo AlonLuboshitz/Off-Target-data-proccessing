@@ -16,11 +16,13 @@ import argparse
 import json
 import random
 import numpy as np
+import sys
+import time
 
-TASK = "Classification"
-FEATURE_TYPE = "Only_seq"
-MODEL_TYPE = "CNN"
-
+global ARGS, PHATS, COLUMNS
+CLASSIFICATION_ENSEMBLE_HEADER = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]
+REGRESSION_ENSEMBLE_HEADER = ["R_pearson","P.pearson","R_spearman","P.spearman","MSE","RP_STD","RS_STD","MSE_STD"]
+ENSEBMLE_HEADER = []
 
 
 
@@ -53,20 +55,44 @@ def argparser():
                          help='''Features method: 1 - Only_sequence, 2 - Epigenetics_by_features, 
                          3 - Base_pair_epigenetics_in_Sequence, 4 - Spatial_epigenetics''', 
                         required=True, default = 1)
-    parser.add_argument('--features_columns','fc',type=list,
-                         help='Features columns - list of string of the features columns in the data', required=False)
+    parser.add_argument('--features_columns', '-fc', nargs='+', type=str,
+                     help='Features columns - list of strings of the features columns in the data', required=False)
     parser.add_argument('--epigenetic_window_size','-ew', type=int, 
-                        help='Epigenetic window size - 100,200,500,2000', required=False)
+                        help='Epigenetic window size - 100,200,500,2000', required=False, default=2000)
     parser.add_argument('--epigenetic_bigwig','-eb', type=str,
                          help='Path for epigenetic folder with bigwig files for each mark.', required=False)
-    parser.add_argument('--task','-t', type=str, help='Task: classification/regression', required=True, default='classification')
+    parser.add_argument('--task','-t', type=str, help='Task: Classification/Regression/T_Regression - T = Transformed', required=True, default='Classification')
+    parser.add_argument('--transformation','-tr', type=str, help='Transformation type: Log/MinMax/Z_score', required=False, default=None)
     parser.add_argument('--over_sampling','-os', type=str, help='Over sampling: y/n', required=False)
     parser.add_argument('--seed','-s', type=int, help='Seed for reproducibility', required=False)
-    parser.add_argument('--data_columns_config','-dcc', type=str, 
-                        help='''Path to a json config file with the next columns:
-                        target_column, offtarget_column, chrom_column, start_column, end_column, binary_label_column, regression_label_column''',
+    parser.add_argument('--data_reproducibility','-dr', type=str, help='Data reproducibility: y/n', required=False, default='n')
+    parser.add_argument('--model_reproducibility','-mr', type=str, help='Model reproducibility: y/n', required=False, default='n')
+    parser.add_argument('--config_file','-cfg', type=str, 
+                        help='''Path to a json config file with the next dictionaries:
+                        1. Data columns:
+                        target_column, offtarget_column, chrom_column, start_column, end_column, binary_label_column,regression_label_column
+                        2. Data paths:
+                        Train_guides, Test_guides, Vivo-silico, Vivo-vitro, Model_path, ML_results, Data_name
+                        ''',
                          required=True)
-    args = parser.parse_args()
+    parser.add_argument('--data_name','-jd', type=str,
+                         help='''Dictionary names: 1 - Change_seq, 2 - Hendel, 3 - Hendel_Changeseq
+                        The name of the data dict need to parse from the json file''', required=False)
+    parser.add_argument('--data_type','-dt', type=str, help='''Data type: silico/vitro''', required=True)
+    parser.add_argument('--partition','-p', type=int, nargs='+',help='Partition number given via list', required=False)
+    if '--argfile' in sys.argv:
+        argfile_index = sys.argv.index('--argfile') + 1
+        argfile_path = sys.argv[argfile_index]
+     # Read the arguments from the file
+        with open(argfile_path, 'r') as f:
+            file_args = f.read().split()
+        
+        # Parse args with the file arguments included
+            args = parser.parse_args(file_args)
+    else:
+    # Parse normally if no config file is provided
+        args = parser.parse_args()    
+    # Read the JSON file and load it as a dictionary
     return args
 
 def validate_args(args):
@@ -76,57 +102,113 @@ def validate_args(args):
         raise ValueError("Epigenetic bigwig folder must be given for base pair epigenetics in sequence")
     if args.features_method == 4 and (args.epigenetic_bigwig is None or args.epigenetic_window_size is None):
         raise ValueError("Epigenetic bigwig folder and epigenetic window size must be given for spatial epigenetics")
-    if args.dcc 
-def parse_data_columns(json_columns):
+    if not os.path.exists(args.config_file):
+        raise ValueError("Data columns config file does not exist") 
+    if args.data_type not in ['silico','vitro']:
+        raise ValueError("Data type must be either silico or vitro")
+    if args.task.lower() not in ['classification','regression','t_regression']:
+        raise ValueError("Task must be either Classification, Regression or T_Regression")
+    if args.task.lower() == 't_regression' and args.transformation is None:
+        raise ValueError("Transformation must be given for transformed regression")
+    if args.transformation.lower() not in ["log","minmax","z_score"]:
+        raise ValueError("Transformation must be either Log, MinMax or Z_score")
+    ## Print all args:
+    print("Arguments are:")
+    for arg, value in vars(args).items():
+        print(f'{arg}: {value}') 
+    with open(args.config_file, 'r') as f:
+        print("Parsing config file")
+        configs = json.load(f)
+        columns_data = configs["Columns_dict"]
+        data_configs = configs[args.data_name]
+        parse_data_columns(columns_data)
+        parse_constants_dict(data_configs)
+        time.sleep(1)
+        global ARGS, PHATS, COLUMNS
+        ARGS = args    
+        PHATS = data_configs
+        COLUMNS = columns_data
+        set_task_label()
+def set_task_label():
+    global COLUMNS, ENSEBMLE_HEADER
+    if ARGS.task == 'Classification':
+        COLUMNS["Y_LABEL_COLUMN"] = COLUMNS["BINARY_LABEL_COLUMN"]
+        ENSEBMLE_HEADER = CLASSIFICATION_ENSEMBLE_HEADER
+    else: 
+        COLUMNS["Y_LABEL_COLUMN"] = COLUMNS["REGRESSION_LABEL_COLUMN"]  
+        ENSEBMLE_HEADER = REGRESSION_ENSEMBLE_HEADER
+def parse_data_columns(columns_config):
     '''This function parse the json columns.'''
-    with open(json_columns, 'r') as file:
-        config = json.load(file)
-        # Access constants from the dictionary
-        TARGET_COLUMN = config["TARGET_COLUMN"]
-        OFFTARGET_COLUMN = config["OFFTARGET_COLUMN"]
-        CHROM_COLUMN = config["CHROM_COLUMN"]
-        START_COLUMN = config["START_COLUMN"]
-        END_COLUMN = config["END_COLUMN"]
-        BINARY_LABEL_COLUMN = config["BINARY_LABEL_COLUMN"]
-        REGRESSION_LABEL_COLUMN = config["REGRESSION_LABEL_COLUMN"]
-    print(f"Columns: {TARGET_COLUMN}, {OFFTARGET_COLUMN}, {CHROM_COLUMN}, {START_COLUMN}, {END_COLUMN}, {BINARY_LABEL_COLUMN}, {REGRESSION_LABEL_COLUMN}")
+    # Access constants from the dictionary
+    for key, value in columns_config.items():
+        print(f'{key}: {value}')
+    
+     
 def parse_constants_dict(constants_dict):
     global VIVO_SILICO,VIVO_VITRO, ML_RESULTS_PATH, MODELS_PATH, TEST_GUIDES, SILICO_VITRO,TRAIN_GUIDES, DATA_NAME
     VIVO_SILICO = constants_dict["Vivo-silico"]
     VIVO_VITRO = constants_dict["Vivo-vitro"]
-    ML_RESULTS_PATH = constants_dict["ML_results"]
+    ML_RESULTS_PATH = constants_dict["ML_results_path"]
     MODELS_PATH = constants_dict["Model_path"]
     TEST_GUIDES = constants_dict["Test_guides"]
     TRAIN_GUIDES = constants_dict["Train_guides"]
     DATA_NAME = constants_dict["Data_name"]
-    
+    print(f"Data constants:\nVivo silico: {VIVO_SILICO}\nVivo vitro: {VIVO_VITRO}\nML results path: {ML_RESULTS_PATH}\nModels path: {MODELS_PATH}\nTest guides: {TEST_GUIDES}\nTrain guides: {TRAIN_GUIDES}\nData name: {DATA_NAME}")
+   
 
-## INIT FILE MANAGER
-def init_file_management():
-    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER, VIVO_SILICO ,VIVO_VITRO)
-    set_file_manager_files(file_manager)
+def get_x_y_data(file_manager, model_runner_booleans, model_runner_codings):
+    '''Given a file manager, model runner booleans and model runner codings
+    The function will generate the features and labels for the model used by the path to data in the file manager.
+    The function will return the x_features, y_features and the guide set.''' 
+    encoded_length, bp_presntation = model_runner_codings
+    if_only_seq, if_bp, if_seperate_epi, if_epi_features, data_reproducibility, model_repro = model_runner_booleans
+    
+    return  generate_features_and_labels(file_manager.get_merged_data_path() , file_manager,
+                                         encoded_length, bp_presntation, 
+                                         if_bp, if_only_seq, if_seperate_epi,
+                                         ARGS.epigenetic_window_size, ARGS.features_columns, 
+                                         data_reproducibility,COLUMNS, ARGS.transformation.lower())
+
+
+### INITIARS ### 
+def init_file_management(params):
+    global PHATS
+    file_manager = File_management(models_path=PHATS["Model_path"], ml_results_path=PHATS["ML_results_path"], 
+                                    train_guides_path=PHATS["Train_guides"], test_guides_path=PHATS["Test_guides"],
+                                    vivo_silico_path=PHATS["Vivo-silico"], vivo_vitro_path=PHATS["Vivo-vitro"],
+                                    epigenetics_bed=EPIGENETIC_FOLDER, epigenetic_bigwig=BIG_WIG_FOLDER)
+    ml_name, cross_val, feature_type = params
+    file_manager.set_model_parameters(data_type=ARGS.data_type,model_task=ARGS.task,cross_validation=cross_val,model_name=ml_name,features=feature_type,transformation=ARGS.transformation)
     return file_manager
-def set_file_manager_files(file_manager):
-    file_manager.set_ml_results_path(ML_RESULTS_PATH)
-    file_manager.set_models_path(MODELS_PATH)
-    file_manager.set_ensmbel_guides_path(TEST_GUIDES)
-    set_silico(file_manager)
 
-def set_silico(file_manager):
-    file_manager.set_silico_vitro_bools(True, False)
-def set_vitro(file_manager):
-    file_manager.set_silico_vitro_bools(False, True)
-    
-## INIT MODEL RUNNER
+def init_model_runner_without_file_manager():
+    from run_models import run_models
+    model_runner = run_models(None)
+    model_runner.setup_runner(ml_task=ARGS.task, model_num=ARGS.model, cross_val=ARGS.cross_val, features_method=ARGS.features_method)
+    return model_runner, model_runner.get_parameters_by_names()
+
+def set_up_model_runner():
+    model_runner, params = init_model_runner_without_file_manager()
+    file_manager = init_file_management(params)
+    model_runner.set_big_wig_number(file_manager.get_number_of_bigiwig())
+    return model_runner, file_manager
+
+def set_up_to_run():
+    model_runner, file_manager = set_up_model_runner()
+    x_features, y_features, guides = get_x_y_data(file_manager, model_runner.get_model_booleans(), model_runner.get_encoding_parameters())
+    return model_runner, file_manager, x_features, y_features, guides
+## MODEL RUNNER
+
+
 def init_run_models(file_manager):
     from run_models import run_models
     model_runner = run_models(file_manager)
+    model_runner.setup_runner(ml_task=ARGS.task, model_num=ARGS.model, cross_val=ARGS.cross_val, features_method=ARGS.features_method)
     return model_runner
 
-def set_up_model_runner():
-    file_manager = init_file_management()
-    model_runner = init_run_models(file_manager)
-    return model_runner, file_manager
+
+
+
 def init_cnn(runner):
     runner.set_model(4)
 def init_ensmbel(runner):
@@ -138,13 +220,12 @@ def init_epigenetics(runner):
 
 
 ## SET ENSMBEL PREFERENCES
-def set_ensmbel_preferences(file_manager, n_models = None, n_ensmbels = None, partition_num = None):
-    
+def set_ensmbel_preferences(file_manager, n_models = None, n_ensmbels = None, partition_num = None, train=False, test=False):
     # Pick partition
     if partition_num is None:
         partition_num = input("Enter partition number: ")
         partition_num = list(partition_num)
-    file_manager.set_partition(partition_num)
+    file_manager.set_partition(partition_num, train, test)
     # Get guides
     guides_path = file_manager.get_guides_partition()
     guides = []
@@ -162,19 +243,32 @@ def set_ensmbel_preferences(file_manager, n_models = None, n_ensmbels = None, pa
     file_manager.set_n_models(n_models)
     return  guides, n_models, n_ensmbels
 
+
+
+# def set_file_manager_files(file_manager):
+#     file_manager.set_ml_results_path(ML_RESULTS_PATH)
+#     file_manager.set_models_path(MODELS_PATH)
+#     file_manager.set_ensmbel_guides_path(TRAIN_GUIDES)
+#     set_silico(file_manager)
+
+# def set_silico(file_manager):
+#     file_manager.set_silico_vitro_bools(True, False)
+# def set_vitro(file_manager):
+#     file_manager.set_silico_vitro_bools(False, True)
+    
+
+
+
+
 ## ENSMBEL
 # Only sequence
 def create_ensmble_only_seq(partition_num = 0, n_models = 50, n_ensmbels = 10, group_dir = None):
     '''The function will create an ensmbel with only sequence features'''
-    runner, file_manager = set_up_model_runner()
-    init_cnn(runner)
-    init_ensmbel(runner)
-    init_only_seq(runner)
-    runner.setup_runner()
+    runner, file_manager , x_features, y_features, all_guides = set_up_to_run()
     if group_dir:
         file_manager.add_type_to_models_paths(group_dir)
-    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager,n_models=n_models, n_ensmbels=n_ensmbels, partition_num=partition_num)
-    create_n_ensembles(n_ensmbels, n_models, guides, file_manager, runner)
+    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager,n_models=n_models, n_ensmbels=n_ensmbels, partition_num=partition_num, train=True)
+    create_n_ensembles(n_ensmbels, n_models, guides, file_manager, runner, x_features, y_features, all_guides)
 
 
 ## - EPIGENETICS:
@@ -216,24 +310,22 @@ def create_ensembels_with_epigenetic_features(group, features,n_models=50):
     runner.set_features_columns(features) # set feature   
     create_n_ensembles(n_ensmbels, n_models, guides, file_manager, runner)
  
-def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner):
+def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, y_, all_guides):
     '''Given number of ensembls to create and n_models to create in each ensmbel
     it will create n_ensembles of n_models'''
     if n_ensembles == 1: # No need for multiprocessing
         output_path = file_manager.create_ensemble_train_folder(1)
-        runner.create_ensemble(n_models, output_path, guides, 10)
+        runner.create_ensemble(n_models, output_path, guides, 10,x_,y_,all_guides)
         return
     # Generate argument list for each ensemble
-    ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10)) for i in range(1, n_ensembles+1)]
+    ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10),x_,y_,all_guides) for i in range(1, n_ensembles+1)]
     # Create_ensmbel accpets - n_models, output_path, guides, additional_seed for reproducibility
     # Create a pool of processes
     cpu_count = os.cpu_count()
     num_proceses = min(cpu_count, n_ensembles)
     with Pool(processes=num_proceses) as pool:
         pool.starmap(runner.create_ensemble, ensemble_args_list)
-    # for i in range(1,n_ensembles+1):
-    #     output_path = file_manager.create_ensemble_train_folder(i)
-    #     runner.create_ensemble(n_modles, output_path, guides)
+    
 
 
 ## 2. ENSMBEL SCORES/Predictions
@@ -276,28 +368,24 @@ def test_ensemble_via_epi_feature(model_path, different_test_folder_path):
    
 
 def test_ensemble_via_onlyseq_feature(n_models=50,partition_num = 0,n_ensembels = 10,different_test_folder_path = None, different_test_path = None, group_dir = None, if_multi_process = False):
-    runner, file_manager = set_up_model_runner()
+    runner, file_manager , x_features, y_features, all_guides = set_up_to_run()
     if different_test_folder_path: # Not None
         file_manager.set_ml_results_path(different_test_folder_path)
     if different_test_path:
         file_manager.set_seperate_test_data(different_test_path[0],different_test_path[1])    
-    init_cnn(runner)
-    init_ensmbel(runner)
-    init_only_seq(runner)
     if group_dir:
         file_manager.add_type_to_models_paths(group_dir)
-    runner.setup_runner()
-    guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager, n_models=n_models, n_ensmbels=n_ensembels, partition_num=partition_num)
+    tested_guides, n_models, n_ensmbels = set_ensmbel_preferences(file_manager, n_models=n_models, n_ensmbels=n_ensembels, partition_num=partition_num,test=True)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
-    args = [(runner, ensmbel, guides, score_path) for ensmbel in ensmbels_paths]
+    args = [(runner, ensmbel, tested_guides, score_path, x_features, y_features, all_guides) for ensmbel in ensmbels_paths]
     if if_multi_process:
         with Pool(processes=10) as pool:
             pool.starmap(test_enmsbel_scores, args)
     else:
         for ensmbel in ensmbels_paths:
-            test_enmsbel_scores(runner, ensmbel, guides, score_path)
+            test_enmsbel_scores(runner, ensmbel, tested_guides, score_path, x_features, y_features, all_guides)
 
 def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data, silico):
     '''This function test one model performance on other data. For example training the model on
@@ -351,7 +439,7 @@ def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data
     test_enmsbel_scores(runner,ensmbels_paths,guides,score_path)
     
 
-def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
+def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path, x_features, y_labels, all_guides):
     '''Given a path to an ensmbel, a list of test guides and a score path
     the function will test the ensmbel on the test guides and save the scores in the score path.
     Each scores will be added with the acctual label and the index of the data point.'''
@@ -359,7 +447,7 @@ def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path):
     print(f"Testing ensmbel {ensmbel_path}")
     models_path_list = create_paths(ensmbel_path)
     models_path_list.sort(key=lambda x: int(x.split(".")[-2].split("_")[-1]))  # Sort model paths by models number
-    y_scores, y_test, test_indexes = runner.test_ensmbel(models_path_list, test_guides)
+    y_scores, y_test, test_indexes = runner.test_ensmbel(models_path_list, test_guides, x_features, y_labels, all_guides)
     # Save raw scores in score path
     temp_output_path = os.path.join(score_path,f'{ensmbel_path.split("/")[-1]}.csv')
     y_scores_with_test = add_row_to_np_array(y_scores, y_test)  # add accual labels to the scores
@@ -381,8 +469,8 @@ def process_single_ensemble_scores(scores_path,if_multi_process = False):
     '''This function will process all the ensmbel scores in the given path
 Given a score csv file it will extract from the scores diffrenet combinations of the scores and evaluate them 
 vs the labels. The results will be saved in the combi path for the same ensmbel.'''
+    run_models, file_manager = set_up_model_runner()
     
-    file_manager = init_file_management()
     file_manager.set_ml_results_path(scores_path)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
     ensmbel_scores_paths = create_paths(score_path) # Get a list of paths for each ensmbel scores
@@ -402,22 +490,23 @@ vs the labels. The results will be saved in the combi path for the same ensmbel.
         
 
 def process_score_path(score_path,combi_path):
+    global ENSEBMLE_HEADER
     '''Given a score path containing csv files with predictions score and label scores
     Extract the scores, labels and indexes from the files and evaluate all the combinatorical results.
     Keep the results in the combi_path given'''
     y_scores, y_test, indexes = extract_scores_labels_indexes_from_files([score_path])
-    results = eval_all_combinatorical_ensmbel(y_scores, y_test)
-    header = ["Auroc", "Auprc", "N-rank", "Auroc_std", "Auprc_std", "N-rank_std"]
+    results = eval_all_combinatorical_ensmbel(y_scores, y_test, ENSEBMLE_HEADER, ARGS.task)
+    ##header = ["Auroc", "Auprc", "N-rank", "Auroc_std", "Auprc_std", "N-rank_std"]
     temp_output_path = os.path.join(combi_path, f'{score_path.split("/")[-1]}')
-    write_2d_array_to_csv(results, temp_output_path, header)
+    write_2d_array_to_csv(results, temp_output_path, ENSEBMLE_HEADER)
 
 
 def set_reproducibility_data(file_manager, run_models, data_path):
-    file_manager.set_model_results_output_path(data_path)
+    file_manager.ml_results_path(data_path)
     run_models.set_data_reproducibility(True)
     run_models.set_model_reproducibility(False)
 def set_reproducibility_models(file_manager, run_models, model_path):
-    file_manager.set_model_results_output_path(model_path)
+    file_manager.ml_results_path(model_path)
     run_models.set_model_reproducibility(True)
     run_models.set_data_reproducibility(False)
 
@@ -570,9 +659,9 @@ def combiscore_by_folder(base_path):
         pool.starmap(process_single_ensemble_scores,scores_nd_combi_paths)
 ### With creation of ensemble i seed is *100 and not 10! need to change back!
 def only_seq_ensemble_pipe():
-    create_ensmble_only_seq(partition_num=[0],n_models=50,n_ensmbels=10)
-    #test_ensemble_via_onlyseq_feature(n_models=50,different_test_folder_path="/localdata/alon/ML_results/Train_vitro_test_genome")
-    #process_single_ensemble_scores("/localdata/alon/ML_results/Train_vitro_test_genome/CNN/Ensemble/Only_sequence/1_partition/1_partition_50")
+    #create_ensmble_only_seq(partition_num=[7],n_models=10,n_ensmbels=1)
+    #test_ensemble_via_onlyseq_feature(n_models=10,n_ensembels=1,partition_num=[7],different_test_folder_path=None)
+    process_single_ensemble_scores("/localdata/alon/ML_results/Change-seq/vivo-vitro/T_Regression/Log/CNN/Ensemble/Only_sequence/7_partition/7_partition_10")
     pass
 def epigeneitc_ensemble_pipe():
     from Server_constants import LOCAL_RESULTS_EPIGENETICS, LOCAL_MODELS_EPIGENETICS
@@ -582,12 +671,11 @@ def epigeneitc_ensemble_pipe():
     pass
 
 if __name__ == "__main__":
-    parse_constants_dict(MERGED_DICT)
+    args = argparser()
+    validate_args(args)
+    only_seq_ensemble_pipe()
     #performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")
-    #epigeneitc_ensemble_pipe()
-    #only_seq_ensemble_pipe()
-    #create_ensmble_only_seq(partition_num=[1],n_models=50,n_ensmbels=1)
-    #create_performance_by_data()
+    
     # test_performance_by_data(Models_folder="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive",
     #                          test_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
     #                          test_guides="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/tested_guides_12_partition.txt")

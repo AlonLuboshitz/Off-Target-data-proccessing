@@ -10,7 +10,7 @@ from pybedtools import BedTool
 #from common_variables import 
 from sklearn.utils import shuffle
 from file_management import File_management
-from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN,READ_COUNT_COLUMN
+from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN,REGRESSION_LABEL_COLUMN
 ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 ## in common variables class there are columns for: 
 '''1. TARGET - gRNA seq column
@@ -28,42 +28,70 @@ Function: takes the data table, create a unique list of gRNAs, Split the data in
 Based on gRNA
 Outputs: 1. Dictionray - {gRNA : Data frame} 2. unique gRNA set
 '''
-def create_data_frames_for_features(data, if_data_reproducibility):
+def create_data_frames_for_features(data, if_data_reproducibility, target_column):
     data_table = pd.read_csv(data) # open data
     # set unquie guide identifier, sorted if reproducibilty is need with data spliting
     if if_data_reproducibility:
-        guides = sorted(set(data_table[TARGET_COLUMN])) 
+        guides = sorted(set(data_table[target_column])) 
     else : 
-        guides = list(set(data_table[TARGET_COLUMN]))
+        guides = list(set(data_table[target_column]))
         guides = shuffle(guides)
         # Create a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames
-    df_dict = {grna: group for grna, group in data_table.groupby(TARGET_COLUMN)}
+    df_dict = {grna: group for grna, group in data_table.groupby(target_column)}
     # Create separate DataFrames for each gRNA in the set
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
     return (result_dataframes, guides)
 
-'''Args:
-1. Dict - {gRNA : Data frame},  2. File manager instaces to get files and thier data 3. booleans for type of feature enconding
-Function: Store x and y lists with x features after encoding, and coresponding y values (1/0/log(1+ read count))
-Iterate on each gRNA : Data frame and extract the Data
-Outputs --> x & y lists with N nd.arrays each of them is for gRNA (N - total number of gRNAs)
-Uses - internal functions for seq encoding, epigentic encoding, and bp intersection of epigenetics with seq'''
-def generate_features_and_labels(data_path, manager, encoded_length, bp_presenation, if_bp, if_only_seq , if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility):
-    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility)
+
+def generate_features_and_labels(data_path, manager, encoded_length, bp_presenation, if_bp, if_only_seq , 
+                                 if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility,
+                                 columns_dict, transform_y_type = False):
+    '''This function generates x and y data for gRNAs and their corresponding off-targets.
+    For each (gRNA, OTS) pair it one-hot encodes the sequences and adds epigenetic data if required.
+    For each pair it will return their corresponding y values (1/0/read_count).
+    It iterates on each gRNA : Data frame and extract the data.
+    Uses internal functions for seq encoding, epigentic encoding, and bp intersection of epigenetics with seq.
+    Args:
+    1. Data path - path to the OTS data file.
+    2. File manager instance to get epigentic files and their data. 
+    3. Encoded length - the length of the one-hot encoded sequence.
+    4. bp_presenation - the vector size for each base pair as.
+    5. if_bp - boolean to add epigenetic data for each base pair.
+    6. if_only_seq - boolean to use only sequence encoding.
+    7. if_seperate_epi - boolean to use epigenetic data in seperate vector.
+    8. epigenetic_window_size - the size of the window for epigenetic data.
+    9. features_columns - list of columns to add as features.
+    10. if_data_reproducibility - boolean to sort the data for reproducibility.
+    11. columns_dict - dictionary of columns to use in the data frame with the columns:
+    TARGET_COLUMN, OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN,
+    BINARY_LABEL_COLUMN, REGRESSION_LABEL_COLUMN, Y_LABEL_COLUMN
+    Returns:
+    1. x_data_all - list of x data for each gRNA.
+    2. y_labels_all - list of y labels for each gRNA.
+    3. guides - list of unique gRNAs.
+    
+'''
+    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility,columns_dict["TARGET_COLUMN"])
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     ALL_INDEXES.clear() # clear indexes
     for guide_data_frame in splited_guide_data.values(): # for every guide get x_features by booleans
         # get seq info - represented in all!
-        seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = bp_presenation) #int8
+        seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = bp_presenation,
+                                   off_target_column=columns_dict["OFFTARGET_COLUMN"],
+                                   target_column=columns_dict["TARGET_COLUMN"]) #int8
         
         if if_bp: # epigentic value for every base pair in gRNA
-            big_wig_data = get_bp_for_one_hot_enconded(data = guide_data_frame, encoded_length = encoded_length, manager = manager, bp_presenation = bp_presenation)
+            big_wig_data = get_bp_for_one_hot_enconded(data = guide_data_frame, encoded_length = encoded_length, manager = manager,
+                                                        bp_presenation = bp_presenation, chr_column = columns_dict["CHROM_COLUMN"],
+                                                        start_column = columns_dict["START_COLUMN"], end_column = columns_dict["END_COLUMN"])
             seq_info = seq_info.astype(np.float32) 
             x_data = seq_info + big_wig_data
            
         elif if_seperate_epi: # seperate vector to epigenetic by window size
-            epi_window_data = get_seperate_epi_by_window(data = guide_data_frame, epigenetic_window_size = epigenetic_window_size, manager = manager)
+            epi_window_data = get_seperate_epi_by_window(data = guide_data_frame, epigenetic_window_size = epigenetic_window_size, 
+                                                         manager = manager, chr_column = columns_dict["CHROM_COLUMN"],
+                                                         start_column = columns_dict["START_COLUMN"])
             seq_info = seq_info.astype(np.float32)
             x_data = np.append(seq_info, epi_window_data ,axis=1)
         elif if_only_seq:
@@ -74,17 +102,19 @@ def generate_features_and_labels(data_path, manager, encoded_length, bp_presenat
         ALL_INDEXES.append(guide_data_frame.index)
         x_data_all.append(x_data)
         
-        y_labels_all.append(guide_data_frame[[BINARY_LABEL_COLUMN]].values) # add label values by extracting from the df by series values.
+        y_labels_all.append(guide_data_frame[[columns_dict["Y_LABEL_COLUMN"]]].values) # add label values by extracting from the df by series values.
     del splited_guide_data # free memory
+    if transform_y_type:
+        y_labels_all = transform_labels(y_labels_all, transform_y_type)
     return (x_data_all,y_labels_all,guides)
 
 
 '''Args: 1. gRNA : data frame, 2. encoded length, 3. the vector size for each base pair as bp_repsentation
 Function: init ones vector with amount of data points each encoded length size
 Each data point sent to one hot encoding with (OTS seq, gRNA seq)'''
-def get_seq_one_hot(data, encoded_length, bp_presenation):
+def get_seq_one_hot(data, encoded_length, bp_presenation, off_target_column, target_column):
     seq_info = np.ones((data.shape[0], encoded_length),dtype=np.int8)
-    for index, (otseq, grnaseq) in enumerate(zip(data[OFFTARGET_COLUMN], data[TARGET_COLUMN])):
+    for index, (otseq, grnaseq) in enumerate(zip(data[off_target_column], data[target_column])):
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
@@ -94,9 +124,9 @@ def get_seq_one_hot(data, encoded_length, bp_presenation):
  4. the vector size for each base pair as bp_repsentation
 Function: init ones vector with amount of data points each encoded length size
 Each data point sent to epigenetic encoding (add peak values for every base pair in grna location)'''
-def get_bp_for_one_hot_enconded(data, encoded_length, manager, bp_presenation):
+def get_bp_for_one_hot_enconded(data, encoded_length, manager, bp_presenation, chr_column, start_column, end_column):
     bigwig_info = np.ones((data.shape[0],encoded_length))
-    for index, (chrom, start, end) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN], data[END_COLUMN])):
+    for index, (chrom, start, end) in enumerate(zip(data[chr_column], data[start_column], data[end_column])):
         if not (end - start) == 23:
             end = start + 23
         bigwig_info[index] = bws_to_one_hot(file_manager=manager,chr=chrom,start=start,end=end,encoded_length=encoded_length,bp_presenation=bp_presenation)
@@ -106,13 +136,13 @@ def get_bp_for_one_hot_enconded(data, encoded_length, manager, bp_presenation):
 Function: init ones vector with amount of data points each encoded length size times the amount of epigenetic files
 i.e. (N_points, window_size + window_size) for 2 files.
 Each data point sent to epigenetic encoding (add peak values for every base pair) where window size/2 added from ots location'''
-def get_seperate_epi_by_window(data, epigenetic_window_size, manager):
+def get_seperate_epi_by_window(data, epigenetic_window_size, manager, chr_column, start_column):
     epi_data = np.ones((data.shape[0],epigenetic_window_size * manager.get_number_of_bigiwig())) # set empty np array with data points and epigenetics window size
     for file_index, (bw_epi_name, bw_epi_file) in enumerate(manager.get_bigwig_files()): # get one or more files 
         #glb_max = manager.get_global_max_bw()[bw_epi_name] # get global max all over bigwig
         filler_start = file_index * epigenetic_window_size
         filler_end = (file_index + 1) * epigenetic_window_size
-        for index, (chrom, start) in enumerate(zip(data[CHROM_COLUMN], data[START_COLUMN])):
+        for index, (chrom, start) in enumerate(zip(data[chr_column], data[start_column])):
         
             epi_data[index,filler_start:filler_end] = get_epi_data_bw(epigenetic_bw_file=bw_epi_file,chrom=chrom,center_loc=start,window_size=epigenetic_window_size,max_type = 1)
         print(epi_data[0])
@@ -267,6 +297,33 @@ def get_guides_indexes(guide_idxs):
     choosen_indexes = [index for idx in guide_idxs for index in ALL_INDEXES[idx]]
     choosen_indexes = np.array(choosen_indexes)
     return choosen_indexes
+
+### Transformations ###
+def transform_labels(y_vals, transform_type):
+    '''Transform the y values based on the given transformation type.
+    The y_vals can be 1d np array or list of 1d np arrays.
+    Returns the transformed y values.'''
+    transform_type = transform_type.lower()
+    if transform_type == "log":
+        return log_transformation(y_vals)
+    else:
+        raise ValueError("Invalid transformation type.")
+def log_transformation(y_vals):
+    '''Conduct log transformation on the y values.
+    The y_vals can be 1d np array or list of 1d np arrays.
+    Returns the transformed y values.'''
+    if isinstance(y_vals, list):
+        transformed = [np.log(y_val + 1) for y_val in y_vals]
+        for index,array in enumerate(transformed):
+            if array.size != y_vals[index].size:
+                raise ValueError("The size of the log transformed array does not match the original array.")
+        return transformed
+    else:
+        transformed = np.log(y_vals + 1)
+        if len(transformed) != len(y_vals):
+            raise ValueError("The size of the log transformed array does not match the original array.")
+        return transformed
+    
 
 '''given feature list, label list split them into
 test and train data.

@@ -7,7 +7,7 @@ import pandas as pd
 
 
 
-
+### DATA UTILITIES ###
 
 def keep_positives_by_ratio(X_data, y_data, ratio = None):
     '''This function keeps a subset ratio of the positive data points in the data.
@@ -326,7 +326,9 @@ def create_k_balanced_groups(dataset, target_column, label_column, k, output_nam
         seperate_grna_path - path to save each group seperatly
         y_labels_tup - list of labels for each guide (optional)
         if y_labels_tup given it should be given the a list of guides!
-        constrained_guides - list of guides need to be kept in one group (Usauly for test set) - NOTE: They will be kept sololy
+        constrained_guides - tuple of:
+        (list of guides need to be kept in one group (Usauly for test set), bool- true to keep them sololy, false to keep them with more guides)
+         NOTE: By defualt they will be kept sololy
         -----------
         Saves the groups in a csv file containing:
         Positives, Negatives, list of guides.
@@ -392,20 +394,33 @@ def fill_k_groups_indices(k, sum_labels, sorted_indices, constrained_grna_indice
             groups.append(constrained_grna_indices)
         return groups
 def write_guides_seperatley(k_groups, guides, output_path):
-    '''Write each guides group to a txt file in the output path
+    '''Write each guides group to a txt file in the output path with train_guides_{i}_partition.txt
+    Write each guides group diffrence from all guides to a txt file in the output path with tested_guides_{i}_partition.txt
     Args:
         k_groups - list of lists with the indices of the guides
         guides - list of all the guides
         output_path - path to save the groups'''
     
     for i, group in enumerate(k_groups): # iterate on each group
-        temp_path = os.path.join(output_path,f"tested_guides_{i+1}_partition.txt")
-        with open(temp_path, "w") as file:
+        train_temp_path = os.path.join(output_path,f"Train_guides_{i+1}_partition.txt")
+        test_temp_path = os.path.join(output_path,f"Test_guides_{i+1}_partition.txt")
+        all_indexes = set(range(len(guides)))
+        with open(test_temp_path, "w") as test_file:
             for index in group:
                 if index == group[-1]:
-                    file.write(guides[index])
+                    test_file.write(guides[index])
                 else:
-                    file.write(guides[index] + ", ")
+                    test_file.write(guides[index] + ", ")
+        test_group_indexes = list(all_indexes - set(group))
+        with open(train_temp_path, "w") as train_file:
+            for index in test_group_indexes:
+                if index == test_group_indexes[-1]:
+                    train_file.write(guides[index])
+                else:
+                    train_file.write(guides[index] + ", ")
+                    
+        
+
 def save_complete_partition_information(k_groups, labels, guides, output_name):
     '''Save the complete partition information to a csv file
     Args:
@@ -491,10 +506,13 @@ def concat_change_seq_df():
     merged["Index"] = merged.index
     merged.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed.csv",index=False)
 if __name__ == "__main__":
-   
+    cons = (['GCTGGTACACGGCAGGGTCANGG', 'GGCGCCCTGGCCAGTCGTCTNGG', 'GTCAGGGTTCTGGATATCTGNGG', 'GGGGCCACTAGGGACAGGATNGG', 'GAGAATCAAAATCGGTGAATNGG', 'GCAGCATAGTGAGCCCAGAANGG'], True)
+    create_k_balanced_groups("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv","target","Label",7
+                             ,"Changeseq-Partition","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides_78",constrained_guides=cons)
+
     
 
-    union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
+    #union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
     # #list_50 = [i for i in range(2,51)]
     # list_50 = [50]
     # dict_50_only_seq = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/Only_seq/1_partition_50/Combi",list_50)
