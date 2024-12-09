@@ -9,8 +9,7 @@ import pandas as pd
 import numpy as np
 import os
 import sys
-import matplotlib.pyplot as plt
-import re
+from utilities import extract_guides_from_partition, get_feature_name, create_folder
 from Changeseq import get_ending
 # chrom_types are defualt and can be change manauly.
 # they correspond to bed files and should be found in the columns of the data
@@ -259,42 +258,49 @@ def run_correlation(x_data,y_data,x_name,y_name,cor_name,data,columns_info):
         correlation, p_value = stats.spearmanr(x_data,y_data)
     elif cor_name == "Hypergeo":
         correlation = 0
-        p_value = hypergeometric_test(data,bed_name=x_name,y_data=y_name)
+        p_value = hypergeometric_test(data,feature=x_name,label_column=y_name)
     
     r_sqr = correlation**2
     returned_params["R"] = correlation
     returned_params["R-Sqr"] =  r_sqr
     returned_params["P-val"] = p_value
     return returned_params
-'''args:
-1. offtarget data - get the off target population size - N . n - get succses (active)
-2. bed name - x column
-function: 
-Population - off targets - active + in acttive
-Succses - active of target
-Sample size - chromatin info intergration amount
-succses in sample - active off target via sample size
-returns p-val
+
+def hypergeometric_test(offtarget_data,feature,label_column,disterbution_stats = None, if_enrichment= False):
+    '''This function calculates the hyper geo test for given data set and feature.
+    How enrichmet the feature is in the data set. Args:
+    1. offtarget data:
+    2. feature 
+    Disterbution_stats = (active,inactive,sample_size,succesees_in_samples)
+    Population - off targets - active + in acttive
+    Succses - active of target
+    Sample size - chromatin info intergration amount
+    succses in sample - active off target via sample size
+returns p-val,fold enrichment
  '''
-def hypergeometric_test(offtarget_data,bed_name,y_data):
-    # Get active and inactive off targets
-    active,inactive = extract_amount_of_pos_neg(offtarget_data,label=y_data)
+    if disterbution_stats is None:
+        # Get active and inactive off targets
+        active,inactive = extract_amount_of_pos_neg(offtarget_data,label=label_column)
+        # intergration with chrom info
+        sample_size = len(offtarget_data[offtarget_data[feature] > 0])
+        # succses in sample - where x column(chrom info) is 1 -> open, and y column is 1 (active)
+        successes_in_sample = len(offtarget_data[(offtarget_data[feature] >0) & (offtarget_data[label_column] > 0)])
+    else :
+        active, inactive, sample_size,successes_in_sample = disterbution_stats
     # N population size - off targets
     population_size = active + inactive
-    # intergration with chrom info
-    sample_size = len(offtarget_data[offtarget_data[bed_name] >= 1])
-    
-    # succses in sample - where x column(chrom info) is 1 -> open, and y column is 1 (active)
-    successes_in_sample = len(offtarget_data[(offtarget_data[bed_name] >= 1) & (offtarget_data[y_data] >= 1)])
     # hypergeo test
     p_value_more_than = 1 - stats.hypergeom.cdf(successes_in_sample - 1, population_size, active, sample_size)
-
-
-
-
-    
-    
-    
+    # enrichments:
+    if if_enrichment:
+        expected_successes = (active / population_size) * sample_size
+        positive_fold_enrichment = successes_in_sample / expected_successes
+        # Calculate expected failures
+        expected_failures = (inactive/population_size) * sample_size 
+        failures_in_sample = sample_size - successes_in_sample
+        # Calculate failure fold enrichment
+        failure_fold_enrichment = failures_in_sample / expected_failures
+        return p_value_more_than,positive_fold_enrichment,failure_fold_enrichment
     return p_value_more_than
 
 
@@ -373,17 +379,7 @@ def merge_cor_data(path):
         
 
 
-''' function creates plot from values, lables, title.
-save the figure in the intened path.'''  
-def create_scatter_image(x_y_values,title,x_label,y_label,path_for_plot):
-    # Create a scatter plot
-    plt.scatter(x_y_values[0],x_y_values[1])
-    plt.title(title)
-    plt.xlabel(x_label)
-    plt.ylabel(y_label)
-    title = title + ".png"
-    outputpath = os.path.join(path_for_plot,title)
-    plt.savefig(outputpath)
+
 ''' function gets a path to base folder and creates corelation folder.
 inside creates folder for spearman,pearson,phi
 returns tuple list of folder (name,path)'''          
@@ -438,11 +434,141 @@ def extract_axis(data_path,function_applied,columns):
         result_series_list.append((axis_name,result_series))
 
     return result_series_list
+def binary_feature_enrichment_by_partition(partitions, features_columns,label_column,output_path,data_path =None,partition_info_path=None):
+    if data_path is None:
+        raise RuntimeError("No data path is given")
+    if partition_info_path is None:
+        raise RuntimeError("No parition data path is given")
+    data = pd.read_csv(data_path)
+    partition_info = pd.read_csv(partition_info_path)
+    output_path = os.path.join(output_path,"Binary")
+    create_folder(output_path)
+    for partition in partitions:
+        partition_guides = extract_guides_from_partition(partition_info,partition)
+        partition_data = data[data["target"].isin(partition_guides)]
+        temp_path = os.path.join(output_path,f"{partition}_partition.csv")
+        binary_feature_enrichment(features_columns,label_column,temp_path,partition_data)
+    temp_path = os.path.join(output_path,"All_partitions.csv")
+    binary_feature_enrichment(features_columns,label_column,temp_path,data=data)
+
+def binary_feature_enrichment( features_columns, label_column,output_path, data= None, data_path = None):
+    '''This function gets a features columns list, label column and data and:
+    Creates a data with the enrichment of each feature compared to the label.
+    '''
+    # Read data
+    if data is None:
+        if data_path is None:
+            raise RuntimeError("No data path is given")
+        else:
+            data = pd.read_csv(data_path)
+            output_path = os.path.join(output_path,f"all_data.csv")
+    positives = len(data[data[label_column] > 0])
+    negatives = len(data[data[label_column] == 0])
+    index = ['positive_peaks','negative_peaks','positive_enrichment','negative_enrichment','p_val','geo_fold_pos','geo_fold_negative','positives','negatives']
+    enrichment_data_set = pd.DataFrame()
+    enrichment_data_set["Index"] = index
+    enrichment_data_set.set_index("Index",inplace=True)
+    for feature in features_columns:
+        feature_in_positive,feature_in_nagative = get_feature_enrichment(data,feature,label_column)
+        total_feature = feature_in_positive + feature_in_nagative
+        positive_enrichment = feature_in_positive/positives
+        negative_enrichment = feature_in_nagative/negatives
+        p_val,geo_fold_positive,geo_fold_negative = hypergeometric_test(None,None,None,(positives,negatives,total_feature,feature_in_positive),True)
+        feature_str = get_feature_name(feature)
+        enrichment_data_set[feature_str] = [feature_in_positive,feature_in_nagative,positive_enrichment,negative_enrichment,p_val,geo_fold_positive,geo_fold_negative,positives,negatives]
+    enrichment_data_set.to_csv(output_path)
+def get_feature_enrichment(data,feature, label_column):
+    feature_in_positive = len(data[(data[feature] > 0 ) & (data[label_column] > 0)])
+    feature_in_nagative = len(data[(data[feature] > 0 ) & (data[label_column] == 0)])
+    return (feature_in_positive,feature_in_nagative)
+
+### FEATURE EVALUTION ###
+def feature_correlation(data, features_columns, label_column, log_feature = False, log_label = False):
+    '''This function will calculate the correlation between the features and the label.
+    The function will calculate the pearson correlation and the p value for each feature.
+    Args:
+    1. data_path - path to the data.
+    2. features_columns - columns with the features.
+    3. label_column - column with the label.
+    4. log_feature - boolean if to log the feature.
+    5. log_label - boolean if to log the label.
+    ------------
+    Returns: dictionary with the features as keys and the (pearson correlation ,p value, x_values, y_values).'''
+   
+    # Calculate the pearson correlation and p value for each feature
+    correlation_dict = {}
+    label_values = data[label_column].values
+    positive_indices = np.where(label_values > 0)[0]
+    positive_label_values = label_values[positive_indices] # only positive values
+    if log_label:
+        label_values_log = np.log(label_values + 1)
+        positive_label_values_log = label_values_log[positive_indices]
+    for feature in features_columns:
+        # All values
+        feature_values = data[feature].values
+        r, p = stats.pearsonr(feature_values, label_values)
+        correlation_dict[(feature,label_column)] = (r, p, feature_values, label_values)
+        # Positive values
+        positive_feature_values = feature_values[positive_indices]
+        r_pos, p_pos = stats.pearsonr(positive_feature_values, positive_label_values)
+        correlation_dict[(feature,f'Positive {label_column}')] = (r_pos, p_pos, positive_feature_values, positive_label_values)
+        if log_label:
+            # All values log
+            r_log, p_log = stats.pearsonr(feature_values, label_values_log)
+            correlation_dict[(feature,f'Log {label_column.lower()}')] = (r_log, p_log, feature_values, label_values_log)
+            # Positive values log
+            r_pos_log, p_pos_log = stats.pearsonr(positive_feature_values, positive_label_values_log)
+            correlation_dict[(feature,f'Positive Log {label_column.lower()}')] = (r_pos_log, p_pos_log, positive_feature_values, positive_label_values_log)
+    return correlation_dict
+def plot_feature_correlation( output_path,  feature_columns, label_column,data_path=None,data=None):
+    '''This function will plot the correlation between the features and the label.
+    The function will plot the scatter plot for each feature and the label.
+    Args:
+    1. data_path - path to the data.
+    2. output_path - path to save the plots.
+    3. feature_columns - columns with the features.
+    4. label_column - column with the label.
+    ------------
+    Returns: None
+    
+    plot_feature_correlation("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
+                             "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Feature_correlation/MOFF",["MOFF","GMT"],"Label")'''
+    if label_column == "Label":
+        log = False
+    else: log = True
+    # Calculate the correlation
+    if data is None:
+        if data_path is None:
+            raise RuntimeError("No data path is given")
+        else:
+            data = pd.read_csv(data_path)
+    correlation_dict = feature_correlation(data, feature_columns, label_column, log_label = log)
+    # Plot the correlation
+    for feature_nd_label, values in correlation_dict.items():
+        r, p, x_values, y_values = values
+        feature,label = feature_nd_label
+        feature = feature.replace("_"," ")
+        label = label.replace("_"," ")
+        y_label = label.replace("Positive","") # remove positive from the label
+        plot_correlation(x=x_values, y=y_values, x_axis_label=feature + " score", y_axis_label=y_label, r_coeff=r, p_value=p, title=feature + " " + label, output_path=output_path)
+
 
 if __name__ == '__main__':
     # run stats create for each guideseq folder the cor_folder
-    run_stats(sys.argv[1],2,sys.argv[2])
-    
-    
-    
+    #run_stats(sys.argv[1],2,sys.argv[2])
+    features = [
+    'Chromstate_H3K27me3_peaks_binary', 
+    'Chromstate_H3K27ac_peaks_binary', 
+    'Chromstate_H3K9ac_peaks_binary', 
+    'Chromstate_H3K9me3_peaks_binary', 
+    'Chromstate_H3K36me3_peaks_binary', 
+    'Chromstate_ATAC-seq_peaks_binary', 
+    'Chromstate_H3K4me3_peaks_binary', 
+    'Chromstate_H3K4me1_peaks_binary'
+]
+    output_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Feature_correlations/Change-seq/Vivo-vitro"
+    data_path ="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv"
+    partition_info = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv"
+                              
+    binary_feature_enrichment_by_partition([1,2,3,4,5,6,7],features,"Read_count",output_path,data_path,partition_info)
 

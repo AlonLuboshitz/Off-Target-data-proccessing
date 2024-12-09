@@ -5,6 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "MOFF",
+            "type": "python",
+            "request": "launch",
+            "program": "External_models_predictions/MOFF/MOFF.py",
+            "console": "integratedTerminal",
+            "args": ["score", "-i", "/home/dsi/lubosha/Off-Target-data-proccessing/External_models_predictions/MOFF/Hendel_only_mism_input_toMOFF_score.txt", "-p","hendel_mism_only"],
+            "justMyCode": true
+        },
+        {
             "name": "Features",
             "type": "python",
             "request": "launch",
@@ -85,6 +94,18 @@
                 "2",
                 "False",
                 "/home/alon/masterfiles/offtarget_260520_nuc.csv"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "main",
+            "type": "python",
+            "request": "launch",
+            "program": "main.py",
+            "args": [
+                "--argfile",
+                "/home/dsi/lubosha/Off-Target-data-proccessing/Args_log_transform.txt"
+                
             ],
             "justMyCode": true
         },

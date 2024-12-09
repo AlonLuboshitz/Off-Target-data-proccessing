@@ -177,29 +177,45 @@ def create_paths(folder):
             paths.append(os.path.join(folder,path))
         return paths
 
-def get_ensmbels_stats(ensemble_dict,n_models):
-    '''This function take an ensmbel dict:
-    {Ensmbel_group: {n_models : scores (auroc,auprc,n-rank)}}
-    The function will compare the statics using wilcoxon test
-    for each group compared to Only_seq.
-    the comparison will be on the same number of models'''
+def get_only_seq_vs_group_ensmbels_stats(ensemble_dict,n_models,compare_to,difference_only = False,compare_to_scores= None,groups_scores=None):
+    '''This function will return the p val statitcs for the wilcoxon test for given set of features agiasnt a spesific label.
+    If difference_only is True, the function will use the group scores as the difference between the group and wanted label.
+    Args:
+    1. ensemble_dict - dictionary with results as follows: {key -> group_name, val -> {key -> n_models, val -> np array of results}}
+    2. n_models - number of models in the ensemble.
+    3. compare_to - the group to compare the results to.
+    4. difference_only - if True, the function will use the group scores as the difference between the group and wanted label.
+    5. compare_to_scores - if given, the function will use this scores as the compare_to scores.
+    6. groups_scores - if given, the function will use this scores as the group scores.
+    ------
+    Returns: a dictionary with the comparison results for each group to the compare_to group.
+    '''
     # 1. Get the Only_seq scores
-    only_seq_scores = get_values_from_ensmbel_dict(ensemble_dict["Only-seq"],n_models)
+    if compare_to_scores is None:
+        if ensemble_dict: # not None
+            compare_to_scores = get_values_from_ensmbel_dict(ensemble_dict[compare_to],n_models)
+    if difference_only:
+        compare_to_scores = None
+    if groups_scores is None:
+        groups_scores = {group: get_values_from_ensmbel_dict(ensemble_dict[group],n_models) for group in ensemble_dict.keys() if group != compare_to}
+    else :
+        groups_scores = {group: get_values_from_ensmbel_dict(groups_scores[group],n_models) for group in groups_scores.keys()}    
     # 2. Compare the scores of each group to the only seq
     compare_dict = {} # Init dict that hold the comparison results key: seq vs _, value: stats
-    for group in ensemble_dict.keys():
-        if group != "Only-seq":
-            group_score = get_values_from_ensmbel_dict(ensemble_dict[group],n_models)
-            stats = extract_roc_prc_nrank_pvals(only_seq_scores,group_score)
-            compare_dict[group] = stats
+    for group,group_score in groups_scores.items():
+        stats = extract_roc_prc_nrank_pvals(compare_to_scores,group_score)
+        compare_dict[group] = stats
     return compare_dict 
+
 
 def get_mean_std_from_ensmbel_results(ensmbel_results):
     '''Given a dictionary of ensmbel results:
      {key : folder_name, val: dict{key: n_models_in_ensmbel, val: np array of results}
     calculate the mean and std of the results for each ensmbel.
-     ------
-      returns a dictionary with the mean and std for each ensmbel - [0] -auroc,[1] - auprc,[2] - n-rank'''
+    ------
+    returns a dictionary with the mean and std for each ensmbel:
+    classification - [0] -auroc,[1] - auprc,[2] - n-rank 
+    regression - [0] r_pearson, [1] pval_persson, [2] r_spearman, [3] pval_spearman, [4] mse'''
     ensmbel_mean_std = {}
     for ensmbel,results in ensmbel_results.items():
         ensmbel_mean_std[ensmbel] = {n_models: (np.mean(results[n_models],axis=0),np.std(results[n_models],axis=0)) for n_models in results.keys()}
@@ -209,13 +225,19 @@ def get_values_from_ensmbel_dict(ensemble_dict, n_models):
     '''This function will return the auroc,auprc,n-rank values for a given number of models
     in ensmbel.'''
     return ensemble_dict[n_models][:,0] , ensemble_dict[n_models][:,1], ensemble_dict[n_models][:,2]
-def extract_roc_prc_nrank_pvals(onlyseq_scores, group_scores):
-    '''Thie function will take the scores of the only_seq and the group scores and will
-    return the p-values of the wilcoxon test for each metric
-    0 - auroc, 1 - auprc, 2 - nrank'''
+    
+def extract_roc_prc_nrank_pvals(compare_to_scores, group_scores):
+    '''This function will take the compare to scores and the group scores and
+    return the p-values of the wilcoxon test for each metric in the scores.
+    0 - auroc, 1 - auprc, 2 - nrank - classification
+    0 - r_pearson, 1 - r_spearman, 2 - mse - regression'''
     p_vals = []
-    for i in range(3):
-        p_vals.append(wilcoxon(onlyseq_scores[i],group_scores[i],alternative="less")[1])
+    if not compare_to_scores: # differnece is given in group scores
+        for group_metric in group_scores:
+            p_vals.append(wilcoxon(group_metric,alternative="greater")[1])
+    else:
+        for compare_metric,group_metric in zip(compare_to_scores,group_scores):
+            p_vals.append(wilcoxon(compare_metric,group_metric,alternative="less")[1])
     return p_vals    
 
 if __name__ == "__main__":

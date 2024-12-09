@@ -4,10 +4,11 @@ import re
 from itertools import combinations
 from shutil import rmtree
 import pandas as pd
+import ast
 
 
 
-
+### DATA UTILITIES ###
 
 def keep_positives_by_ratio(X_data, y_data, ratio = None):
     '''This function keeps a subset ratio of the positive data points in the data.
@@ -76,6 +77,22 @@ def keep_negatives_by_ratio(X_data, y_data, ratio = None):
         if len(y_data_copy[index]) != len(X_data_copy[index]):
             raise Exception("The labels and features must have the same amount of data points")
     return X_data_copy,y_data_copy
+
+def keep_positive_OTSs_labels(y_scores, y_test, indexes):
+    '''Function keeps only the positive OTSs and their corresponding scores.
+    It remove the zero labels to avoid floating point errors.
+    Args:
+    1. y_test - true labels
+    2. y_scores - predicted labels
+    3. indexes - indexes of the data points
+    -----------
+    Returns: positive OTSs labels, scores and indexes'''
+    zero_y_test = np.where(y_test == 0)[0] # zero indices
+    pos_y_test = np.delete(y_test,zero_y_test) # get only the positive OTSs
+    
+    pos_y_scores = np.delete(y_scores,axis=1,obj=zero_y_test) # get only the predicted positive OTSs
+    pos_indexes = np.delete(indexes,zero_y_test) # get only the positive OTSs indexes
+    return pos_y_scores, pos_y_test, pos_indexes
 def convert_partition_str_to_list(partition_str):
     '''This function will convert a partition string to a list of integers
     Args:
@@ -113,6 +130,20 @@ def create_guides_list(guides_path,i_line):
                 guides = [guide.replace(' ','') for guide in line2]
                 break
     return guides
+def extract_guides_from_partition(partition_info,partition):
+    '''Given partition information and the partition number extract the guides of the partition'''
+    if not isinstance(partition_info,pd.DataFrame):
+        info = pd.read_csv(partition_info)
+    else: info = partition_info
+    partition_info_guides = info[info["Partition"] == partition]["Guides"].values[0]
+    try:
+        partition_guides = ast.literal_eval(partition_info_guides)
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return e
+    return partition_guides  
+        
 '''Function writes 2d array to csv file'''
 def write_2d_array_to_csv(np_array, file_path, header):
     if np_array.ndim != 2:
@@ -147,7 +178,7 @@ def split_epigenetic_features_into_groups(features_columns):
         groups.setdefault(ending, []).append(feature)
     return groups  
 
-def set_epigenetic_features_by_string(feature_columns, epi_string, split_by):
+def set_features_columns_by_string( feature_string, split_by,epi_feature_columns = None,other_columns = None,method = None):
     '''This function take a string of epigentic features and return a list of the features matching the
 the features columns
 features_columns - name of the epigenetic features columns
@@ -155,9 +186,21 @@ epi_string - string of epigenetic features
 split_by - how to split the epi_string
 --------
 returns a list of the features matching the epi_string'''
-    if epi_string == "All":
+    if method == 2: # epi_features
+        if epi_feature_columns is None:
+            raise Exception("epi_feature_columns  must be given")
+        feature_columns = epi_feature_columns
+    elif method == 5: # other features
+        if other_columns is None:
+            raise Exception("other_columns  must be given")
+        feature_columns = other_columns
+    elif method == 6: # all features
+        if epi_feature_columns is None or other_columns is None:
+            raise Exception("epi_feature_columns and other_columns  must be given")
+        feature_columns = epi_feature_columns + other_columns
+    if feature_string == "All":
         return feature_columns
-    epi_features = epi_string.split(split_by)
+    epi_features = feature_string.split(split_by)
     return_list = []
     for feature in epi_features:
         feature = feature.strip().lower()  # Remove whitespace and convert to lowercase
@@ -168,7 +211,13 @@ returns a list of the features matching the epi_string'''
                 return_list.append(column)
     return return_list
     
- 
+def get_feature_name(feature_column):
+    '''This function splits the feature column by _ and returns the name of the feature'''
+    feature_column_splited = feature_column.split("_")
+    if feature_column_splited[0] == 'Chromstate':
+        return feature_column_splited[1]
+    else:
+        return feature_column
 def extract_scores_labels_indexes_from_files(paths):
     '''Given a list of paths for csv files containing models predicitions scores
 extract the scores and combine them into one np array.
@@ -205,6 +254,8 @@ def get_X_random_indices(N, k, X):
         random_indices = np.random.choice(indices, k, replace=False)
         all_indices.append(random_indices)
     return all_indices
+
+
 ## FILES
 def remove_dir_recursivly(dir_path):
     try:
@@ -314,121 +365,6 @@ def fill_tprs_fpr_by_max_length(tprs, fprs):
             tprs[i] += [last_tpr] * (max_length - len(tprs[i]))
             fprs[i] += [last_fpr] * (max_length - len(fprs[i]))
     return tprs, fprs
-### K GROUPS
-
-def create_k_balanced_groups(dataset, target_column, label_column, k, output_name, seperate_grna_path, y_labels_tup = None, constrained_guides = None):
-    '''Given y_labels and k, create k groups with rougly eqaul amount of labels in each group
-    Args: 
-        dataset - path for the dataset
-        target_column - name of the target column
-        k - number of groups
-        output_name - name of the complete output file
-        seperate_grna_path - path to save each group seperatly
-        y_labels_tup - list of labels for each guide (optional)
-        if y_labels_tup given it should be given the a list of guides!
-        constrained_guides - list of guides need to be kept in one group (Usauly for test set) - NOTE: They will be kept sololy
-        -----------
-        Saves the groups in a csv file containing:
-        Positives, Negatives, list of guides.
-        -----------
-        Save each gRNA group separtley in txt file
-        -----------
-        Example:     
-        create_k_balanced_groups("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","target","Label",12,"Hendel-Partition","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides",constrained_guides=cons_guides)
-
-        '''
-    if y_labels_tup is None: # y_labels not given, load them from the dataset
-        dataset = pd.read_csv(dataset)
-        guides = set(dataset[target_column]) # get unuiqe guides
-        y_labels = [dataset[dataset[target_column] == guide][label_column].values for guide in guides] # get the labels for each guide
-    else : # y_labels given
-        guides = y_labels_tup[1]
-        y_labels = y_labels_tup[0]
-    # Get the sum of the labels for each guide and sort it by descending order        
-    sum_labels = [np.sum(array > 0) for array in y_labels] 
-    print(f'Total positives: {sum(sum_labels)}')     
-    sorted_indices = np.argsort(sum_labels)[::-1]
-    guides = list(guides)
-    keep_constrained_sololy = False
-    if constrained_guides is not None:
-        if constrained_guides[1]:
-            keep_constrained_sololy = True
-        constrained_guides = [guides.index(guide) for guide in constrained_guides[0]]
-        sorted_indices = [i for i in sorted_indices if i not in constrained_guides] # remove the constrained guides from the sorted indices
-        
-    # init K groups and fill them with features by the sorted indices
-    k_groups = fill_k_groups_indices(k, sum_labels = sum_labels, sorted_indices = sorted_indices, constrained_grna_indices=constrained_guides,keep_constraied_sololy=keep_constrained_sololy)
-    write_guides_seperatley(k_groups, guides, seperate_grna_path)
-    save_complete_partition_information(k_groups, y_labels, guides, output_name)
-
-def fill_k_groups_indices(k, sum_labels, sorted_indices, constrained_grna_indices = None, keep_constraied_sololy = False):
-        '''Greedy approch to fill k groups with ~ equal amount of labels
-        Getting sum of labels for each indice and sorted indices by sum, filling the groups
-        from the biggest amount to smallest adding to the minimum group
-        Args:
-            k - number of groups
-            sum_labels - sum of labels for each indice
-            sorted_indices - indices sorted by sum of labels
-            constrained_grna_indices - list of indices that need to be in the same group
-            -----------
-            Returns a list of lists with the indices of the guides in each group'''
-        
-        if k > len(sorted_indices):
-            raise RuntimeError("K value is bigger than the amount of guides")
-        # Create k groups with 1 indice each from the sorted indices in descending order
-        if constrained_grna_indices is not None:
-            groups = [[sorted_indices[i]] for i in range(k-1)] # create k-1 groups
-            if not keep_constraied_sololy: #  append the list of the constrained indices for k groups. 
-                groups.append(constrained_grna_indices) 
-            k -= 1 # update k value
-        else : groups = [[sorted_indices[i]] for i in range(k)] 
-        
-        for index in sorted_indices[k:]: # Notice [K:] to itreate over the remaining indices
-        # Find the group with the smallest current sum
-            min_sum_group = min(groups, key=lambda group: sum(sum_labels[i] for i in group), default=groups[0])
-            # Add the series to the group with the smallest current sum
-            min_sum_group.append(index)
-        if keep_constraied_sololy:
-            groups.append(constrained_grna_indices)
-        return groups
-def write_guides_seperatley(k_groups, guides, output_path):
-    '''Write each guides group to a txt file in the output path
-    Args:
-        k_groups - list of lists with the indices of the guides
-        guides - list of all the guides
-        output_path - path to save the groups'''
-    
-    for i, group in enumerate(k_groups): # iterate on each group
-        temp_path = os.path.join(output_path,f"tested_guides_{i+1}_partition.txt")
-        with open(temp_path, "w") as file:
-            for index in group:
-                if index == group[-1]:
-                    file.write(guides[index])
-                else:
-                    file.write(guides[index] + ", ")
-def save_complete_partition_information(k_groups, labels, guides, output_name):
-    '''Save the complete partition information to a csv file
-    Args:
-        k_groups - list of lists with the indices of the guides in each group
-        labels - list of all the labels
-        guides - list of all the guides
-        output_name - name of the output file'''
-    # Create a list of dictionaries with the information
-    complete_info = []
-    
-    for i, group in enumerate(k_groups):
-        group_info = {}
-        group_info["Partition"] = i + 1
-        group_info["Positives"] = sum(np.sum(labels[index] > 0) for index in group)
-        group_info["Negatives"] = sum(np.sum(labels[index] <= 0) for index in group)
-        group_info["Guides_amount"] = len(group)
-        group_info["Guides"] = [guides[index] for index in group]
-        complete_info.append(group_info)
-    # Save the information to a csv file
-    complete_info_df = pd.DataFrame(complete_info)
-    complete_info_df.to_csv(f'{output_name}.csv', index=False)
-    print(f"Complete partition information saved at {output_name}")
-
 
 # Function to calculate averages for NchooseK
 def calculate_averages_partitions(df, K):
@@ -462,6 +398,20 @@ def union_partitions_stats(data_path):
         averages = calculate_averages_partitions(data, k)
         print(f"Union of {k} rows: Positives: {averages['Positives']}, Negatives: {averages['Negatives']}, Guides amount: {averages['Guides_amount']}")
 
+### Numeric Validations
+def validate_non_negative_int(number):
+    if not isinstance(number, int):
+        raise Exception("Number must be an integer")
+    if number < 1:
+        raise Exception("Number must be positive")
+    return number
+
+
+def print_dict_values(columns_config):
+    '''This function prints the json columns.'''
+    # Access constants from the dictionary
+    for key, value in columns_config.items():
+        print(f'{key}: {value}')
 
 def concat_change_seq_df():
     old_cs = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/merged_csgs_withEpigenetic_ALL_indexed.csv")
@@ -491,10 +441,11 @@ def concat_change_seq_df():
     merged["Index"] = merged.index
     merged.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed.csv",index=False)
 if __name__ == "__main__":
-   
+    data = get_partition_information("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",7)
+    print(data)
     
 
-    union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
+    #union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
     # #list_50 = [i for i in range(2,51)]
     # list_50 = [50]
     # dict_50_only_seq = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/Only_seq/1_partition_50/Combi",list_50)
