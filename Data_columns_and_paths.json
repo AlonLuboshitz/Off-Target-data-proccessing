@@ -9,13 +9,18 @@
     "REGRESSION_LABEL_COLUMN": "Read_count"
 },
 "Change_seq" : {
-    "Train_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides_78/Train_guides",
-    "Test_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides_78/Tested_guides",
-    "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv",
-    "Vivo-vitro" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed.csv",
+    "Train_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Train_guides",
+    "Test_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Tested_guides",
+    "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivosilico_nobulges_withEpigenetic_indexed.csv",
+    "Vivo-vitro" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv",
     "Model_path" : "/localdata/alon/Models/Change-seq",
     "ML_results_path" : "/localdata/alon/ML_results/Change-seq",
-    "Data_name" : "Lazzarotto"
+    "Epigenetic_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics",
+    "Big_wig_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig",
+    "Partition_information" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",
+    "Data_name" : "Lazzarotto",
+    "Plots_path" : "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq"
+    
    
 },
 "Hendel" : {
@@ -25,15 +30,22 @@
     "Vivo-vitro" : "Null",
     "Model_path" : "/localdata/alon/Models/Hendel",
     "ML_results_path" : "/localdata/alon/ML_results/Hendel",
-    "Data_name" : "Hendel"
+    "Epigenetic_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics",
+    "Big_wig_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig",
+    "Partition_information" : "",
+    "Data_name" : "Hendel",
+    "Plots_path" : "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel"
 },
-"Hendel_Changeseq" : {
+"Hendel_Change-seq" : {
     "Train_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies/train_guides/hendel_changeseq",
     "Test_guides" : "Null",
     "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies/hendel_changeseq.csv",
     "Vivo-vitro" : "Null",
     "Model_path" : "/localdata/alon/Models/Hendel_Changeseq",
     "ML_results_path" : "/localdata/alon/ML_results/Hendel_Changeseq",
-    "Data_name" : "Hendel_Changeseq"
+    "Epigenetic_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics",
+    "Big_wig_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig",
+    "Data_name" : "Hendel_Change-seq",
+    "Plots_path" : "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_Change-seq"
     }
 }

@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
+from utilities import create_paths
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 
@@ -88,6 +90,54 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
     plt.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}\nn = {num_of_points}', fontsize=12, ha='center', va='center', transform=plt.gca().transAxes)
     plt.show()
     plt.savefig(output_path + f"/{title}.png")
+
+
+
+
+
+def plot_binary_feature_heatmap(data_paths, plots_paths):
+    # Get all data tables paths
+    all_tables = create_paths(data_paths)
+    all_tables = [pd.read_csv(table) for table in all_tables] 
+    features = all_tables[0].columns
+    
+    # Number of tables
+    num_tables = len(all_tables)
+
+    # Create a grid of subplots
+    fig, axes = plt.subplots(1, num_tables, figsize=(5 * num_tables, 8), sharey=True)
+
+    # Iterate over tables and axes
+    # Iterate over tables and axes
+    for idx, (table, ax) in enumerate(zip(all_tables, axes)):
+        # Extract `geo_fold_pos` and `geo_fold_negative`
+        table.set_index("Index", inplace=True)
+        heatmap_data = table[["geo_fold_pos", "geo_fold_negative"]].T
+        
+        # Create heatmap
+        sns.heatmap(
+            heatmap_data,
+            ax=ax,
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            cbar=True,
+            xticklabels=table.index,
+            yticklabels=["geo_fold_pos", "geo_fold_negative"],
+        )
+        
+        # Title for each subplot
+        ax.set_title(f"Table {idx+1}", fontsize=14)
+        ax.set_xlabel("Features", fontsize=12)
+
+    # Set common ylabel
+    plt.tight_layout()
+    plt.ylabel("Metrics", fontsize=14)
+    plt.show()
+    plt.savefig(plots_paths + "binary_feature_heatmap.png")
+
+
+
 def draw_averages_epigenetics():
     data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
     file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
@@ -257,7 +307,8 @@ def draw_histogram_bigwig(file_manager):
     # Save the entire figure to a file
     plt.savefig('epigenetics_histograms.png')
 '''Draw a bar plot. y- metric\premonace, x - num of models in the ensemble'''
-def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,output_path,if_scaling = True):
+def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,output_path,if_scaling = True, if_ticks = False):
+    '''This is a scatter plot function that plots '''
     plt.clf()
     # clear underscores from the x_values
     x_positions = np.arange(len(x_values))
@@ -268,7 +319,8 @@ def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,o
     if if_scaling:
         x_values = [int(x/100) for x in x_values]
         x_label = x_label + " (× 10²)"
-    plt.xticks(ticks=x_positions,labels=x_values, fontsize=12)
+    if if_ticks:
+        plt.xticks(ticks=x_positions,labels=x_values, fontsize=12)
     plt.yticks(fontsize=12)
     
     plt.xlabel(x_label,fontsize=14)
@@ -276,7 +328,7 @@ def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,o
     output_path = output_path + f"/{title}.png"
     plt.savefig(output_path)
 
-def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, title, y_label, path):
+def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, title, y_label, path,partition_information= None):
     plt.clf()
     # Sort indices based on mean values
     sorted_indices = np.argsort(mean_values)
@@ -301,8 +353,9 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     fig.tight_layout(pad=5)
     bars = ax.barh(ind, mean_values_sorted, width, xerr=std_sorted)
     multi = False
-    min_x = min(mean_values_sorted) - 3 * (max(std_values)) if min(mean_values_sorted) > 0 else 0
-    max_x = max(mean_values_sorted) + 2 * (max(std_values))
+    std_gap = max(std_values) if max(std_values) > 0 else 0.02
+    min_x = min(mean_values_sorted) - 3 * std_gap if min(mean_values_sorted) > 0 else 0
+    max_x = max(mean_values_sorted) + 2 * std_gap
     # Add p-value annotations
     if p_values: # not empty
         for i, bar in enumerate(bars):
@@ -316,18 +369,21 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
             plt.text(bar.get_width() + std_sorted[i] + 0.001 , bar.get_y() + (width/2), annotation, va='center', fontsize=8)
             plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.3f}', va='center', fontsize=10,color='white')
 
-            if "_" in model or model == "All":
+            if "epigenetics" in model:
                 multi = True
                 bar.set_color('red')
+            elif "All" in model:
+                bar.set_color('green')
           
        
 
-    ax.set_ylabel('Epigenetic marks', fontsize=12)
+    ax.set_ylabel('Features', fontsize=12)
     ax.set_xlabel(y_label, fontsize=12)
     ax.set_title(title, fontsize=14)
     ax.set_yticks(ind)
     
-    # Initialize variables
+    ### THIS NOT NEEDED??????
+    # Initialize variables for subset labels
     subset_count = 1
     y_labels = []
     subset_mapping = {}
@@ -340,7 +396,7 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
             subset_count += 1
         else:
             y_labels.append(model)
-
+    ###############################################
     ax.set_yticklabels( y_labels,fontsize = 12)
     
     fig.subplots_adjust(left=label_width/fig_width)
@@ -348,7 +404,9 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
         ax.plot([], label='Epigenetic subsets', color='red')
         for subset_label, subset_models in subset_mapping.items():
             ax.plot([], label=f'{subset_label}: {", ".join(subset_models)}', color='none')
-    
+    if partition_information:
+        for key,info_ in partition_information.items():
+            ax.plot([], label=f'{key}: {info_}', color='none')
     ax.legend(loc='lower right',bbox_to_anchor=(1.05, 0.0),fontsize = 'small',borderaxespad=0.05,ncol=1)
     
     ax.set_xlim(min_x, max_x)
@@ -389,12 +447,13 @@ if __name__ == "__main__":
 #     #draw_averages_epigenetics()
 #     #draw_histogram_bigwig(file_manager)
 #     import numpy as np
-    scores = np.genfromtxt("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/1_partition_50/Combi/ensemble_1.csv", delimiter=',')
-    y_auroc = scores[2:,0]
-    y_auprc = scores[2:,1]
-    y_nrank = scores[2:,2]
-    x = np.arange(2,51)
-    output_ath = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq"
-    plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
-    plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
-    plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)
+    # scores = np.genfromtxt("/localdata/alon/ML_results/Change-seq/vivo-vitro/Change_seq/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi/ensemble_1.csv", delimiter=',')
+    # y_auroc = scores[2:,0]
+    # y_auprc = scores[2:,1]
+    # y_nrank = scores[2:,2]
+    # x = np.arange(2,51)
+    # output_ath = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq"
+    # plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
+    # plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
+    # plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)
+    plot_binary_feature_heatmap("/home/dsi/lubosha/Off-Target-data-proccessing/Feature_correlations/Change-seq/Vivo-vitro/Binary","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-vitro/Feature_correlation/Binary")

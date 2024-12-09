@@ -3,9 +3,388 @@ import pandas as pd
 from itertools import combinations
 import os
 from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve, mean_squared_error
-from utilities import create_paths, find_target_folders,get_X_random_indices, extract_scores_labels_indexes_from_files
+from utilities import create_paths, find_target_folders,get_X_random_indices, extract_scores_labels_indexes_from_files, create_folder, get_feature_name
+from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv, keep_only_folders
+from k_groups import get_partition_information
 from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr
-from ml_statistics import get_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
+
+
+from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
+from multiprocessing import Pool
+ 
+
+class evaluation():
+    def __init__(self, task, only_pos=False):
+        self.results_header = [] # init results header
+        self.combi_suffix = "Combi"
+        self.set_task(task)
+        pass
+    
+    def set_task(self, task):
+        if task.lower() == "regression" or task.lower() == "t_regression":
+            self.task = "regression"
+            self.results_header = ["R_pearson","R_spearman","MSE","P.pearson","P.spearman","PR_STD","PP_STD","SR_STD","SP_STD","MSE_STD"]
+            self.set_only_positive(True)
+        elif task.lower() == "classification" or task.lower() == "reg_classification":
+            self.set_only_positive(False)
+            self.task = "classification"
+            if task.lower() == "reg_classification":
+                self.task = "reg_classification"
+                self.combi_suffix = "Combi_reg"
+            self.results_header = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]
+        self.set_data_evaluation_columns()
+    def set_only_positive(self, only_pos= False):
+        self.only_positive = False
+        if only_pos:
+            self.only_positive = True
+            self.combi_suffix = "Combi_pos"    
+    
+    def set_features(self, features):
+        self.features = features
+
+    def set_partition_information(self, data_path, partitions, ensembles, models):
+        '''This function returns a dictionary with the informatino of the partition.
+        If more than one partition is given, the function will sum the positives, negatives, and guides 
+        from each partition.'''
+        partitions_info = {
+            "Ensembles" : ensembles, "Models" : models
+        }
+        if isinstance(partitions, int):
+            partitions_info.update(get_partition_information(data_path, partitions))
+            partitions_info["Partition"] = partitions 
+        else:
+            positives =  negatives =  number_of_guides = 0
+            for partition in partitions:  # More than 1 partition
+                partition_data = get_partition_information(data_path, partition)
+                positives += partition_data["Positives"]
+                negatives += partition_data["Negatives"]
+                number_of_guides += partition_data["sgRNAs"]
+            partitions_info["Positives"] = positives
+            partitions_info["Negatives"] = negatives
+            partitions_info["sgRNAs"] = number_of_guides
+            partitions = [str(partition) for partition in partitions]
+            partitions_info["Partitions"] = ",".join(partitions)
+        return partitions_info
+    def set_data_evaluation_columns(self):
+        if self.task.lower() == "classification" or self.task.lower() == "reg_classification":
+            self.data_evaluation_columns = ['feature', 'auroc', 'auroc_std','auroc_pval', 'auprc', 'auprc_std','auprc_pval', 'n-rank', 'n-rank_std','n-rank_pval']
+        elif self.task.lower() == "regression" or self.task.lower() == "t_regression":
+            self.data_evaluation_columns = ['feature', 'pearson', 'pearson_std','pearson_pval', 'spearman', 'spearman_std','spearman_pval', 'mse', 'mse_std','mse_pval']
+    def process_score_path(self, score_path, combi_path):
+        process_score_path(score_path, combi_path, self.only_positive, self.combi_suffix, self.results_header, self.task)
+    
+    def process_single_ensemble_scores(self, ml_results_path, if_multi_process = False):
+        '''This function will process all the ensmbel scores in the given path
+Given a score csv file it will extract from the scores diffrenet combinations of the scores and evaluate them 
+vs the labels. The results will be saved in the combi path for the same ensmbel.'''
+        
+        score_path = os.path.join(ml_results_path, "Scores")
+        combi_path = os.path.join(ml_results_path, "Combi")
+        ensmbel_scores_paths = create_paths(score_path) # Get a list of paths for each ensmbel scores
+        # Add the combi path to ensmbel paths for the process function
+        ensmbel_scores_paths = [(score_path, combi_path) for score_path in ensmbel_scores_paths]
+        if if_multi_process:
+            # Number of processes in the pool
+            num_cores = os.cpu_count()
+            num_processes = min(num_cores, len(ensmbel_scores_paths))
+            # Create a multiprocessing pool
+            with Pool(processes=num_processes) as pool:
+                # Map the function to the list of paths
+                pool.starmap(self.process_score_path, ensmbel_scores_paths)
+        else:
+            for path in ensmbel_scores_paths:
+                self.process_score_path(*path)
+    
+
+    def evaluate_all_partitions_multiple_metrics(self,args):
+        self.evaluate_all_partitions(*args, metric="difference")
+        self.evaluate_all_partitions(*args, metric="ratio")
+        self.evaluate_all_partitions(*args, metric="log_ratio")
+    def evaluate_all_partitions(self,ml_results_path, partitions, n_ensembles, n_models, epi_features_dict, other_feature_dict, plots_path, partition_info_path,metric="difference", if_plot = True):
+        '''This function evalautes all the paritions.
+        It first checks if for each partition the results are already evaluated.'''
+        temp_data_path = os.path.join(plots_path,f'{partitions[0]}_partition',f'{n_ensembles}_ensembles',f'{n_models}_models',f'data.csv')
+        if not os.path.exists(temp_data_path): # data dont exists - create it
+                self.evaluate_partitions(ml_results_path, [partitions[0]], n_ensembles, n_models, epi_features_dict, other_feature_dict, plots_path, partition_info_path, True)
+        all_partitions_results = init_partitions_dict_by_features(temp_data_path, compare_to = "Only-seq", partitions_number = len(partitions), n_models = n_models)
+        ## 1. Check if the partitions is evaluated
+        for partition_index,partition in enumerate(partitions):
+            temp_data_path = os.path.join(plots_path,f'{partition}_partition',f'{n_ensembles}_ensembles',f'{n_models}_models',f'data.csv')
+            if not os.path.exists(temp_data_path): # data dont exists - create it
+                self.evaluate_partitions(ml_results_path, [partition], n_ensembles, n_models, epi_features_dict, other_feature_dict, plots_path, partition_info_path, True)
+            partition_data = pd.read_csv(temp_data_path)
+            partition_results = compare_feature_in_partition(partition_data, compare_to = "Only-seq", metric = metric)
+            for feature, results in partition_results.items():
+                all_partitions_results[feature][n_models][partition_index] = results
+        p_vals = get_only_seq_vs_group_ensmbels_stats(ensemble_dict=None,n_models=n_models,
+                                                      difference_only=True,compare_to="",groups_scores=all_partitions_results)     
+        mean_std_results = get_mean_std_from_ensmbel_results(all_partitions_results)       
+        partitions_info = self.set_partition_information(partition_info_path, partitions, n_ensembles, n_models)
+        all_partitions_path = os.path.join(plots_path,f'all_partitions',f'{n_ensembles}_ensembles',f'{n_models}_models')
+        create_folder(all_partitions_path)
+        if if_plot:
+            plot_ensembles_by_features_and_task((mean_std_results,f"all_features_{metric}",p_vals,all_partitions_path,self.task,n_models),self.task,partitions_info)
+        save_bar_plot_data(mean_std_results,p_vals,all_partitions_path,columns=self.data_evaluation_columns,title=f'{metric}')
+    
+    def evaluate_partitions(self, ml_results_path, partitions, n_ensembles, n_models, epi_features_dict, other_feature_dict, plots_path,partition_info_path, if_plot = False):
+        '''This function evaluates spesific partition results.
+        It utilize the evalaute_partition function to evaluate the results for each partition.
+        By default for one the function will plot the results, for multiple partition the function will not plot the results.
+        '''
+        if len(partitions) > 1: # More than one partition
+            multi_partition_args = []
+            for partition in partitions:
+                partition_info = self.set_partition_information(partition_info_path, partition, n_ensembles, n_models)
+                temp_plots_path = os.path.join(plots_path,f'{partition}_partition',f'{n_ensembles}_ensembles',f'{n_models}_models')
+                create_folder(temp_plots_path)
+                multi_partition_args.append((ml_results_path, partition, n_ensembles, n_models, epi_features_dict, other_feature_dict, temp_plots_path, if_plot, partition_info))
+            process = min(os.cpu_count(), len(multi_partition_args))
+            with Pool(process) as pool:
+                pool.starmap(self.evaluate_partition, multi_partition_args)   
+        else:
+            partition = partitions[0]
+            partition_info = self.set_partition_information(partition_info_path, partition, n_ensembles, n_models)
+            plots_path = os.path.join(plots_path,f'{partition}_partition',f'{n_ensembles}_ensembles',f'{n_models}_models')
+            create_folder(plots_path)
+            self.evaluate_partition(ml_results_path, partition, n_ensembles, n_models, epi_features_dict, other_feature_dict, plots_path, if_plot = True, partition_info = partition_info)    
+    def evaluate_partition(self, ml_results_path, partition,n_ensembles,n_models, epi_features_dict,other_feature_dict, plots_path, if_plot = True, partition_info = None):
+            '''This function extract the combi results for all the features in the partition and compare them to the only sequence results.
+            It will save the comparison in the plots path given.
+            If plotting is set to True it will plot the results as well.
+            '''
+            # Only sequence
+            partition_results = {}
+            only_seq_path = combine_partition_path(os.path.join(ml_results_path, "Only_sequence"),partition,n_ensembles,n_models, combi_suffix=self.combi_suffix)
+            partition_results["Only-seq"] = extract_combinatorical_results(only_seq_path, [n_models])
+            features_addition = False
+            if epi_features_dict:
+                for group in epi_features_dict.keys():
+                    try:
+                        epi_features_path = combine_partition_path(os.path.join(ml_results_path,"Epigenetics_by_features"),partition,n_ensembles,n_models,group=group)
+                    except ValueError as e:
+                        print(e)
+                        continue
+                    features_addition=True
+                    partition_results.update(eval_ensembles_in_folder(epi_features_path, n_models, self.combi_suffix, if_single_amount_of_models = True))
+            if other_feature_dict:
+                for group in other_feature_dict.keys():
+                    try:
+                        other_features_path = combine_partition_path(os.path.join(ml_results_path,"Other_features"),partition,n_ensembles,n_models,group=group)
+                    except ValueError as e:
+                        print(e)
+                        continue
+                    features_addition=True
+                    partition_results.update(eval_ensembles_in_folder(other_features_path, n_models,self.combi_suffix, if_single_amount_of_models = True))
+            if not features_addition:
+                raise ValueError("No features were found in order to compare agianst the only sequence")
+            partition_p_vals = get_only_seq_vs_group_ensmbels_stats(partition_results,n_models,compare_to="Only-seq")
+            # Get the mean and std for each feature
+            results_means_and_std = get_mean_std_from_ensmbel_results(partition_results)
+            
+            if if_plot:
+                args = (results_means_and_std,"all_features",partition_p_vals,plots_path,self.task,n_models)
+                plot_ensembles_by_features_and_task(args,self.task,partition_info)
+            save_bar_plot_data(results_means_and_std,partition_p_vals,plots_path,columns=self.data_evaluation_columns)
+def init_partitions_dict_by_features(data_path, compare_to, partitions_number, n_models):
+    data = pd.read_csv(data_path)
+    features = list(data["feature"].values)
+    features.remove(compare_to)
+    return {feature: {n_models:np.zeros(shape=(partitions_number,3))} for feature in features}
+
+
+def compare_feature_in_partition(partition_data,compare_to,metric):
+    '''This function will return a comparison metric between the compare_to label to all other labels.
+    It will return the metric for all partitions to check.
+    Args:
+    1. partitions_data - list of data frames for each partition.
+    Each intended columns in the data frame are: feature, score,x,x,score,x,x,score,x,x where x is the std or p-value.
+    2. partitions_to_check - list of partitions to check.
+    3. compare_to - the feature to compare to.
+    4. metric - the metric to compare the features. Options: difference, ratio, log_ratio.
+    ------------
+    Returns: dictionary {feature: (metric,metric,metric)}'''
+    if metric is None or metric not in ["difference","ratio","log_ratio"]:
+        raise ValueError(f"No valid metric: {metric} was given to compare the partitions")
+    partition_data = partition_data.iloc[:, [0,1,4,7]] # Get only the scores and the feature column (0)
+    partition_data.set_index("feature", inplace = True)
+    chosen_values = partition_data.loc[compare_to]
+    if metric == "difference":
+        return {
+            feature: tuple(row - chosen_values)
+            for feature, row in partition_data.iterrows()
+            if feature != compare_to
+        }
+    elif metric == "ratio":
+        return {
+            feature: tuple(row / chosen_values)
+            for feature, row in partition_data.iterrows()
+            if feature != compare_to
+        }
+    elif metric == "log_ratio":
+        return {
+            feature: tuple(np.log((row / chosen_values) + 1e-10))
+            for feature, row in partition_data.iterrows()
+            if feature != compare_to
+        }
+def extract_combinatorical_results(ensmbel_combi_path, n_models_in_ensmbel_list):
+    '''Given a list of paths for csv files containing ensembel combinatiorical results
+And given a list with model amounts in each ensmbel to check return a dictionary
+with the results of each combinatorical amount from each ensmbel
+Dict returned : {n_keys : (n_ensmbels,[auroc,auprc,n-rank]) }'''
+    
+    ensmbels_combi_paths = create_paths(ensmbel_combi_path) 
+
+    # Create a dictinoary of 2d np arrays. key is number of models in the ensmbel and value is the results
+    all_n_models = {n_models: np.zeros(shape=(len(ensmbels_combi_paths),3)) for n_models in n_models_in_ensmbel_list}
+    
+    for idx,ensmbel in enumerate(ensmbels_combi_paths):
+        results = np.genfromtxt(ensmbel, delimiter=',') # read file
+        for n_models in n_models_in_ensmbel_list:
+            # n_models is the row number first row is header
+            n_results = results[n_models,:3] # 3 columns - auroc,auprc,n-rank/ pearson_r, spearman_r, mse
+            all_n_models[n_models][idx] = n_results 
+
+    return all_n_models
+def eval_ensembles_in_folder(ensmbel_folder_path, n_models_in_ensmbel,combi_suffix, if_single_amount_of_models = False):
+    '''Given a path to a folder containing multiple folders of models
+    Iterate over each folder and return the results of each ensmbel
+    n_models_in_ensmbel is a number of models in each ensmbel.
+    If if_single_amount_of_models is True, the calculation will be only for the given amount of models
+    other wise it will be for all the possible combinations of models in the ensmbel
+    -----
+    returns a dict {key : folder_name, val: dict{key: n_models_in_ensmbel, val: np array of results}}'''
+    if not if_single_amount_of_models:
+        n_models_in_ensmbel = [i for i in range(2,n_models_in_ensmbel+1)]
+    else :
+        n_models_in_ensmbel = [n_models_in_ensmbel]
+    ensmbel_results = {}
+    for ensmbel_folder in os.listdir(ensmbel_folder_path):
+        ensmbel_combi_path = os.path.join(ensmbel_folder_path,ensmbel_folder,combi_suffix) # combine folder with combi results
+        dict_ensmbel = extract_combinatorical_results(ensmbel_combi_path,n_models_in_ensmbel) # get the results
+        folder_suffix = get_feature_name(ensmbel_folder)
+        ensmbel_results[folder_suffix] = dict_ensmbel # set the results per folder
+    return ensmbel_results
+          
+
+
+
+## Ensemble scores to evaluation metrics      
+def combine_partition_path(base_path, partition, n_ensembles, n_models, group = None, combi_suffix = None):
+    partition_path = os.path.join(base_path, f'{partition}_partition/{n_ensembles}_ensembels/{n_models}_models')
+    if group:
+        partition_path = os.path.join(partition_path, group)
+    if combi_suffix:
+        partition_path = os.path.join(partition_path, combi_suffix)
+    if not os.path.exists(partition_path):
+        raise ValueError(f"Path {partition_path} does not exist")
+    return partition_path
+def process_all_ensembels_scores_in_folder(ensmbel_folder,n_ensmebles = 0):
+    '''Given a folder with subfolders inside - each subfolder is a feature
+    the feature score will be combinatorical evaluated and saved in the combi folder for each feature'''
+    ensmbel_paths = create_paths(ensmbel_folder)
+    ensmbel_paths = keep_only_folders(ensmbel_paths)
+    if n_ensmebles == 1:
+        ensmbel_paths = [(path,False) for path in ensmbel_paths]
+        num_cores = os.cpu_count()
+        num_processes = min(num_cores, len(ensmbel_paths))
+        with Pool(processes=num_processes) as pool:
+            # Map the function to the list of paths
+            pool.starmap(process_single_ensemble_scores, ensmbel_paths)
+    #else :
+    ensmbel_paths = [(path,True) for path in ensmbel_paths]
+    for path in ensmbel_paths:
+        process_single_ensemble_scores(*path)
+    
+def process_single_ensemble_scores(self, ml_results_path, if_multi_process = False):
+    '''This function will process all the ensmbel scores in the given path
+Given a score csv file it will extract from the scores diffrenet combinations of the scores and evaluate them 
+vs the labels. The results will be saved in the combi path for the same ensmbel.'''
+    
+    score_path = os.path.join(ml_results_path, "Scores")
+    combi_path = os.path.join(ml_results_path, "Combi")
+    ensmbel_scores_paths = create_paths(score_path) # Get a list of paths for each ensmbel scores
+    # Add the combi path to ensmbel paths for the process function
+    ensmbel_scores_paths = [(score_path, combi_path) for score_path in ensmbel_scores_paths]
+    if if_multi_process:
+        # Number of processes in the pool
+        num_cores = os.cpu_count()
+        num_processes = min(num_cores, len(ensmbel_scores_paths))
+        # Create a multiprocessing pool
+        with Pool(processes=num_processes) as pool:
+            # Map the function to the list of paths
+            pool.starmap(process_score_path, ensmbel_scores_paths)
+    else:
+        for path in ensmbel_scores_paths:
+            process_score_path(*path)
+        
+
+def process_score_path(score_path, combi_path, only_positive = False, combi_suffix = "Combi" , header = None, task = None):
+    
+    '''Given a score path containing csv files with predictions score and label scores
+    Extract the scores, labels and indexes from the files and evaluate all the combinatorical results.
+    Keep the results in the combi_path given'''
+    y_scores, y_test, indexes = extract_scores_labels_indexes_from_files([score_path])
+    if only_positive: # evaluate only positive OTSs
+        y_scores, y_test, indexes = keep_positive_OTSs_labels(y_scores, y_test, indexes)
+    combi_path = combi_path.replace("Combi",combi_suffix)
+    results = eval_all_combinatorical_ensmbel(y_scores, y_test, header, task)
+    temp_output_path = os.path.join(combi_path, f'{score_path.split("/")[-1]}')
+    if not os.path.exists(combi_path):
+        os.makedirs(combi_path)
+    write_2d_array_to_csv(results, temp_output_path, header)
+
+def evaluate_n_combinatorical_models(n_models, n_y_scores, y_test, k, task = None):
+    '''This function aasses all the possible combinatorical options for k given.
+N choose K options.
+For exmaple: if there are 10 models and n = 3, the function will average 
+the results of all the possible combinations of 3 models out of 10.
+The function will return the average of the aurpc,auroc and std over all the combinations.'''
+    # Get list of tuples containing k indices out of n_models
+    if n_models <= 10 or k==2: # more then 10 models to many combinations to validate
+        indices_combinations = list(combinations(range(n_models), k))
+        if len(indices_combinations) > 200: 
+            indices_combinations = get_X_random_indices(n_models, k, 200)
+        indices_combinations = [list(indices) for indices in indices_combinations]
+    else :
+        indices_combinations = get_X_random_indices(n_models, k, 200)    
+    
+    # Create np array for each indice combination for the averaged model evaluations.
+    if task.lower() == "classification" or task.lower() == "reg_classification":# Row - combination, Column - auroc,auprc,n_rank
+        all_combination_results = np.zeros(shape=(len(indices_combinations),3))
+    elif task.lower() == "regression" or task.lower() == 't_regression': # Row - combination, Column - Pearson_r, Pearson_p, Spearman_r, Spearman_p, MSE
+        all_combination_results = np.zeros(shape=(len(indices_combinations),5))
+        
+    
+    for index,indices in enumerate(indices_combinations):
+        # get the scores for the models in the combination
+        y_scores = n_y_scores[indices]
+        # average the scores
+        y_scores = np.mean(y_scores, axis = 0)
+        # evaluate the model
+        model_scores = evaluate_model(y_test, y_scores, task)
+        # auroc, auprc = evaluate_auroc_auprc(y_test, y_scores)
+        # n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_scores,y_test,1000))[0]
+        all_combination_results[index] = [*model_scores]
+    return all_combination_results
+
+def eval_all_combinatorical_ensmbel(y_scores, y_test, header = None, task = None):
+    '''Evaluate all the possible combinatorical options for an ensmbel
+y_scores is 2d array (N_models, scores), y_test is the accautal labels'''
+    # Get amount of models
+    n_models = y_scores.shape[0]
+    # Create nd array with for each k combination with auroc,auprc,n-rank (means,std)
+    all_combination_results = np.zeros(shape=(n_models,len(header)))
+    # first row k = 1 no ensmble to calculate
+    for k in range(1,n_models): # 1 
+        print(f"Check combinations of {k + 1} models out of {n_models}")
+        k_combination_result = evaluate_n_combinatorical_models(n_models, y_scores, y_test, k + 1, task) 
+        # Average the k_combination_results over the 2d dimension
+        k_combination_result_mean = np.mean(k_combination_result, axis = 0)
+        k_combination_result_std = np.std(k_combination_result, axis = 0)
+        k_mean_and_std = np.concatenate((k_combination_result_mean, k_combination_result_std))
+        # Add the results to all_combination_results
+        all_combination_results[k] = k_mean_and_std
+    return all_combination_results
 
 
 
@@ -56,6 +435,9 @@ def evaluate_model(y_test, y_scores, task = None):
     '''
     if task.lower() == "classification":
         return evaluate_auroc_auprc(y_test, y_scores)
+    elif task.lower() == "reg_classification":
+        tpr,fpr,percision, perc_base = convert_continous_values_to_fpr_tpr(y_test, y_scores)
+        return auc(fpr,tpr), auc(tpr,percision), get_auc_by_tpr(get_tpr_by_n_expriments(y_scores,y_test,1000))[0]
     elif task.lower() == "regression" or task.lower() == "t_regression":
         return evalaute_regression(y_test, y_scores)
     else:
@@ -79,16 +461,13 @@ def evalaute_regression(y_test, y_scores):
     1. y_test - the actual labels.
     2. y_scores - the predicted scores.
     ------------   
-    Returns: tuple of dicts of {pearson: (correlation,p.value), spearman: (correlation,p.value), MSE: mse}
-    (all_data_points, positive_data_points)
+    Returns: tuple of pearson_r, spearman_r, mse, pearson_p, spearman_p.
     '''
-    all_data_points = {"pearson": pearson_correlation(y_test, y_scores), "spearman": spearman_correlation(y_test, y_scores), "MSE": mean_squared_error(y_test , y_scores)}
-    ## to get only positive OTSs deteced zero and remove them to avoid floating point errors
-    zero_y_test = np.where(y_test == 0)[0] # zero indices
-    pos_y_test = np.delete(y_test,zero_y_test) # get only the positive OTSs
-    pos_y_scores = np.delete(y_scores,zero_y_test) # get only the predicted positive OTSs
-    positive_data_points = {"pearson": pearson_correlation(pos_y_test, pos_y_scores), "spearman": spearman_correlation(pos_y_test, pos_y_scores), "MSE": mean_squared_error(pos_y_test , pos_y_scores)}
-    return all_data_points, positive_data_points
+    p_r, p_p = pearson_correlation(y_test, y_scores)
+    s_r, s_p = spearman_correlation(y_test, y_scores)
+    mse= mean_squared_error(y_test , y_scores)
+    
+    return p_r, s_r, mse, p_p, s_p 
 
 ## Saving the evaluations results
 def save_model_results(classification_tuple = None, regression_dict = None, table = None, ml_feature_key_tuple = None, n_rank = None, tpn_tuple = None, task = None):
@@ -190,119 +569,60 @@ def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_titl
         auprcs.append((average_precision_score(y_test, y_scores),np.sum(y_test[y_test > 0]) / len(y_test)))
     plot_roc(fprs,tprs,aucs,titles,output_path,f'{plot_title}_roc')
     plot_pr(recall_list=recalls,precision_list=percs,auprcs=auprcs,titles=titles,output_path=output_path,general_title=f'{plot_title}_pr')
-def evaluate_n_combinatorical_models(n_models, n_y_scores, y_test, k, task = None):
-    '''This function aasses all the possible combinatorical options for k given.
-N choose K options.
-For exmaple: if there are 10 models and n = 3, the function will average 
-the results of all the possible combinations of 3 models out of 10.
-The function will return the average of the aurpc,auroc and std over all the combinations.'''
-    # Get list of tuples containing k indices out of n_models
-    if n_models <= 10 or k==2: # more then 10 models to many combinations to validate
-        indices_combinations = list(combinations(range(n_models), k))
-        if len(indices_combinations) > 200: 
-            indices_combinations = get_X_random_indices(n_models, k, 200)
-        indices_combinations = [list(indices) for indices in indices_combinations]
-    else :
-        indices_combinations = get_X_random_indices(n_models, k, 200)    
-    
-    # Create np array for each indice combination for the averaged model evaluations.
-    if task.lower() == "classification":# Row - combination, Column - auroc,auprc,n_rank
-        all_combination_results = np.zeros(shape=(len(indices_combinations),3))
-    elif task.lower() == "regression" or task.lower() == 't_regression': # Row - combination, Column - Pearson_r, Pearson_p, Spearman_r, Spearman_p, MSE
-        all_combination_results = np.zeros(shape=(len(indices_combinations),5))
-    
-    for index,indices in enumerate(indices_combinations):
-        # get the scores for the models in the combination
-        y_scores = n_y_scores[indices]
-        # average the scores
-        y_scores = np.mean(y_scores, axis = 0)
-        # evaluate the model
-        model_scores = evaluate_model(y_test, y_scores, task)
-        # auroc, auprc = evaluate_auroc_auprc(y_test, y_scores)
-        # n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_scores,y_test,1000))[0]
-        all_combination_results[index] = [*model_scores]
-    return all_combination_results
 
-def eval_all_combinatorical_ensmbel(y_scores, y_test, header = None, task = None):
-    '''Evaluate all the possible combinatorical options for an ensmbel
-y_scores is 2d array (N_models, scores), y_test is the accautal labels'''
-    # Get amount of models
-    n_models = y_scores.shape[0]
-    # Create nd array with for each k combination with auroc,auprc,n-rank (means,std)
-    all_combination_results = np.zeros(shape=(n_models,len(header)))
-    # first row k = 1 no ensmble to calculate
-    for k in range(1,n_models): # 1 
-        print(f"Check combinations of {k + 1} models out of {n_models}")
-        k_combination_result = evaluate_n_combinatorical_models(n_models, y_scores, y_test, k + 1, task) 
-        # Average the k_combination_results over the 2d dimension
-        k_combination_result_mean = np.mean(k_combination_result, axis = 0)
-        k_combination_result_std = np.std(k_combination_result, axis = 0)
-        k_mean_and_std = np.concatenate((k_combination_result_mean, k_combination_result_std))
-        # Add the results to all_combination_results
-        all_combination_results[k] = k_mean_and_std
-    return all_combination_results
+
+def plot_ensembles_by_features_and_task(args,task,partition_information = None):
+    #positives, negatives, number_of_guides = get_partition_information(PARTITION_INFORMATION_PATH,PARTITION)
+    # partition_information = (PARTITION,positives,negatives,number_of_guides)
+    # partition_information = (PARTITION,positives,number_of_guides)
+
+    if task == "classification" or task == "reg_classification":
+        plot_all_ensmbels_means_std_classification(*args,partition_information= partition_information)
+    elif task == "regression" or task == "t_regression":
+        plot_all_ensmbels_means_std_regression(*args,partition_information= partition_information)
 
 
 
-def extract_combinatorical_results(ensmbel_combi_path, n_models_in_ensmbel_list):
-    '''Given a list of paths for csv files containing ensembel combinatiorical results
-And given a list with model amounts in each ensmbel to check return a dictionary
-with the results of each combinatorical amount from each ensmbel
-Dict returned : {n_keys : (n_ensmbels,[auroc,auprc,n-rank]) }'''
-    ensmbels_combi_paths = create_paths(ensmbel_combi_path) 
-    # Create a dictinoary of 2d np arrays. key is number of models in the ensmbel and value is the results
-    all_n_models = {n_models: np.zeros(shape=(len(ensmbels_combi_paths),3)) for n_models in n_models_in_ensmbel_list}
-    
-    for idx,ensmbel in enumerate(ensmbels_combi_paths):
-        results = np.genfromtxt(ensmbel, delimiter=',') # read file
-        for n_models in n_models_in_ensmbel_list:
-            # n_models is the row number first row is header
-            n_results = results[n_models,:3] # 3 columns - auroc,auprc,n-rank
-            all_n_models[n_models][idx] = n_results 
-
-    return all_n_models
-def eval_ensembles_in_folder(ensmbel_folder_path, n_models_in_ensmbel, if_single_amount_of_models = False):
-    '''Given a path to a folder containing multiple folders of models
-    Iterate over each folder and return the results of each ensmbel
-    n_models_in_ensmbel is a number of models in each ensmbel.
-    If if_single_amount_of_models is True, the calculation will be only for the given amount of models
-    other wise it will be for all the possible combinations of models in the ensmbel
-    -----
-    returns a dict {key : folder_name, val: dict{key: n_models_in_ensmbel, val: np array of results}}'''
-    if not if_single_amount_of_models:
-        n_models_in_ensmbel = [i for i in range(2,n_models_in_ensmbel+1)]
-    else :
-        n_models_in_ensmbel = [n_models_in_ensmbel]
-    ensmbel_results = {}
-    for ensmbel_folder in os.listdir(ensmbel_folder_path):
-        ensmbel_combi_path = os.path.join(ensmbel_folder_path,ensmbel_folder,"Combi") # combine folder with combi results
-        dict_ensmbel = extract_combinatorical_results(ensmbel_combi_path,n_models_in_ensmbel) # get the results
-        folder_suffix = ensmbel_folder.split("_") # get the folder name
-        if folder_suffix[0] == 'Chromstate':
-            folder_suffix = folder_suffix[1]
-        else:
-            folder_suffix = ensmbel_folder
-        ensmbel_results[folder_suffix] = dict_ensmbel # set the results per folder
-    return ensmbel_results
-
-    
-def plot_all_ensmbels_means_std(ensmbel_mean_std_dict,features,stats_dict,output_path, n_modles_in_ensmbel = None):
+def plot_all_ensmbels_means_std_classification(ensmbel_mean_std_dict,features,stats_dict,output_path,task, n_modles_in_ensmble = None, partition_information = None):
     '''Given a dictionary with the mean and std for each ensmbel - [0] -auroc,[1] - auprc,[2] - n-rank
     plot the results for all ensmbels togther
     stats dict is {Key: group/model, value: pvals of [auroc,auprc,n-rank]}'''
+    ending = ""
+    if task == "reg_classification":
+        ending = "by_reg"
+
     x_values = [str(ensmbel) for ensmbel in ensmbel_mean_std_dict.keys()]
-    aurocs_results = [results[n_modles_in_ensmbel][0][0] for results in ensmbel_mean_std_dict.values()]
-    aurocs_stds = [results[n_modles_in_ensmbel][1][0] for results in ensmbel_mean_std_dict.values()]
+    aurocs_results = [results[n_modles_in_ensmble][0][0] if n_modles_in_ensmble is not None else results[0][0] for results in ensmbel_mean_std_dict.values()]
+    aurocs_stds = [results[n_modles_in_ensmble][1][0] if n_modles_in_ensmble is not None else results[1][0] for results in ensmbel_mean_std_dict.values()]
     roc_pvals = {key: stats_dict[key][0] for key in stats_dict.keys()}
-    plot_ensemble_performance_mean_std(aurocs_results,aurocs_stds,x_values,roc_pvals,f"AUROC by ensmbels - {features}","AUROC",output_path)
-    auprcs_results = [results[n_modles_in_ensmbel][0][1] for results in ensmbel_mean_std_dict.values()]
-    auprcs_stds = [results[n_modles_in_ensmbel][1][1] for results in ensmbel_mean_std_dict.values()]
+    plot_ensemble_performance_mean_std(aurocs_results,aurocs_stds,x_values,roc_pvals,f"AUROC by ensmbels - {features} {ending}","AUROC",output_path, partition_information)
+    auprcs_results = [results[n_modles_in_ensmble][0][1] if n_modles_in_ensmble is not None else results[0][1] for results in ensmbel_mean_std_dict.values()]
+    auprcs_stds = [results[n_modles_in_ensmble][1][1] if n_modles_in_ensmble is not None else results[1][1] for results in ensmbel_mean_std_dict.values()]
     prc_pvals = {key: stats_dict[key][1] for key in stats_dict.keys()}
-    plot_ensemble_performance_mean_std(auprcs_results,auprcs_stds,x_values,prc_pvals,f"AUPRC by ensmbels - {features}","AUPRC",output_path)
-    n_ranks_results = [results[n_modles_in_ensmbel][0][2] for results in ensmbel_mean_std_dict.values()]
-    n_ranks_stds = [results[n_modles_in_ensmbel][1][2] for results in ensmbel_mean_std_dict.values()]
+    plot_ensemble_performance_mean_std(auprcs_results,auprcs_stds,x_values,prc_pvals,f"AUPRC by ensmbels - {features} {ending}","AUPRC",output_path,partition_information)
+    n_ranks_results = [results[n_modles_in_ensmble][0][2] if n_modles_in_ensmble is not None else results[0][2] for results in ensmbel_mean_std_dict.values()]
+    n_ranks_stds = [results[n_modles_in_ensmble][1][2] if n_modles_in_ensmble is not None else results[1][2] for results in ensmbel_mean_std_dict.values()]
     n_rank_pvals = {key: stats_dict[key][2] for key in stats_dict.keys()}
-    plot_ensemble_performance_mean_std(n_ranks_results,n_ranks_stds,x_values,n_rank_pvals,f"N-rank by ensmbels - {features}","N-rank",output_path)
+    plot_ensemble_performance_mean_std(n_ranks_results,n_ranks_stds,x_values,n_rank_pvals,f"N-rank by ensmbels - {features} {ending}","N-rank",output_path,partition_information)
+
+
+def plot_all_ensmbels_means_std_regression(ensmbel_mean_std_dict,features,stats_dict,output_path,task, n_modles_in_ensmbel = None,partition_information = None):
+    '''Given a dictionary with the mean and std for each ensmbel - [0] -r_pearson, [1] - r_spearman,[2] - MSE,##[3] - p_spearman,[4] - mse
+    plot the results for all ensmbels togther
+    stats dict is {Key: group/model, value: pvals of [r_pearson,p_pearson,r_spearman,p_spearman,mse]}'''
+    x_values = [str(ensmbel) for ensmbel in ensmbel_mean_std_dict.keys()]
+    r_pearson = [results[n_modles_in_ensmbel][0][0] if n_modles_in_ensmbel is not None else results[0][0] for results in ensmbel_mean_std_dict.values()]
+    r_pearson_stds = [results[n_modles_in_ensmbel][1][0] if n_modles_in_ensmbel is not None else results[1][0] for results in ensmbel_mean_std_dict.values()]
+    r_pearson_pvals = {key: stats_dict[key][0] for key in stats_dict.keys()}
+    plot_ensemble_performance_mean_std(r_pearson,r_pearson_stds,x_values,r_pearson_pvals,f"R_Pearson by ensmbels - {features}","R_pearson",output_path,partition_information)
+    r_spearman = [results[n_modles_in_ensmbel][0][1] if n_modles_in_ensmbel is not None else results[0][1] for results in ensmbel_mean_std_dict.values()]
+    r_spearman_stds = [results[n_modles_in_ensmbel][1][1] if n_modles_in_ensmbel is not None else results[1][1] for results in ensmbel_mean_std_dict.values()]
+    r_spearman_pvals = {key: stats_dict[key][1] for key in stats_dict.keys()}
+    plot_ensemble_performance_mean_std(r_spearman,r_spearman_stds,x_values,r_spearman_pvals,f"R_Spearman by ensmbels - {features}","R_Spearman",output_path,partition_information)
+    mse_results = [results[n_modles_in_ensmbel][0][2] if n_modles_in_ensmbel is not None else results[0][2] for results in ensmbel_mean_std_dict.values()]
+    mse_stds = [results[n_modles_in_ensmbel][1][2] if n_modles_in_ensmbel is not None else results[1][2] for results in ensmbel_mean_std_dict.values()]
+    mse_pvals = {key: stats_dict[key][2] for key in stats_dict.keys()}
+    plot_ensemble_performance_mean_std(mse_results,mse_stds,x_values,mse_pvals,f"M.S.E by ensmbels - {features}","M.S.E",output_path,partition_information)
 
 def plot_all_ensmbels_std(ensmbel_mean_std_dict,features):
     x_values = [str(ensmbel) for ensmbel in ensmbel_mean_std_dict.keys()]
@@ -333,7 +653,36 @@ def get_subset_dict(subsets_path, feature_dict, n_models_in_ensmbel):
     for key in temp_keys:
         picked_dict[key] = feature_dict[key]
     return picked_dict
+def plot_ensemble_perforamnce_and_std_by_models(combi_path,n_models,plots_output_path, features_description):
+    '''This function will plot the performance and std over number of models.
+    It will extract the scores from each ensmble in the combi path and plot the mean and std for each number of models using plot_ensemble_performance.
+    '''
+    n_models_list = [i for i in range(2,n_models+1)]
+    models_dict = extract_combinatorical_results(combi_path, n_models_list)
+    mean_and_std = {key: (np.mean(models_dict[key],axis = 0),np.std(models_dict[key],axis = 0)) for key in models_dict.keys()}
+    results_dict = get_roc_pr_n_from_N_models(mean_and_std)
+    for metric, metric_values in results_dict.items():
+        plot_ensemeble_preformance(y_values=metric_values[0],x_values=n_models_list,title=f"{metric}-{n_models} increasing models {features_description}",
+                                   y_label=metric, x_label="Number of models",stds=None,output_path=plots_output_path,if_scaling=False)
+        plot_ensemeble_preformance(y_values=metric_values[1],x_values=n_models_list,title=f"{metric} stds-{n_models} increasing models {features_description}",
+                                   y_label=metric, x_label="Number of models",stds=None,output_path=plots_output_path,if_scaling=False)
+        
 
+def get_roc_pr_n_from_N_models(mean_std_dict):
+    results_dict = {}
+    roc_vals = [value[0][0] for value in mean_std_dict.values()]
+    roc_stds = [value[1][0] for value in mean_std_dict.values()]
+    results_dict['AUROC'] = (roc_vals,roc_stds) 
+    prc_vals = [value[0][1] for value in mean_std_dict.values()]
+    prc_stds = [value[1][1] for value in mean_std_dict.values()]
+    results_dict['AUPRC'] = (prc_vals,prc_stds)
+    n_vals = [value[0][2] for value in mean_std_dict.values()]
+    n_stds = [value[1][2] for value in mean_std_dict.values()]
+    results_dict['N_rank'] = (n_vals,n_stds)
+
+    
+    return results_dict
+    
 def bar_plot_ensembels_feature_performance(only_seq_combi_path, epigenetics_path, n_models_in_ensmbel, plots_output_path, data_output_path, title,  add_subsets = None):
     '''This function will plot the performance of the ensembles for the given features compared with only sequence
     Will create 3 diffrenet plots for AUROC,AUPRC,N-rank each with the performance of the ensembles for the given features
@@ -369,26 +718,27 @@ def bar_plot_ensembels_feature_performance(only_seq_combi_path, epigenetics_path
     feature_dict = eval_ensembles_in_folder(epigenetics_path, n_models_in_ensmbel, True)
     dict_50_only_seq = extract_combinatorical_results(only_seq_combi_path, [n_models_in_ensmbel])
     feature_dict["Only-seq"] = dict_50_only_seq
-    feature_stats = get_ensmbels_stats(feature_dict,50)
+    feature_stats = get_only_seq_vs_group_ensmbels_stats(feature_dict,n_models_in_ensmbel,compare_to="Only-seq")
     feature_scores = get_mean_std_from_ensmbel_results(feature_dict)
     # Plot single features
-    plot_all_ensmbels_means_std(feature_scores,f'{title}_singel_features', feature_stats, plots_output_path, n_models_in_ensmbel)
+    
+    plot_ensembles_by_features_and_task((feature_scores,f'{title}_single_features', feature_stats, plots_output_path, n_models_in_ensmbel))
     if add_subsets:
         subsets_dict =  eval_ensembles_in_folder(add_subsets,n_models_in_ensmbel,True)
         subsets_dict['All'] = feature_dict['All']
         subsets_dict['Only-seq'] = feature_dict['Only-seq']
-        subsets_stats = get_ensmbels_stats(subsets_dict,n_models_in_ensmbel)
+        subsets_stats = get_only_seq_vs_group_ensmbels_stats(subsets_dict,n_models_in_ensmbel,compare_to="Only-seq")
         subsets_scores = get_mean_std_from_ensmbel_results(subsets_dict)
         # Plot only subsets
-        plot_all_ensmbels_means_std(subsets_scores,f"{title}_just_subsets",subsets_stats, plots_output_path, n_models_in_ensmbel)
+        plot_ensembles_by_features_and_task((subsets_scores,f"{title}_just_subsets",subsets_stats, plots_output_path, n_models_in_ensmbel))
         feature_dict.update(subsets_dict)
         feature_stats.update(subsets_stats)
         feature_scores.update(subsets_scores)
-    # Plot all features
-    plot_all_ensmbels_means_std(feature_scores,f'{title}_all_features', feature_stats, plots_output_path, n_models_in_ensmbel)
+        # Plot all features together - single and subsets
+        plot_ensembles_by_features_and_task((feature_scores,f'{title}_all_features', feature_stats, plots_output_path, n_models_in_ensmbel))
     # Save the data
     save_bar_plot_data(feature_scores, feature_stats, data_output_path, title)
-def save_bar_plot_data(scores_dict, stats_dict, output_path, title):
+def save_bar_plot_data(scores_dict, stats_dict, output_path,columns = None, title= None):
     '''This function save the raw data used to create the bar plot for future tasks such as:
     reproducing the bar plot without running the whole code, statistical tests and more.
     It will create a csv file with the scores (mean,std) for each feature and the statistical tests results.
@@ -409,12 +759,16 @@ def save_bar_plot_data(scores_dict, stats_dict, output_path, title):
         
         # Append a row with the feature name and corresponding data
         data.append([feature, scores[0], stds[0],pvals[0], scores[1], stds[1],pvals[1], scores[2], stds[2],pvals[2]])
-
+    if not columns:
+        raise RuntimeError("No columns given")
     # Create the DataFrame with columns specified
-    df = pd.DataFrame(data, columns=['feature', 'auroc', 'auroc_std','auroc_pval', 'auprc', 'auprc_std','auprc_pval', 'n-rank', 'n-rank_std','n-rank_pval'])
-
+    df = pd.DataFrame(data, columns=columns)
+    if not title:
+        title = "data.csv"
+    else :
+        title = title + "_data.csv"
     # Save the DataFrame to a CSV file
-    df.to_csv(os.path.join(output_path,f'{title}_data.csv'), index=False)
+    df.to_csv(os.path.join(output_path,title), index=False)
 
 ### ENSEMBLE AND MODEL EVALUATIONS ###
 
@@ -511,7 +865,7 @@ def increasing_points(path_to_counts, sgRNA = False):
 ### DIFFERENET DATASETS EVALUATIONS###
 def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, job, plot_output_path, data_output_path, guides_list = None,
                                features_columns = ['target','offtarget_sequence','chrom','chromStart','chromEnd']):
-    '''This function will evaluate the concurence between 2 off target data sets. 
+    '''This function will evaluate the concurdence between 2 off target data sets. 
     The function will extract the matching guides from both data sets. 
     If guide list is given the function will evaluate only the guides in the list.
     If job is binary the function will calculate the AUROC, AUPRC and N-rank given the data sets else it will calculate the R2 score and pearson correlation.
@@ -547,8 +901,10 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, title, label_column, 
     
     # Rank the data 1 model,2 lables
     if job == 'binary':
-        tpr,fpr,percision,baseline = convert_label_to_tpr_fpr_percision(merged_df, 'label_df1', 'label_df2')
-        tpr_2,fpr_2,percision_2,baseline_2 = convert_label_to_tpr_fpr_percision(merged_df, 'label_df2', 'label_df1')
+        tpr,fpr,percision,baseline = convert_continous_values_to_fpr_tpr(merged_df["label_df2"].values, merged_df["label_df1"].values)
+        tpr_2,fpr_2,percision_2,baseline_2 = convert_continous_values_to_fpr_tpr(merged_df["label_df1"].values, merged_df["label_df2"].values)
+        # tpr,fpr,percision,baseline = convert_label_to_tpr_fpr_percision(merged_df, 'label_df1', 'label_df2')
+        # tpr_2,fpr_2,percision_2,baseline_2 = convert_label_to_tpr_fpr_percision(merged_df, 'label_df2', 'label_df1')
         # Aucs
         aucs = [auc(fpr,tpr),auc(fpr_2,tpr_2)]
         auprcs = [(auc(tpr,percision),baseline),(auc(tpr_2,percision_2),baseline_2)]
@@ -631,89 +987,26 @@ def merge_ots_replicates_values(ots_data_1, ots_data_2, label_column, features_c
     print(f'df1 features: {len(ots_data_1)}, df2 features: {len(ots_data_2)}, intersecting features: {intersecting_length}\nvalues only in df1: {only_df1}, values only in df2: {only_df2}')
     return merged_df
 
-### FEATURE EVALUTION ###
-def feature_correlation(data_path, features_columns, label_column, log_feature = False, log_label = False):
-    '''This function will calculate the correlation between the features and the label.
-    The function will calculate the pearson correlation and the p value for each feature.
-    Args:
-    1. data_path - path to the data.
-    2. features_columns - columns with the features.
-    3. label_column - column with the label.
-    4. log_feature - boolean if to log the feature.
-    5. log_label - boolean if to log the label.
-    ------------
-    Returns: dictionary with the features as keys and the (pearson correlation ,p value, x_values, y_values).'''
-    # Read the data
-    data = pd.read_csv(data_path)
-    # Calculate the pearson correlation and p value for each feature
-    correlation_dict = {}
-    label_values = data[label_column].values
-    positive_indices = np.where(label_values > 0)[0]
-    positive_label_values = label_values[positive_indices] # only positive values
-    if log_label:
-        label_values_log = np.log(label_values + 1)
-        positive_label_values_log = label_values_log[positive_indices]
-    for feature in features_columns:
-        # All values
-        feature_values = data[feature].values
-        r, p = pearson_correlation(feature_values, label_values)
-        correlation_dict[(feature,label_column)] = (r, p, feature_values, label_values)
-        # Positive values
-        positive_feature_values = feature_values[positive_indices]
-        r_pos, p_pos = pearson_correlation(positive_feature_values, positive_label_values)
-        correlation_dict[(feature,f'Positive {label_column}')] = (r_pos, p_pos, positive_feature_values, positive_label_values)
-        if log_label:
-            # All values log
-            r_log, p_log = pearson_correlation(feature_values, label_values_log)
-            correlation_dict[(feature,f'Log {label_column.lower()}')] = (r_log, p_log, feature_values, label_values_log)
-            # Positive values log
-            r_pos_log, p_pos_log = pearson_correlation(positive_feature_values, positive_label_values_log)
-            correlation_dict[(feature,f'Positive Log {label_column.lower()}')] = (r_pos_log, p_pos_log, positive_feature_values, positive_label_values_log)
-    return correlation_dict
-def plot_feature_correlation(data_path, output_path,  feature_columns, label_column):
-    '''This function will plot the correlation between the features and the label.
-    The function will plot the scatter plot for each feature and the label.
-    Args:
-    1. data_path - path to the data.
-    2. output_path - path to save the plots.
-    3. feature_columns - columns with the features.
-    4. label_column - column with the label.
-    ------------
-    Returns: None
-    
-    plot_feature_correlation("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
-                             "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Feature_correlation/MOFF",["MOFF","GMT"],"Label")'''
-    if label_column == "Label":
-        log = False
-    else: log = True
-    # Calculate the correlation
-    correlation_dict = feature_correlation(data_path, feature_columns, label_column, log_label = log)
-    # Plot the correlation
-    for feature_nd_label, values in correlation_dict.items():
-        r, p, x_values, y_values = values
-        feature,label = feature_nd_label
-        feature = feature.replace("_"," ")
-        label = label.replace("_"," ")
-        y_label = label.replace("Positive","") # remove positive from the label
-        plot_correlation(x=x_values, y=y_values, x_axis_label=feature + " score", y_axis_label=y_label, r_coeff=r, p_value=p, title=feature + " " + label, output_path=output_path)
+
+
+
 ### METRICS HELPER FUNCTIONS ###
-def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
-    '''This function converts the labels in the merged data frame to TPR, FPR, Percisions values and tp baseline.
+
+def convert_continous_values_to_fpr_tpr(y_test, y_pred):
+    '''This functions calculates the tpr, fpr, percision values and percision baseline based on continuos values.
+    It calculates the total positives and total negatives.
+    It calculate the percsision baseline as the TP/ Total population.
+    It sorts the predictions values in descending order and calculates the: tpr,fpr, percision at each threshold. 
     Args:
-    1. merged_df - merged off target data frame.
-    2. label_1 - label column from the first data frame.
-    3. label_2 - label column from the second data frame.
+    1. y_pred - predictions values.
+    2. y_test - test values.
     ------------
-    Returns: TPR, FPR, Percision values and tp baseline.
-    TP baseline - Total positive/ total population.'''
-    # Create 2d np array - first row predictions, 2'd row labels
-    pred_label_array = np.array([merged_df[label_1].values, merged_df[label_2].values])
-    # Get the total amount of actual positives
-    total_positives = np.sum(pred_label_array[1] > 0)
-    total_negatives = np.sum(pred_label_array[1] == 0)
+    Returns: TPR, FPR, Percision values and tp baseline.'''
+    total_positives = np.sum(y_test > 0)
+    total_negatives = np.sum(y_test == 0)
     perc_baseline = total_positives / (total_positives + total_negatives)
     # Sort the array in descending order by the first row
-    sorted_indices = np.argsort(pred_label_array[0])[::-1]
+    sorted_indices = np.argsort(y_pred)[::-1]
   
     # Initialize variables
     tpr_values = [0]
@@ -724,8 +1017,8 @@ def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
 
     for indice in (sorted_indices):
         # Calculate the number of true positives and false positives up to the current threshold
-        true_positives += (pred_label_array[1][indice] > 0)
-        false_positives += (pred_label_array[1][indice] == 0)
+        true_positives += (y_test[indice] > 0)
+        false_positives += (y_test[indice] == 0)
         # Calculate TPR
         tpr = true_positives / total_positives if total_positives > 0 else 0
         tpr_values.append(tpr)
@@ -738,11 +1031,37 @@ def convert_label_to_tpr_fpr_percision(merged_df, label_1, label_2):
             precision = 0
         precision_values.append(precision)
     return tpr_values, fpr_values, precision_values, perc_baseline
-   
-if __name__ == "__main__":
+
+
+def combiscore_by_folder(base_path):
+    scores_nd_combi_paths = find_target_folders(base_path, ["Scores", "Combi"])
     
-    plot_feature_correlation("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
-                             "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Feature_correlation/MOFF",["MOFF","GMT"],"Label")
+    # turn the list into list of tuples (for multi process)
+    scores_nd_combi_paths = [(path,False) for path in scores_nd_combi_paths]
+    
+    with Pool(processes=10) as pool:
+        pool.starmap(process_single_ensemble_scores,scores_nd_combi_paths)
+
+if __name__ == "__main__":
+    pass
+    # plot_ensemble_perforamnce_and_std_by_models("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi",50,
+    #                                              "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/CHANGE-seq/Vivo_vitro/Classification/Ensemble/old","Only_sequence")
+    #process_all_ensembels_scores_in_folder("/localdata/alon/ML_results/Change-seq/vivo-vitro/T_Regression/Log/CNN/Ensemble/Epigenetics_by_features/7_partition/7_partition_10/binary",n_ensmebles=1)
+    #process_single_ensemble_scores("/localdata/alon/ML_results/Change-seq/vivo-vitro/T_Regression/Log/CNN/Ensemble/Only_sequence/7_partition/7_partition_50",False)
+    plots_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Feature_correlations/Change-seq/Vivo-vitro"
+    feature_cor_by_partition(data_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv",
+                             partitions=[1,2,3,4,5,6,7],
+                             partition_info="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",
+                             label_column="Read_count",features_columns=['MOFF','GMT'],output_path=plots_path)
+    # only_seq_path = "/localdata/alon/ML_results/Change-seq/vivo-vitro/T_Regression/Log/CNN/Ensemble/Only_sequence/7_partition/7_partition_10/Combi_reg"
+    # epigenetic_path = "/localdata/alon/ML_results/Change-seq/vivo-vitro/T_Regression/Log/CNN/Ensemble/Epigenetics_by_features/7_partition/7_partition_10/binary"
+    # n_models = 10
+    # plots_output_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/CHANGE-seq/Vivo_vitro/Reg_classification/Ensemble/Epigenetics/7_partition_1_ensemble_10_models"
+    # data_output_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/CHANGE-seq/Vivo_vitro/Reg_classification/Ensemble/Epigenetics/7_partition_1_ensemble_10_models"
+    # title = "Only-seq vs Epigenetics"
+    # #add_subsets = "/localdata/alon/ML_results/Change-seq/vivo-silico/Change_seq/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/picked_marks"
+    # bar_plot_ensembels_feature_performance(only_seq_path, epigenetic_path, n_models, plots_output_path, data_output_path, title)
+    
     #  gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
     #  gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
     #  evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","Lazzarotto et. Al"), "Read_count", "regression","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")

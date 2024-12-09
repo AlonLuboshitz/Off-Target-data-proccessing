@@ -1,17 +1,21 @@
 import os
 #import pyBigWig
-from utilities import create_paths, validate_path
+from utilities import create_paths, create_guides_list, validate_non_negative_int
 #import pybedtools
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
     def __init__(self, models_path = None , ml_results_path = None, train_guides_path = None,
-                  test_guides_path = None,  epigenetics_bed = None , epigenetic_bigwig = None, vivo_silico_path = None, vivo_vitro_path = None) -> None: 
+                  test_guides_path = None,  epigenetics_bed = None , epigenetic_bigwig = None,
+                    vivo_silico_path = None, vivo_vitro_path = None, partition_information_path = None,
+                    plots_path = None) -> None: 
         self.set_paths = False
         self.set_all_paths(models = models_path, ml_results = ml_results_path, train_guides = train_guides_path,
-                           test_guides = test_guides_path, vivo_silico = vivo_silico_path, vivo_vitro = vivo_vitro_path, epi_folder = epigenetics_bed, bigiw_folder = epigenetic_bigwig)
+                           test_guides = test_guides_path, vivo_silico = vivo_silico_path,
+                             vivo_vitro = vivo_vitro_path, epi_folder = epigenetics_bed, bigiw_folder = epigenetic_bigwig,
+                             partition_information_path=partition_information_path, plots_path = plots_path)
         
-        self.test_data_path = False
+        
         
     ## Getters:
     def get_positive_path(self):
@@ -25,7 +29,8 @@ class File_management:
             raise RuntimeError("No merged data path set")
         else:
             raise RuntimeError("No silico/vitro bools data path set")
-        
+    def get_plots_path(self):
+        return self.plots_path
 
     def get_epigenetics_folder(self):
         return self.epigenetics_folder_path
@@ -57,9 +62,10 @@ class File_management:
     def get_seperate_test_data(self):
         if self.test_data_path:
             return self.test_data_path
-    
+    def get_partition_information_path(self):
+        return self.partition_information_path
     ## Setters:
-    def set_all_paths(self, models, ml_results, train_guides, test_guides, vivo_silico, vivo_vitro, epi_folder, bigiw_folder):
+    def set_all_paths(self, models, ml_results, train_guides, test_guides, vivo_silico, vivo_vitro, epi_folder, bigiw_folder,partition_information_path, plots_path):
         self.set_models_path(models)
         self.set_ml_results_path(ml_results)
         self.set_train_guides_path(train_guides)
@@ -67,6 +73,8 @@ class File_management:
         self.set_epigenetic_paths(epi_folder, bigiw_folder)
         self.set_vivo_silico_data_path(vivo_silico)
         self.set_vivo_vitro_data_path(vivo_vitro)
+        self.set_partition_information_path(partition_information_path)
+        self.set_plot_path(plots_path)
         self.set_paths = True
 
     def set_models_path(self, models_path):
@@ -89,7 +97,13 @@ class File_management:
         #self.create_bigwig_files_objects()
         #self.set_global_bw_max()
         #self.create_bed_files_objects()
+    def set_partition_information_path(self, partition_information_path):
+        self.validate_path_exsits(partition_information_path)
+        self.partition_information_path = partition_information_path
     
+    def set_plot_path(self, plots_path):
+        self.validate_path_exsits(plots_path)
+        self.plots_path = plots_path
     ## Data paths - silico/vitro negative OTSs ##
     '''These functions dont validate the path, a dataset can have only one of the paths.
     When choosing to use one of the datasets then the path will be validated.'''
@@ -110,11 +124,19 @@ class File_management:
             self.set_silico_vitro_bools(vitro_bool = True)
         else:
             raise RuntimeError("Data type not set")
+        if model_task.lower() == "reg_classification":
+            model_task = "T_Regression"
+            plots_model_task = "Reg_classification"
         if transformation:
+            
             full_path = os.path.join(model_task,transformation,model_name,cross_validation,features)
+            plots_path = os.path.join(plots_model_task,model_task,transformation,model_name,cross_validation)
         else:
             full_path = os.path.join(model_task,model_name,cross_validation,features)
+            plots_path = os.path.join(model_task,model_name,cross_validation)
         self.add_type_to_models_paths(full_path)
+        
+        self.plots_path = self.add_to_path(self.plots_path,plots_path)
         self.task = model_task
         
         
@@ -141,6 +163,8 @@ class File_management:
             raise RuntimeError("No silico vitro bools were given data path set")
         if (suffix_str not in self.models_path) and (suffix_str not in self.ml_results_path):
             self.add_type_to_models_paths(suffix_str)
+        if (suffix_str not in self.plots_path):
+            self.plots_path = self.add_to_path(self.plots_path,suffix_str)
         else:
             raise Exception(f"Suffix {suffix_str} already in model or results paths:\n {self.models_path}\n{self.ml_results_path}")
     
@@ -166,48 +190,34 @@ class File_management:
         self.models_path = self.add_to_path(self.models_path,type)
   
     ## ENSMBELS:    
-
-    def set_n_models(self, n_models):
-        if n_models < 0 :
-            raise RuntimeError('Number of models cannot be negative')
-        self.n_models = n_models
-        self.add_n_models_ensmbel_path()
     def add_partition_path(self):
-        self.validate_ml_results_and_model()
         partition_str = "-".join(map(str,self.partition)) # Join the partition numbers into str seperated by '-'
-        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{partition_str}_partition')
-        self.models_path = self.add_to_path(self.models_path,f'{partition_str}_partition')
+        self.add_type_to_models_paths(f'{partition_str}_partition')
     
-    def add_n_models_ensmbel_path(self):
-        self.validate_ml_results_and_model()
-        partition_str = "-".join(map(str,self.partition)) # Join the partition numbers into str seperated by '-'
-        self.ml_results_path = self.add_to_path(self.ml_results_path,f'{partition_str}_partition_{self.n_models}')
-        self.models_path = self.add_to_path(self.models_path,f'{partition_str}_partition_{self.n_models}')
-        
-    def set_ensmbel_result_path(self, ensmbel_path):
-        self.validate_path_exsits(ensmbel_path)
-        self.ensmbel_result_path = ensmbel_path
-    def set_ensmbel_guides_path(self, guides_path):
-        self.validate_path_exsits(guides_path)
-        if os.listdir(guides_path) == 0:
-            raise Exception('Guides path is empty')
-        self.train_guides_path = guides_path
+    def set_n_ensembels(self, n_ensembels):
+        validate_non_negative_int(n_ensembels)
+        self.n_ensembels = n_ensembels
+        if self.partition:
+            self.add_type_to_models_paths(f'{self.n_ensembels}_ensembels')
+        else :
+            raise ValueError("Cannot set ensembels without partition")
+    
+    def set_n_models(self, n_models):
+        validate_non_negative_int(n_models)
+        if self.n_ensembels:
+            self.add_type_to_models_paths(f'{n_models}_models')
+        else:
+            raise ValueError("Cannot set models number without ensembels or partition")
+    
+     
     def add_to_path(self, path, path_to_add):
         '''Function take two paths, concatenate togther, create a folder and return the path'''
         temp_path = os.path.join(path, path_to_add)
         if not os.path.exists(temp_path):
             os.makedirs(temp_path)
         return temp_path
-    def add_path_to_train_ensmbel(self, path_to_add):
-        temp_path = os.path.join(self.ensmbel_train_path,path_to_add)
-        if not os.path.exists(temp_path):
-            os.makedirs(temp_path)
-        self.ensmbel_train_path = temp_path
-    def add_path_to_result_ensmbel(self, path_to_add):
-        temp_path = os.path.join(self.ensmbel_result_path,path_to_add)
-        if not os.path.exists(temp_path):
-            os.makedirs(temp_path)
-        self.ensmbel_result_path = temp_path    
+   
+    
     
     def set_partition(self, partition_list, train = False, test = False):
         '''Function to set the partition number
@@ -258,8 +268,10 @@ class File_management:
         '''Function to get the guides for the partition setted
         If partition/path not setted, raise exception
         Else sort the list of guides by partition number and 
-        return the path of the partition guides
+        return the GUIDES in the partition guides path
         '''
+        guides = []
+     
         if self.guides_partition_path:
             guides_list = os.listdir(self.guides_partition_path)
             if self.partition:
@@ -269,11 +281,14 @@ class File_management:
                     if guides_txt not in guides_list:
                         raise RuntimeError(f'Guides for partition {partition} not found')
                     guides_path.append(os.path.join(self.guides_partition_path,guides_txt))
-                return guides_path                
+                              
                
                 
             else : raise Exception('Partition not set')
         else : raise Exception('Guides path not set')
+        for guide_path in guides_path:
+            guides += create_guides_list(guide_path, 0)
+        return guides
         if self.train_guides_path:
             if self.test_data_path:
                 return [self.test_guides_paths]
@@ -377,12 +392,16 @@ class File_management:
             raise Exception("Ensemble result path not set")
         score_path = os.path.join(self.ml_results_path,"Scores")
         combi_path = os.path.join(self.ml_results_path,"Combi")
-        
+        # if self.task.lower() == "regression" or self.task.lower() == "t_regression":
+        #     pos_combi_path = os.path.join(self.ml_results_path,"Pos_combi") 
+        # else: pos_combi_path = None
         if not os.path.exists(score_path):
             os.makedirs(score_path)
         if not os.path.exists(combi_path):
             os.makedirs(combi_path)
-        return score_path,combi_path
+        # if not os.path.exists(pos_combi_path):
+        #     os.makedirs(pos_combi_path)
+        return score_path,combi_path #pos_combi_path
         
     ## Validations
     '''Function to validate the paths'''
@@ -399,3 +418,4 @@ class File_management:
         #self.close_bed_files()
         # call more closing
         pass
+

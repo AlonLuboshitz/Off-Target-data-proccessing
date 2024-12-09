@@ -10,7 +10,6 @@ from pybedtools import BedTool
 #from common_variables import 
 from sklearn.utils import shuffle
 from file_management import File_management
-from constants import TARGET_COLUMN , OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN, BINARY_LABEL_COLUMN,REGRESSION_LABEL_COLUMN
 ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 ## in common variables class there are columns for: 
 '''1. TARGET - gRNA seq column
@@ -104,8 +103,10 @@ def generate_features_and_labels(data_path, manager, encoded_length, bp_presenat
         
         y_labels_all.append(guide_data_frame[[columns_dict["Y_LABEL_COLUMN"]]].values) # add label values by extracting from the df by series values.
     del splited_guide_data # free memory
+    
     if transform_y_type:
         y_labels_all = transform_labels(y_labels_all, transform_y_type)
+    
     return (x_data_all,y_labels_all,guides)
 
 

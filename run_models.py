@@ -10,6 +10,7 @@ from features_engineering import generate_features_and_labels, order_data, get_t
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_auroc_auprc, evaluate_model, save_model_results
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
 from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
+from parsing import features_method_dict, cross_val_dict, model_dict
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 import pandas as pd
@@ -17,7 +18,6 @@ import numpy as np
 import time
 import logging
 import os
-import argparse
 
 if FORCE_USE_CPU:
     os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
@@ -30,7 +30,7 @@ logger.setLevel(logging.ERROR)
 
 
 class run_models:
-    def __init__(self, file_manager) -> None:
+    def __init__(self) -> None:
         self.ml_type = "" # String inputed by user
         self.ml_name = ""
         self.ml_task = None # class/reg
@@ -45,11 +45,7 @@ class run_models:
         self.init_cross_val_dict()
         self.init_features_methods_dict()
         self.epigenetic_window_size = 0
-        # if file_manager: # Not None
-        #     self.file_manager = file_manager
-        # else : raise Exception("Trying to init model runner without file manager")
-        
-        self.features_columns = ["Chromstate_atacseq_peaks_binary","Chromstate_h3k4me3_peaks_binary"]
+        self.features_columns = ""       
     ## initairs ###
     # This functions are used to init necceseray parameters in order to run a model.
     # If the parameters are not setted before running the model, the program will raise an error.
@@ -67,32 +63,17 @@ class run_models:
     
     def init_model_dict(self):
         ''' Create a dictionary for ML models'''
-        self.model_dict = {
-            1: "LOGREG",
-            2: "XGBOOST",
-            3: "XGBOOST_CW",
-            4: "CNN",
-            5: "RNN"
-        }
+        self.model_dict = model_dict()
         self.model_type_initiaded = False
     
     def init_cross_val_dict(self):
         ''' Create a dictionary for cross validation methods'''
-        self.cross_val_dict = {
-            1: "Leave_one_out",
-            2: "K_cross",
-            3: "Ensmbel"
-        }
+        self.cross_val_dict = cross_val_dict()
         self.cross_val_init = False
     
     def init_features_methods_dict(self):
         ''' Create a dictionary for running methods'''
-        self.features_methods_dict = {
-            1: "Only_sequence",
-            2: "Epigenetics_by_features",
-            3: "Base_pair_epigenetics_in_Sequence",
-            4: "Spatial_epigenetics"
-        }
+        self.features_methods_dict = features_method_dict()
         self.method_init = False
     
     def validate_initiation(self):
@@ -238,7 +219,8 @@ class run_models:
             1: self.set_only_seq_booleans,
             2: self.set_epigenetic_feature_booleans,
             3: self.set_bp_in_seq_booleans,
-            4: self.set_epi_window_booleans
+            4: self.set_epi_window_booleans,
+            5: self.set_epigenetic_feature_booleans
         }   
         booleans_dict[feature_method_answer]()
         self.feature_type = self.features_methods_dict[feature_method_answer]
