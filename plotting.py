@@ -98,9 +98,8 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
 def plot_binary_feature_heatmap(data_paths, plots_paths):
     # Get all data tables paths
     all_tables = create_paths(data_paths)
-    all_tables = [pd.read_csv(table) for table in all_tables] 
-    features = all_tables[0].columns
-    
+    all_tables = [(pd.read_csv(table),table.split(".csv")[0].split("/")[-1]) for table in all_tables] 
+    all_tables.sort(key=lambda x: x[1])    
     # Number of tables
     num_tables = len(all_tables)
 
@@ -108,11 +107,14 @@ def plot_binary_feature_heatmap(data_paths, plots_paths):
     fig, axes = plt.subplots(1, num_tables, figsize=(5 * num_tables, 8), sharey=True)
 
     # Iterate over tables and axes
-    # Iterate over tables and axes
-    for idx, (table, ax) in enumerate(zip(all_tables, axes)):
+    for  (table_tuple,ax) in zip(all_tables, axes):
         # Extract `geo_fold_pos` and `geo_fold_negative`
+        table, table_name = table_tuple
         table.set_index("Index", inplace=True)
-        heatmap_data = table[["geo_fold_pos", "geo_fold_negative"]].T
+        heatmap_data = table.loc[["geo_fold_pos", "geo_fold_negative"]]
+
+        # Transpose the data for heatmap
+        heatmap_data = heatmap_data.T
         
         # Create heatmap
         sns.heatmap(
@@ -127,14 +129,16 @@ def plot_binary_feature_heatmap(data_paths, plots_paths):
         )
         
         # Title for each subplot
-        ax.set_title(f"Table {idx+1}", fontsize=14)
+        ax.set_title(f"{table_name}", fontsize=14)
         ax.set_xlabel("Features", fontsize=12)
 
     # Set common ylabel
-    plt.tight_layout()
-    plt.ylabel("Metrics", fontsize=14)
-    plt.show()
-    plt.savefig(plots_paths + "binary_feature_heatmap.png")
+    fig.text(0.04, 0.5, "Metrics", va="center", rotation="vertical", fontsize=14)
+
+    # Save the plot before calling plt.show()
+    output_file = plots_paths + "binary_feature_heatmap.png"
+    plt.savefig(output_file)
+
 
 
 
