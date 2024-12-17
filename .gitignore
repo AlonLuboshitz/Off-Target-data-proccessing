@@ -9,3 +9,5 @@ __pycache__
 *.txt
 *.keras
 y_scores_output
+ofirs_enconding.py
+ofir_utilities.py

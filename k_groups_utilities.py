@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
 import os
-
-
+import ast
+from Data_labeling_and_processing import return_constrained_data
+from parameters_utilities import get_ot_constraint_name
+from file_utilities import create_folder
 def create_k_balanced_groups(dataset, target_column, label_column, k, output_name, seperate_grna_path, y_labels_tup = None, constrained_guides = None):
     '''Given y_labels and k, create k groups with rougly eqaul amount of labels in each group
     Args: 
@@ -133,22 +135,6 @@ def save_complete_partition_information(k_groups, labels, guides, output_name):
     complete_info_df.to_csv(f'{output_name}.csv', index=False)
     print(f"Complete partition information saved at {output_name}")
 
-def get_partition_information(partition_summary_path, partition_number):
-    '''This function returns for the partition number the positives, negatives and guides amount
-    Args:
-    1. partition_summary_path - path to the partition summary file
-    2. partition_number - number of the partition
-    -----------
-    Returns: Positives, Negatives, Guides amount'''
-    partitions_data = pd.read_csv(partition_summary_path)
-    partition_data = partitions_data[partitions_data["Partition"] == partition_number]
-    return {
-        'Positives': partition_data['Positives'].values[0],
-        'Negatives': partition_data['Negatives'].values[0],
-        'sgRNAs': partition_data['Guides_amount'].values[0]
-    }
-
-
 def get_k_groups_ensemble_args(partitions, models, ensembles, multi_process = False, other_feature_columns = None, method = None):
     if not method: # None
         raise ValueError("Method is not given")
@@ -187,3 +173,94 @@ def get_k_groups_ensebmle_args_other_features(partitions, n_models, n_ensmbels, 
         cross_val_params = (n_models, n_ensmbels, [partition])
         multi_process_args.append((None,cross_val_params,False, other_feature_columns))
     return multi_process_args
+
+
+##########################################
+'''
+Partition utilities
+'''
+
+#### Move get_partition_information to k_groups_utilities.py
+#### Create data_utilities where the functino to obtain only mismtaches\bulges\all OTSs will be located
+
+def partition_data_for_histograms(data_frame, partition_information_path, data_name,
+                                   data_type, off_target_constraints, partition_number, output_path = None,
+                                   target_column = 'target', label_column = "Label", bulge_column = None, mismatch_column = None):
+    '''
+    For the given partition this function will create a csv file with the following contect:
+    For each guide and for all guides togther in the partition:
+    Number of active OTSs, Number of inactive OTSs.
+    Args:
+    1. data_frame - data_frame with the off target data.
+    2. partition_information_path - path where the partition information and guides located.
+    2. data_name - name of the data i.e - Change-seq, Hendel Lab, So on..
+    3. data_type - in active OTSs are in silico or in vitro.
+    4. off_target_constraints - off target constraints i.e. all OTSs, only mismatches, only bulges.
+    6. partition_number - number of the partition.
+    The function extracts from the partition information the guides and look for tham in the data_frame.
+    ------------
+    Save: A csv file {partition_number}_partition_histogram.csv
+    '''
+    if isinstance(data_frame,pd.DataFrame):
+        data_frame = data_frame
+    else:
+        data_frame = pd.read_csv(data_frame)
+    partition_guides = extract_guides_from_partition(partition_information_path, partition_number)
+    partition_data = data_frame[data_frame[target_column].isin(partition_guides)]
+    partition_data = return_constrained_data(partition_data, off_target_constraints, bulge_column, mismatch_column)
+    actives_in_actives_df = pd.DataFrame(columns = ['sgRNA', 'Active OTSs', 'Inactive OTSs'])
+    for guide in partition_guides:
+        guide_data = partition_data[partition_data[target_column] == guide]
+        actives_in_actives_df = actives_in_actives_df.append({'sgRNA': guide, 'Active OTSs': np.sum(guide_data[label_column] > 0),
+                                                              'Inactive OTSs': np.sum(guide_data[label_column] <= 0)}, ignore_index = True)
+    actives_in_actives_df = actives_in_actives_df.append({'sgRNA': 'All guides', 'Active OTSs': np.sum(partition_data[label_column] > 0),'Inactive OTSs': np.sum(partition_data[label_column] <= 0)}, ignore_index = True)
+    if output_path is None:
+        raise ValueError("Output path is not given")
+    output_path = create_folder(output_path,(f"{data_name}",f"{data_type}",f"{get_ot_constraint_name(off_target_constraints)}"))
+    actives_in_actives_df.to_csv(os.path.join(output_path, f"{partition_number}_partition_OTSs.csv"), index = False)
+
+
+def create_guides_list(guides_path,i_line):
+    '''function path to guides txt file and return a list from the i line of the file
+    i_line is the line number to read from the file
+    the returned list objects are gRNA strings separted by comma "," '''
+    with open(guides_path, "r") as f:
+        for i, line in enumerate(f):
+            if i == i_line:
+                line = line.replace("\n","")
+                line2 = line.split(",")
+                guides = [guide.replace(' ','') for guide in line2]
+                break
+    return guides
+
+def extract_guides_from_partition(partition_info,partition):
+    '''Given partition information and the partition number extract the guides of the partition'''
+    if not isinstance(partition_info,pd.DataFrame):
+        info = pd.read_csv(partition_info)
+    else: info = partition_info
+    partition_info_guides = info[info["Partition"] == partition]["Guides"].values[0]
+    try:
+        partition_guides = ast.literal_eval(partition_info_guides)
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return e
+    return partition_guides  
+
+
+def get_partition_information(partition_summary_path, partition_number):
+    '''This function returns for the partition number the positives, negatives and guides amount
+    Args:
+    1. partition_summary_path - path to the partition summary file
+    2. partition_number - number of the partition
+    -----------
+    Returns: Positives, Negatives, Guides amount'''
+    partitions_data = pd.read_csv(partition_summary_path)
+    partition_data = partitions_data[partitions_data["Partition"] == partition_number]
+    return {
+        'Positives': partition_data['Positives'].values[0],
+        'Negatives': partition_data['Negatives'].values[0],
+        'sgRNAs': partition_data['Guides_amount'].values[0]
+    }
+
+

@@ -2,13 +2,17 @@
 from multiprocessing import Pool
 
 from file_management import File_management
+from file_utilities import create_paths, keep_only_folders, find_target_folders
 from evaluation import evaluation
-from utilities import set_features_columns_by_string, split_epigenetic_features_into_groups, create_guides_list, print_dict_values
-from utilities import write_2d_array_to_csv, create_paths, keep_only_folders, add_row_to_np_array, validate_non_negative_int
-from utilities import get_k_choose_n,  convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio, find_target_folders
-from k_groups import get_k_groups_ensemble_args
+from utilities import  split_epigenetic_features_into_groups, print_dict_values,get_feature_column_suffix
+from utilities import write_2d_array_to_csv,  add_row_to_np_array, validate_non_negative_int
+from utilities import get_k_choose_n,  convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio
+from parameters_utilities import with_bulges
+from k_groups_utilities import get_k_groups_ensemble_args, create_guides_list, partition_data_for_histograms
 from features_engineering import generate_features_and_labels
-from parsing import features_method_dict, cross_val_dict, model_dict, main_argparser, parse_args, validate_main_args
+from features_and_model_utilities import get_features_columns_args, parse_feature_column_dict
+from parsing import features_method_dict, cross_val_dict, model_dict,encoding_dict
+from parsing import class_weights_dict,off_target_constrians_dict, main_argparser, parse_args, validate_main_args
 from time_loging import log_time, save_log_time, set_time_log
 
 import os
@@ -126,7 +130,9 @@ def init_file_management(params=None, phats = None):
         ml_name, cross_val, feature_type = model_dict()[ARGS.model], cross_val_dict()[ARGS.cross_val], features_method_dict()[ARGS.features_method]
     else:
         ml_name, cross_val, feature_type = params
-    file_manager.set_model_parameters(data_type=ARGS.data_type,model_task=ARGS.task,cross_validation=cross_val,model_name=ml_name,features=feature_type,transformation=ARGS.transformation)
+    cw,encoding_type,ots_constraints = class_weights_dict()[ARGS.class_weights], encoding_dict()[ARGS.encoding_type], off_target_constrians_dict()[ARGS.off_target_constriants]
+    file_manager.set_model_parameters(data_type=ARGS.data_type,model_task=ARGS.task,cross_validation=cross_val,model_name=ml_name,
+                                      features=feature_type,class_weight=cw,encoding_type=encoding_type,ots_constriants=ots_constraints, transformation=ARGS.transformation)
     
     return file_manager
 
@@ -145,7 +151,8 @@ def init_model_runner(ml_task = None, model_num = None, cross_val = None, featur
         cross_val = ARGS.cross_val
     if not features_method:
         features_method = ARGS.features_method
-    model_runner.setup_runner(ml_task=ml_task, model_num=model_num, cross_val=cross_val, features_method=features_method)
+    model_runner.setup_runner(ml_task=ml_task, model_num=model_num, cross_val=cross_val,
+                               features_method=features_method,cw=ARGS.class_weights, encoding_type=ARGS.encoding_type, if_bulges=with_bulges(ARGS.off_target_constriants))
     return model_runner
 
 def init_model_runner_file_manager(model_params = None):
@@ -165,22 +172,27 @@ def init_run(model_params = None,  cross_val_params = None):
     model_runner, file_manager = init_model_runner_file_manager(model_params)
     train,test,process,evaluation = set_job(ARGS)
     t_guides, ensembles, models = set_cross_val_args(file_manager, train, test, cross_val_params)
-    x_features, y_features, all_guides = get_x_y_data(file_manager, model_runner.get_model_booleans(), model_runner.get_encoding_parameters())
+    x_features, y_features, all_guides = get_x_y_data(file_manager, model_runner.get_model_booleans())
     return model_runner, file_manager, x_features, y_features, all_guides, t_guides, ensembles, models
 
-def get_x_y_data(file_manager, model_runner_booleans, model_runner_codings, features_columns = None):
+def get_x_y_data(file_manager, model_runner_booleans, features_columns = None):
     '''Given a file manager, model runner booleans and model runner codings
     The function will generate the features and labels for the model used by the path to data in the file manager.
     The function will return the x_features, y_features and the guide set.''' 
-    encoded_length, bp_presntation = model_runner_codings
-    if_only_seq, if_bp, if_seperate_epi, if_epi_features, data_reproducibility, model_repro = model_runner_booleans
+    
+    if_only_seq, if_bp, if_seperate_epi, if_features_by_columns, data_reproducibility, model_repro = model_runner_booleans
     if not features_columns: # if feature columns not given set for the defualt columns
+        #### CHANGE to validate column with booleans
         features_columns = ARGS.epi_features_columns
-    return  generate_features_and_labels(file_manager.get_merged_data_path() , file_manager,
-                                         encoded_length, bp_presntation, 
+    log_time(f"Features_generation_{encoding_dict()[ARGS.encoding_type]}_start")
+    x,y,guides=  generate_features_and_labels(file_manager.get_merged_data_path() , file_manager,
                                          if_bp, if_only_seq, if_seperate_epi,
                                          ARGS.epigenetic_window_size, features_columns, 
-                                         data_reproducibility,COLUMNS, ARGS.transformation.lower())
+                                         data_reproducibility,COLUMNS, ARGS.transformation.lower(),
+                                         sequence_coding_type=ARGS.encoding_type, if_bulges= with_bulges(ARGS.off_target_constriants))
+    log_time(f"Features_generation_{encoding_dict()[ARGS.encoding_type]}_end")
+    return x,y,guides
+
 def init_evaluation_and_process(base_path, multi_process = False):
     '''This function init an evaluation object and process the scores of the ensemble into a combi file.
     If multi_process is False it will not multi process the inner function used - process_single_ensemble_scores'''
@@ -188,29 +200,30 @@ def init_evaluation_and_process(base_path, multi_process = False):
     evaluation_obj.process_single_ensemble_scores(base_path,multi_process)
 
 def set_method(args):
-    if args.features_method == 2 and args.epi_features_columns is None:
-        raise ValueError("Features columns must be given for epigenetic features")
+    if args.features_method == 2 and args.features_columns is None:
+        raise ValueError("Features columns must be given for features by columns method")
+    else:
+        try:
+            with open(args.features_columns, 'r') as f: # Read the features columns dict json file
+                args.features_columns = json.load(f)
+        except:
+            raise ValueError("Features columns must be json file")
     if args.features_method == 3 and args.epigenetic_bigwig is None:
         raise ValueError("Epigenetic bigwig folder must be given for base pair epigenetics in sequence")
     if args.features_method == 4 and (args.epigenetic_bigwig is None or args.epigenetic_window_size is None):
         raise ValueError("Epigenetic bigwig folder and epigenetic window size must be given for spatial epigenetics")
-    if args.features_method == 5:
-        if args.other_feature_columns is None:
-            raise ValueError("Other features columns must be given for other features")
-        else: 
-            with open(args.other_feature_columns, 'r') as f:
-                args.other_feature_columns = json.load(f)
+    
     return args.features_method
 def run():
     set_args(sys.argv)
     global ARGS
-    log_time("Run_start")
+    log_time("Main_Run_start")
     set_task_label()
     method = set_method(ARGS)
     train,test,process,evaluation = set_job(ARGS)
     cross_val_dict = cross_val()
     cross_val_dict[ARGS.cross_val](train,test,process,evaluation,method)
-    log_time("Run_end")
+    log_time("Main_Run_end")
 
 def cross_val():
     function_dict = {
@@ -238,7 +251,7 @@ def run_ensemble(train = False, test = False,process=False,evaluation=False, met
 def train_ensemble():
     return  {
         1: create_ensmble_only_seq,
-        2: create_ensembels_by_all_epi_feature_columns,
+        2: create_ensembels_by_all_feature_columns,
         
     }
     
@@ -408,10 +421,10 @@ def train_k_groups_with_ensembles_epi_features():
     if ARGS.n_ensmbels == 1:
         processes = min(os.cpu_count(), len(ARGS.partition))
         with Pool(processes=processes) as pool:
-            pool.starmap(create_ensembels_by_all_epi_feature_columns, multi_process_args)
+            pool.starmap(create_ensembels_by_all_feature_columns, multi_process_args)
     else:
         for arg in multi_process_args:
-            create_ensembels_by_all_epi_feature_columns(*arg)
+            create_ensembels_by_all_feature_columns(*arg)
 
 def test_k_groups_with_ensembles_epi_features():
     global ARGS
@@ -431,10 +444,10 @@ def train_k_groups_with_ensemble_other_features():
     if ARGS.n_ensmbels == 1:
         processes = min(os.cpu_count(), len(ARGS.partition))
         with Pool(processes=processes) as pool:
-            pool.starmap(create_ensembels_by_all_epi_feature_columns, multi_process_args)
+            pool.starmap(create_ensembels_by_all_feature_columns, multi_process_args)
     else:
         for arg in multi_process_args:
-            create_ensembels_by_all_epi_feature_columns(*arg)
+            create_ensembels_by_all_feature_columns(*arg)
 
 def test_k_groups_with_ensemble_other_features():
     ARGS.cross_val = 3
@@ -485,7 +498,7 @@ def create_ensmble_only_seq(  model_params = None,cross_val_params=None,multi_pr
     del x_features, y_features
 ## - EPIGENETICS:
     ## 1. Creation
-def create_ensembels_by_all_epi_feature_columns(model_params = None,cross_val_params=None, multi_process = True, feature_dict = None):
+def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params=None, multi_process = True, feature_dict = None):
     '''
     This function trains ensembles for each epigenetic feature column.
     The function splits the columns them into groups of the epigenetic value estimation i.e binary, score, enrichment.
@@ -496,7 +509,7 @@ def create_ensembels_by_all_epi_feature_columns(model_params = None,cross_val_pa
     2. cross_val_params: tuple - cross val parameters for the file manager
     3. multi_process: bool - if True the function will multiprocess the features in the group.'''
     if not feature_dict: # None
-        features_dict = split_epigenetic_features_into_groups(ARGS.epi_features_columns)
+        features_dict = parse_feature_column_dict(ARGS.features_columns)
     else:
         features_dict = feature_dict
     arg_list = []
@@ -509,19 +522,19 @@ def create_ensembels_by_all_epi_feature_columns(model_params = None,cross_val_pa
     model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
     
     if n_ensmbels == 1 and multi_process:  # multiprocess bool for activating this function from another function.
-        for group, features in features_dict.items():
-            for feature in features:
-                arg_list.append((group, [feature],runner, file_manager,train_guides,model_base_path,ml_results_base_path, n_models, n_ensmbels))
-            if len(features) > 1: # More then 1 feature in the group run all togther.
-                arg_list.append((group, features,runner, file_manager,train_guides,model_base_path,ml_results_base_path, n_models, n_ensmbels))
+        arg_list = get_features_columns_args(runner= runner, file_manager = file_manager, t_guides = train_guides, 
+                                             model_base_path = model_base_path, ml_results_base_path = ml_results_base_path,
+                                               n_models = n_models, n_ensmbels = n_ensmbels, features_dict = features_dict, multi_process = False)
         with Pool(processes=10) as pool:
             pool.starmap(create_ensembels_for_a_given_feature, arg_list) 
-    else:
-        for group, features in features_dict.items():
-            for feature in features:
-                create_ensembels_for_a_given_feature(group, [feature],runner, file_manager,train_guides,model_base_path,ml_results_base_path,n_models=n_models,n_ensmbels=n_ensmbels,multi_process=True) # singel epigenetic mark
-            if len(features) > 1: # More then 1 feature in the group run all togther.
-                create_ensembels_for_a_given_feature(group, features,runner, file_manager,train_guides,model_base_path,ml_results_base_path,n_models=n_models,n_ensmbels=n_ensmbels,multi_process=True) # all epigenetic marks togther
+    else: # multi_process = True/False and n_ensmbels > 1
+        arg_list = get_features_columns_args(runner= runner, file_manager = file_manager, t_guides = train_guides, 
+                                             model_base_path = model_base_path, ml_results_base_path = ml_results_base_path,
+                                               n_models = n_models, n_ensmbels = n_ensmbels, features_dict = features_dict, multi_process = multi_process)
+        for args in arg_list:
+            create_ensembels_for_a_given_feature(*args)
+            
+
 
 
 def create_ensembels_for_a_given_feature(group, feature,runner, file_manager,train_guides,model_base_path,ml_results_base_path,n_models=50, n_ensmbels=10, multi_process = False):
@@ -539,13 +552,8 @@ def create_ensembels_for_a_given_feature(group, feature,runner, file_manager,tra
     9. n_ensmbels: int - number of ensembles
     10. multi_process: bool - passed to create_n_ensembles function to multiprocess the ensembles.'''
     log_time(f'Create_ensmbels_with_epigenetic_features_{group}_{feature}_start')
-    x_features,y_features,all_guides = get_x_y_data(file_manager, runner.get_model_booleans(), runner.get_encoding_parameters(), feature)
-    if len(feature) > 1:
-        features_str = "All"
-        
-    else:
-        features_str = "".join(feature)    
-    temp_suffix = os.path.join(group,features_str) # set path to epigenetic data type - binary, by score, by enrichment.
+    x_features,y_features,all_guides = get_x_y_data(file_manager, runner.get_model_booleans(),  feature)
+    temp_suffix = get_feature_column_suffix(group,feature) # set path to epigenetic data type - binary, by score, by enrichment.
     file_manager.set_models_path(model_base_path) # set model path
     file_manager.set_ml_results_path(ml_results_base_path) # set ml results path
     file_manager.add_type_to_models_paths(temp_suffix) # add path to train ensmbel
@@ -644,40 +652,29 @@ def test_ensemble_by_features(model_params= None, cross_val_params= None, multi_
         runner, file_manager  = init_model_runner_file_manager(model_params)
         t_guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = False, test = True, cross_val_params = cross_val_params)
     if not features_dict: # None
-        features_dict = split_epigenetic_features_into_groups(ARGS.epi_features_columns)
+        features_dict = parse_feature_column_dict(ARGS.features_columns)
+    else:
+        features_dict = features_dict
+    
     model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
     arg_list = []
     if n_ensmbels == 1 and multi_process: # multiprocess each feature
-        for group, features in features_dict.items():
-            for feature in features:
-                arg_list.append((runner, file_manager, t_guides, group, feature,False,model_base_path, ml_results_base_path))
-            if len(features) > 1:
-                arg_list.append((runner, file_manager, t_guides, group, features, False,model_base_path, ml_results_base_path))
+        arg_list = get_features_columns_args(runner, file_manager, t_guides, model_base_path, ml_results_base_path, n_models, n_ensmbels, features_dict, multi_process = False)
         with Pool(processes=10) as pool:
             pool.starmap(test_ensemble_via_epi_feature_2, arg_list)
     else:
-        
-        for group, features in features_dict.items():
-            for feature in features:
-                test_ensemble_via_epi_feature_2(runner,file_manager,t_guides,group,feature,multi_process,model_base_path, ml_results_base_path)
-            if len(features) > 1:
-                test_ensemble_via_epi_feature_2(runner,file_manager,t_guides,group,features,multi_process,model_base_path, ml_results_base_path)
-
-def test_ensemble_via_epi_feature_2(runner, file_manager, t_guides, group,feature, multi_process,model_base_path, ml_results_base_path):
-    # if different_test_folder_path: # Not None
-    #     file_manager.set_ml_results_path(different_test_folder_path)
+        arg_list = get_features_columns_args(runner, file_manager, t_guides, model_base_path, ml_results_base_path, n_models, n_ensmbels, features_dict, multi_process = multi_process)
+        for arg in arg_list:
+            test_ensemble_via_epi_feature_2(*arg)
     
-    if isinstance(feature,list):
-        features_str = "All"
-    else:
-        features_str = feature
-        feature = [feature]
-    group_epi_path = os.path.join(group, features_str)
+def test_ensemble_via_epi_feature_2(group, feature, runner, file_manager, t_guides, model_base_path, ml_results_base_path,n_models, n_ensmbels, multi_process):
+    
+    group_epi_path = get_feature_column_suffix(group,feature)
     file_manager.set_models_path(model_base_path)
     file_manager.set_ml_results_path(ml_results_base_path)
     file_manager.add_type_to_models_paths(group_epi_path)
     runner.set_features_columns(feature)
-    x_features, y_features, all_guides = get_x_y_data(file_manager, runner.get_model_booleans(), runner.get_encoding_parameters(), feature)
+    x_features, y_features, all_guides = get_x_y_data(file_manager, runner.get_model_booleans(),  feature)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder() # Create score and combi folders
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
@@ -897,7 +894,14 @@ if __name__ == "__main__":
     
     set_time_log(keep_time=True,time_logs_paths="/home/dsi/lubosha/Off-Target-data-proccessing/Time_logs")
     run()
+    ## FIX SAFE MODE IN RUN_MODELS!!!!!!!!!!!!!! #
     #evalaute_all_partitions()
+    # partition_data_for_histograms("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv",
+    #                               partition_information_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",
+    #                               data_name="Change-seq",data_type="vivo-vitro",off_target_constraints=2,partition_number=1,
+    #                               output_path="/home/dsi/lubosha/Off-Target-data-proccessing/Partition_analysis",target_column="target",
+    #                               label_column="Label",bulge_column=None,mismatch_column="distance")
+                             
     save_log_time(ARGS)
     
     #performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")

@@ -8,9 +8,10 @@ from scipy import stats
 import pandas as pd
 import numpy as np
 import os
-import sys
-from utilities import extract_guides_from_partition, get_feature_name, create_folder
+from utilities import  get_feature_name
 from Changeseq import get_ending
+from file_management import create_folder
+from k_groups_utilities import extract_guides_from_partition
 # chrom_types are defualt and can be change manauly.
 # they correspond to bed files and should be found in the columns of the data
 CHROM_TYPES = ['Chromstate']

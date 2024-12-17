@@ -1,6 +1,9 @@
 import os
+
 #import pyBigWig
-from utilities import create_paths, create_guides_list, validate_non_negative_int
+from utilities import validate_non_negative_int
+from k_groups_utilities import create_guides_list
+from file_utilities import create_paths
 #import pybedtools
 
 class File_management:
@@ -112,7 +115,7 @@ class File_management:
     def set_vivo_vitro_data_path(self, vivo_vitro_path):
         self.vivo_vitro_path = vivo_vitro_path
 
-    def set_model_parameters(self,data_type, model_task, cross_validation, model_name, features, transformation = None):
+    def set_model_parameters(self,data_type, model_task, cross_validation, model_name, features,class_weight,encoding_type,ots_constriants, transformation = None):
         '''This function sets the model parameters to save the model in the corresponding path.
         
         Path: .../Models/{data_type}/{model_task}/{cross_validation}/{model_name}/{features}
@@ -129,11 +132,11 @@ class File_management:
             plots_model_task = "Reg_classification"
         if transformation:
             
-            full_path = os.path.join(model_task,transformation,model_name,cross_validation,features)
-            plots_path = os.path.join(plots_model_task,model_task,transformation,model_name,cross_validation)
+            full_path = os.path.join(model_task,transformation,ots_constriants,encoding_type,class_weight,model_name,cross_validation,features)
+            plots_path = os.path.join(plots_model_task,model_task,transformation,ots_constriants,encoding_type,class_weight,model_name,cross_validation)
         else:
-            full_path = os.path.join(model_task,model_name,cross_validation,features)
-            plots_path = os.path.join(model_task,model_name,cross_validation)
+            full_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,cross_validation,features)
+            plots_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,cross_validation)
         self.add_type_to_models_paths(full_path)
         
         self.plots_path = self.add_to_path(self.plots_path,plots_path)
@@ -418,4 +421,6 @@ class File_management:
         #self.close_bed_files()
         # call more closing
         pass
+
+
 

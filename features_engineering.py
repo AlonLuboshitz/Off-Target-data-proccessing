@@ -7,17 +7,10 @@ import pandas as pd
 import numpy as np
 import os
 from pybedtools import BedTool
-#from common_variables import 
 from sklearn.utils import shuffle
-from file_management import File_management
+import itertools
+from features_and_model_utilities import get_encoding_parameters
 ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
-## in common variables class there are columns for: 
-'''1. TARGET - gRNA seq column
-   2. OFFTARGET- off-target seq column
-   3. CHROM - chrom column
-   4. START,END - start and end coordinates'''
-## in common variables class there are booleans for:
-'''1. Seq_only, 2. bigwig info with seq 3. seperate bigwig info channel 4. seq and 1 epi value'''
 
 ## FUNCTIONS:
 # 1.
@@ -42,10 +35,11 @@ def create_data_frames_for_features(data, if_data_reproducibility, target_column
     return (result_dataframes, guides)
 
 
-def generate_features_and_labels(data_path, manager, encoded_length, bp_presenation, if_bp, if_only_seq , 
+def generate_features_and_labels(data_path, manager, if_bp, if_only_seq , 
                                  if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility,
-                                 columns_dict, transform_y_type = False):
-    '''This function generates x and y data for gRNAs and their corresponding off-targets.
+                                 columns_dict, transform_y_type = False, sequence_coding_type = 1, if_bulges = False):
+    '''
+    This function generates x and y data for gRNAs and their corresponding off-targets.
     For each (gRNA, OTS) pair it one-hot encodes the sequences and adds epigenetic data if required.
     For each pair it will return their corresponding y values (1/0/read_count).
     It iterates on each gRNA : Data frame and extract the data.
@@ -64,6 +58,9 @@ def generate_features_and_labels(data_path, manager, encoded_length, bp_presenat
     11. columns_dict - dictionary of columns to use in the data frame with the columns:
     TARGET_COLUMN, OFFTARGET_COLUMN, CHROM_COLUMN, START_COLUMN, END_COLUMN,
     BINARY_LABEL_COLUMN, REGRESSION_LABEL_COLUMN, Y_LABEL_COLUMN
+    12. transform_y_type - the type of transformation to apply to the y values.
+    13. sequence_coding_type - the type of sequence encoding to use -  defualt is 1 - PiCRISPR style. 2 -  nuc*nuc per base pair.
+    14. if_bulges - boolean to include bulges in the sequence encoding.
     Returns:
     1. x_data_all - list of x data for each gRNA.
     2. y_labels_all - list of y labels for each gRNA.
@@ -74,15 +71,21 @@ def generate_features_and_labels(data_path, manager, encoded_length, bp_presenat
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     ALL_INDEXES.clear() # clear indexes
+    seq_len,nuc_num = get_encoding_parameters(sequence_coding_type,if_bulges) # get sequence encoding parameters
+    encoded_length = seq_len * nuc_num # set encoded length
     for guide_data_frame in splited_guide_data.values(): # for every guide get x_features by booleans
         # get seq info - represented in all!
-        seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = bp_presenation,
-                                   off_target_column=columns_dict["OFFTARGET_COLUMN"],
-                                   target_column=columns_dict["TARGET_COLUMN"]) #int8
-        
+        if sequence_coding_type == 1: # PiCRISPR style
+            seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = nuc_num,
+                                    off_target_column=columns_dict["OFFTARGET_COLUMN"],
+                                    target_column=columns_dict["TARGET_COLUMN"]) #int8
+        elif sequence_coding_type == 2: # Full encoding
+            seq_info = full_one_hot_encoding(dataset_df=guide_data_frame, n_samples=len(guide_data_frame), seq_len=seq_len, nucleotide_num=nuc_num,
+                                  off_target_column=columns_dict["OFFTARGET_COLUMN"], target_column=columns_dict["TARGET_COLUMN"])
+
         if if_bp: # epigentic value for every base pair in gRNA
             big_wig_data = get_bp_for_one_hot_enconded(data = guide_data_frame, encoded_length = encoded_length, manager = manager,
-                                                        bp_presenation = bp_presenation, chr_column = columns_dict["CHROM_COLUMN"],
+                                                        bp_presenation = nuc_num, chr_column = columns_dict["CHROM_COLUMN"],
                                                         start_column = columns_dict["START_COLUMN"], end_column = columns_dict["END_COLUMN"])
             seq_info = seq_info.astype(np.float32) 
             x_data = seq_info + big_wig_data
@@ -109,7 +112,9 @@ def generate_features_and_labels(data_path, manager, encoded_length, bp_presenat
     
     return (x_data_all,y_labels_all,guides)
 
+    
 
+     
 '''Args: 1. gRNA : data frame, 2. encoded length, 3. the vector size for each base pair as bp_repsentation
 Function: init ones vector with amount of data points each encoded length size
 Each data point sent to one hot encoding with (OTS seq, gRNA seq)'''
@@ -119,7 +124,7 @@ def get_seq_one_hot(data, encoded_length, bp_presenation, off_target_column, tar
         otseq = enforce_seq_length(otseq, 23)
         grnaseq = enforce_seq_length(grnaseq, 23)
         otseq = otseq.upper()
-        seq_info[index] = seq_to_one_hot(otseq, grnaseq,encoded_length,bp_presenation)
+        seq_info[index] = partial_one_hot_enconding(otseq, grnaseq,encoded_length,bp_presenation)
     return seq_info
 '''Args: 1. gRNA : data frame, 2. encoded length, 3. file manager with epigenetic files
  4. the vector size for each base pair as bp_repsentation
@@ -155,7 +160,7 @@ creating |encoded_length| vector
 first 4 values are for base paris: A,T,C,G
 next 2 values are indicating which letter belongs to which sequence.
 returned flatten vector'''
-def seq_to_one_hot(sequence, seq_guide,encoded_length,bp_presenation):
+def partial_one_hot_enconding(sequence, seq_guide,encoded_length,bp_presenation):
     bases = ['A', 'T', 'C', 'G']
     onehot = np.zeros(encoded_length, dtype=np.int8) # init encoded length zeros vector (biary vec, int8)
     sequence_length = len(sequence)
@@ -174,6 +179,41 @@ def seq_to_one_hot(sequence, seq_guide,encoded_length,bp_presenation):
             except ValueError:  # Non-ATCG base found
                 pass
     return onehot
+
+def full_one_hot_encoding(dataset_df, n_samples, seq_len, nucleotide_num, off_target_column, target_column):
+    """
+    Creates a one-hot encoding of sgRNA and off-target sequences.
+
+    Args:
+        dataset_df (pd.DataFrame): Dataset Dataframe. Must contain columns "SG_RNA_SEQ" and "OFF_TARGET".
+        n_samples (int): Total number of samples in the dataset.
+        seq_len (int): Length of the sequences.
+        nucleotide_num (int): Number of distinct nucleotides (5 when including bulges).
+
+    Returns:
+        np.ndarray: One-hot encoded array, shape: (n_samples, seq_len, nucleotide_num ** 2)
+    """
+    nucleotides_to_position_mapping = create_nucleotides_to_position_mapping()
+
+    one_hot_arr = np.zeros((n_samples, seq_len, nucleotide_num, nucleotide_num), dtype=np.int8)
+    for i, (sg_rna_seq, off_seq) in enumerate(zip(dataset_df[target_column], dataset_df[off_target_column])):
+        if len(off_seq) != len(sg_rna_seq):
+            raise ValueError("len(off_seq) != len(sg_rna_seq)")
+        actual_seq_size = len(off_seq)
+        if actual_seq_size > seq_len:
+            raise ValueError("actual_seq_size > seq_len")
+
+        size_diff = seq_len - actual_seq_size
+        for j in range(seq_len):
+            if j >= size_diff:
+                # note that it is important to take (sg_rna_seq_j, off_seq_j) as old models did the same.
+                matrix_positions = nucleotides_to_position_mapping[(sg_rna_seq[j-size_diff], off_seq[j-size_diff])]
+                one_hot_arr[i, j, matrix_positions[0], matrix_positions[1]] = 1
+    # reshape to [n_samples, seq_len, nucleotide_num**2]
+    one_hot_arr = one_hot_arr.reshape((n_samples, seq_len, nucleotide_num**2))
+    one_hot_arr = one_hot_arr.reshape(n_samples, -1) # flatten the array
+    return one_hot_arr
+
 '''1.2 Reverse one hot encoding to sequence'''
 def reversed_ont_hot_to_seq(one_hot, bp_presenation):
     bases = ['A', 'T', 'C', 'G']
@@ -290,6 +330,43 @@ def update_y_values_by_intersect(intersect_tmp, start, window_size):
     y_values[0] = 0 # for better respresnation - setting 0,0
     return y_values
 
+
+def create_nucleotides_to_position_mapping():
+    """
+    Creates a mapping of nucleotide pairs (sgRNA, off-target) to their numerical positions.
+    This mapping includes positions for "N" nucleotides (representing any nucleotide).
+
+    Returns:
+        dict: A dictionary where keys are tuples of nucleotides ("A", "T"), ("G", "C"), etc.,
+              and values are tuples representing their (row, column) positions in a matrix.
+    """
+    # matrix positions for ("A","A"), ("A","C"),...
+    # tuples of ("A","A"), ("A","C"),...
+    nucleotides_product = list(itertools.product(*(["ACGT-"] * 2)))
+    # tuples of (0,0), (0,1), ...
+    position_product = [(int(x[0]), int(x[1]))
+                        for x in itertools.product(*(["01234"] * 2))]
+    nucleotides_to_position_mapping = dict(
+        zip(nucleotides_product, position_product))
+
+    # tuples of ("N","A"), ("N","C"),...
+    n_mapping_nucleotides_list = [("N", char) for char in ["A", "C", "G", "T", "-"]]
+    # list of tuples positions corresponding to ("A","A"), ("C","C"), ...
+    n_mapping_position_list = [nucleotides_to_position_mapping[(char, char)]
+                               for char in ["A", "C", "G", "T", "-"]]
+
+    nucleotides_to_position_mapping.update(
+        dict(zip(n_mapping_nucleotides_list, n_mapping_position_list)))
+
+    # tuples of ("A","N"), ("C","N"),...
+    n_mapping_nucleotides_list = [(char, "N") for char in ["A", "C", "G", "T", "-"]]
+    # list of tuples positions corresponding to ("A","A"), ("C","C"), ...
+    n_mapping_position_list = [nucleotides_to_position_mapping[(char, char)]
+                               for char in ["A", "C", "G", "T", "-"]]
+    nucleotides_to_position_mapping.update(
+        dict(zip(n_mapping_nucleotides_list, n_mapping_position_list)))
+
+    return nucleotides_to_position_mapping
 ## Data and features manipulation
 '''Function to extract the guides indexes given which guides to keep.
 The guides to keep are given as a list of indexes.
@@ -388,9 +465,11 @@ def over_sample(X_train, y_train, over_sampler):
     print(f"Number of samples duplicated: {num_samples_duplicated}\nclass ratio: {num_minority_samples_after / num_majority}")
     return (X_train, y_train)
 
-'''function splits one hot encoding into seq encoding and features encoding.'''
 def extract_features(X_train,encoded_length):
-    seq_only = X_train[:, :encoded_length]
+    '''
+    This function splits one hot encoding into seq encoding and features encoding.
+    '''
+    seq_only = X_train[:, :encoded_length].astype(np.int8)
     features = X_train[:, encoded_length:]
     return [seq_only,features]
 
@@ -430,13 +509,5 @@ def get_duplicates(file_manager):
     with open("otss.txt", "w") as file:
         for ots in otss:
             file.write(f"OTS: {ots[0]}, gRNA: {ots[1]}\n")
-if __name__ == "__main__":
-    from Server_constants import EPIGENETIC_FOLDER, BIG_WIG_FOLDER , DATA_PATH,TESTSSS
-    from utilities import keep_positives_by_ratio
-#    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER,TESTSSS , DATA_PATH)
-    x_features, y_labels, guides = generate_features_and_labels(TESTSSS, None,
-                                                                 23*6, 6, False, True, False, 2000, [], False)
-    keep_positives_by_ratio(x_features, y_labels, 0.5)
-    
-    
+
     

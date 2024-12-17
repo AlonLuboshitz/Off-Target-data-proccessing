@@ -5,10 +5,10 @@ def features_method_dict():
     '''A dictionary for the feature incorporate in the model.'''
     return {
             1: "Only_sequence",
-            2: "Epigenetics_by_features",
+            2: "With_features_by_columns",
             3: "Base_pair_epigenetics_in_Sequence",
-            4: "Spatial_epigenetics",
-            5: "Other_features"
+            4: "Spatial_epigenetics"
+            
         }
 
 def cross_val_dict():
@@ -26,29 +26,53 @@ def model_dict():
             2: "XGBOOST",
             3: "XGBOOST_CW",
             4: "CNN",
-            5: "RNN"
+            5: "RNN",
+            6: "GRU-EMB"
         }
+def encoding_dict():
+    '''
+    A dictionary for the sequence encoding types.
+    '''
+    return {
+        1: "PiCrispr_encoding",
+        2: "Full_encoding"
+    }
 
+def off_target_constrians_dict():
+    '''
+    A dictionary for the off-target constraints.
+    '''
+    return {
+        1: "No_constraints",
+        2: "Mismatch_only",
+        3: "Bulges_only"
+    }
+def class_weights_dict():
+    '''
+    A dictionary for the class weights.
+    '''
+    return {
+        1: "CW",
+        2: "No_CW"
+    }
 def main_argparser():
     parser = argparse.ArgumentParser(description='''Python script to init a model and train it on off-target dataset.
                                      Different models, feature types, cross_validations and tasks can be created.
                                      ''')
     parser.add_argument('--model','-m', type=int, 
                         help='''Model number: 1 - LogReg, 2 - XGBoost,
-                          3 - XGBoost with class weights, 4 - CNN, 5 - RNN''',
+                          3 - XGBoost with class weights, 4 - CNN, 5 - RNN, 6- GRU-EMB''',
                          required=True, default=4)
     parser.add_argument('--cross_val','-cv', type=int,
                          help='''Cross validation type: 1 - Leave one out, 
                          2 - K cross validation, 3 - Ensmbel, 4 - K cross with ensemble''',
                          required=True, default=1)
     parser.add_argument('--features_method','-fm', type=int,
-                         help='''Features method: 1 - Only_sequence, 2 - Epigenetics_by_features, 
-                         3 - Base_pair_epigenetics_in_Sequence, 4 - Spatial_epigenetics, 5 - other features''', 
+                         help='''Features method: 1 - Only_sequence, 2 - With_features_by_columns, 
+                         3 - Base_pair_epigenetics_in_Sequence, 4 - Spatial_epigenetics''', 
                         required=True, default = 1)
-    parser.add_argument('--epi_features_columns', '-fc', nargs='+', type=str,
-                     help='Features columns - list of strings of the epigenetic features columns in the data', required=False)
-    parser.add_argument('--other_feature_columns','-ofc', type=str,
-                        help='''Other features columns - path to a dict with keys that are groups and values is a list of strings of non epigenetic features columns in the data''', required=False)
+    parser.add_argument('--features_columns', '-fc', type=str,
+                     help='Features columns - path to a dict with keys as feature type and values are the columns names', required=False)
     parser.add_argument('--epigenetic_window_size','-ew', type=int, 
                         help='Epigenetic window size - 100,200,500,2000', required=False, default=2000)
     parser.add_argument('--epigenetic_bigwig','-eb', type=str,
@@ -75,6 +99,9 @@ def main_argparser():
     parser.add_argument('--partition','-p', type=int, nargs='+',help='Partition number given via list', required=False)
     parser.add_argument('--n_models','-nm', type=int, help='Number of models in each ensmbel', required=False)
     parser.add_argument('--n_ensmbels','-ne', type=int, help='Number of ensmbels', required=False)
+    parser.add_argument('--encoding_type','-et', type=int, help='Sequence encoding type: 1 - PiCrispr, 2 - Full', default=1)
+    parser.add_argument('--off_target_constriants','-otc', type=int, help='Off-target constraints: 1 - No_constraints, 2 - Mismatch_only, 3 - Bulges_only', default=1)
+    parser.add_argument('--class_weights','-cw', type=int, help='Class weights: 1 - CW, 2 - No_CW', default=1)
     return parser
 
 def parse_args(argv,parser):
@@ -117,4 +144,4 @@ def validate_main_args(args):
         data_columns = configs["Columns_dict"]
         data_configs = configs[args.data_name]
         return args, data_configs, data_columns
-       
+    
