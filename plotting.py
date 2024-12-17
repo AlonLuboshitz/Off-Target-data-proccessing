@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from utilities import create_paths
+from file_utilities import create_paths
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 

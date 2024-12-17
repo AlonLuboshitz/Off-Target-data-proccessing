@@ -3,11 +3,11 @@ import pandas as pd
 from itertools import combinations
 import os
 from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve, mean_squared_error
-from utilities import create_paths, find_target_folders,get_X_random_indices, extract_scores_labels_indexes_from_files, create_folder, get_feature_name
-from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv, keep_only_folders
-from k_groups import get_partition_information
+from utilities import get_X_random_indices, extract_scores_labels_indexes_from_files, get_feature_name
+from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv
+from k_groups_utilities import get_partition_information
 from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr
-
+from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder
 
 from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
 from multiprocessing import Pool

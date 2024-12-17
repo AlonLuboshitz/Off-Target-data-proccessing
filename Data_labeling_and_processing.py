@@ -5,7 +5,7 @@ import re
 import numpy as np
 import pybedtools
 import time
-from utilities import validate_path, create_folder, remove_dir_recursivly, get_bed_folder
+from file_utilities import validate_path, create_folder, remove_dir_recursivly, get_bed_files
 
 ORDERED_COLUMNS = ['chrom','chromStart','chromEnd','Position','Filename','strand','offtarget_sequence','target','realigned_target','Read_count','missmatches','insertion','deletion','bulges','Label']
 #### Identified guideseq preprocessing functions ####
@@ -257,7 +257,8 @@ def preprocess_identified_files(folder_path, idenetified_folder_name, n_duplicat
                 if n_duplicates > 1:
                     remove_dir_recursivly(merged_folder_path)
     print(f"Preprocessing of {idenetified_folder_name} is done. Merged data saved in {output_data_name} file.")
-          
+
+#####################################################################      
 
 ### Negative Labeling functions ###
 '''Example input file (DNA bulge size 2, RNA bulge size 1):
@@ -420,7 +421,7 @@ def merge_positive_negative(positives, negatives, output_name, output_path, targ
     pos_length = len(positives)
     merged_data = pd.concat([positives,negatives])
     print(f"data points should be: Merged: {len(merged_data)},Pos + Neg: {pos_length+ neg_length}")
-    merged_data,md_duplicates = drop_by_colmuns(merged_data,['chrom', 'chromStart', 'chromEnd','strand', 'offtarget_sequence', 'target','missmatches'],"first")
+    merged_data,md_duplicates = drop_by_colmuns(merged_data,['chrom', 'chromStart', 'chromEnd','strand', 'offtarget_sequence', 'target'],"first")
      
     
     
@@ -431,6 +432,8 @@ def merge_positive_negative(positives, negatives, output_name, output_path, targ
     print(f"Negatives: {neg_length} - {count_ones} = {neg_length - count_ones + (count_ones-md_duplicates)}, label: {count_zeros} ")
     print(merged_data.columns)
     output_path = f"{os.path.join(output_path,output_name)}.csv"
+    merged_data.reset_index(drop=True,inplace=True)
+    merged_data["Index"] = merged_data.index
     merged_data.to_csv(output_path,index=False)
 
 def remove_unmatching_guides(positive_data, target_column, negative_data):
@@ -516,8 +519,9 @@ def intersect_with_epigentics(whole_data,epigentic_data,if_strand):
     intersection_df_wa = intersection_wa.to_dataframe(header=None,names = columns)
     return whole_data,intersection_df_wa
     
-def assign_epigenetics(off_target_data,intersection,file_ending,chrom_type,score_type_dict={"binary":True}):
-    '''This function assign epigenetic data to the off-target data frame.
+def assign_epigenetics(off_target_data,intersection,file_ending,score_type_dict={"binary":True}):
+    '''
+    This function assign epigenetic data to the off-target data frame.
     It extracts the epigenetic type - i.e. chromatin accesesibility, histone modification, etc.
     To that it adds the epigenetic mark itself - i.e. H3K4me3, H3K27ac, etc.
     To each combination of type and mark it assigns a binary column by defualt.
@@ -533,8 +537,8 @@ def assign_epigenetics(off_target_data,intersection,file_ending,chrom_type,score
     ------------
     Returns: off_target_data - data frame with the epigenetic data assigned.
     '''
-    chrom_column = f'{chrom_type}_{file_ending}' # set chrom type and mark column
-    columns_dict = {key: f'{chrom_column}_{key}' for key in score_type_dict.keys()} # set columns names
+    
+    columns_dict = {key: f'{file_ending}_{key}' for key in score_type_dict.keys()} # set columns names
     # add columns to the off-target data
     for column_name in columns_dict.values():
         off_target_data[column_name] = 0
@@ -591,18 +595,19 @@ def run_intersection(merged_data_path,bed_folder,if_update):
     Returns: None
     Saves the new data frame with the epigenetic data in the same path as the merged data with the ending _withEpigenetic.csv'''
     data = pd.read_csv(merged_data_path)
-    data["Index"] = data.index # set index column
-    bed_types_nd_paths = get_bed_folder(bed_folder)
+    data = order_data_column_for_intersection(data,["chrom","chromStart","chromEnd"])
+    if not "Index" in data.columns:
+        data["Index"] = data.index
+    bed_paths = get_bed_files(bed_folder)
     new_data_name = merged_data_path.replace(".csv","")
     new_data_name = f'{new_data_name}_withEpigenetic.csv'
     if if_update:
-        bed_types_nd_paths = remove_exsiting_epigenetics(data,bed_types_nd_paths,True) # remove exsiting epigenetics
+        bed_paths = remove_exsiting_epigenetics(data,bed_paths,True) # remove exsiting epigenetics
         new_data_name = merged_data_path # update exsiting data
-    for chrom_type,bed_paths in bed_types_nd_paths:
-        for bed_path in bed_paths:
-            data,intersect = intersect_with_epigentics(data,epigentic_data=bed_path,if_strand=False)
-            data = assign_epigenetics(off_target_data=data,intersection=intersect,file_ending=get_ending(bed_path),chrom_type=chrom_type)
-    data = data.drop("Index", axis=1) # remove "Index" column
+    for bed_path in bed_paths:
+    
+        data,intersect = intersect_with_epigentics(data,epigentic_data=bed_path,if_strand=False)
+        data = assign_epigenetics(off_target_data=data,intersection=intersect,file_ending=get_ending(bed_path))
     data.to_csv(new_data_name,index=False)
 
 def remove_exsiting_epigenetics(data,bed_type_nd_paths,full_match=False):
@@ -627,6 +632,19 @@ def remove_exsiting_epigenetics(data,bed_type_nd_paths,full_match=False):
             
         new_chrom_information.append((chrom_type,paths_list))
     return new_chrom_information
+def order_data_column_for_intersection(data,chrom_columns):
+    '''
+    This function orders the columns of the data frame for the intersection.
+    it sets the chrom, chromstart and chromend columns first and the rest of the columns after them.
+    Args:
+    1. data - data frame with the data
+    2. chrom_columns - list of the chrom columns - chrom,start,end
+    ------------
+    Returns: data frame with the ordered columns
+    '''
+    data_columns = data.columns.tolist()
+    data_columns = chrom_columns + [column for column in data_columns if column not in chrom_columns] # set the chrom columns first
+    return data[data_columns]
 ### Multiple sources data merging ###
 def combine_data_from_diffrenet_studies(studies_list, target_column, with_intersecting = False):
     '''This function combines data from different studies.
@@ -660,7 +678,94 @@ def combine_data_from_diffrenet_studies(studies_list, target_column, with_inters
     if merged_data_guides != diffrence_guides:
         raise ValueError("Not all guides are in the data frames.")
     return merged_data
-   
+
+#############################################
+## Remove unwanted examples ##
+def remove_unwanted_samples(dataframe,column,value,if_treshold =False,treshold_sign=None):
+    '''
+    This function removews unwanted samples from the data frame.
+    It removes samples with value in the given column.
+    if_treshold is True, the function will remove samples with value above or below the treshold given the threshold sign.
+    Args:
+    1. dataframe - data frame with the data
+    2. column - column to remove the samples from
+    3. value - value to remove
+    4. if_treshold - boolean, if True the function will remove samples above or below the treshold
+    5. treshold_sign - sign of the treshold - <, >, <=, >=
+    ------------
+    Returns: data frame with the removed samples.
+    '''
+    if if_treshold:
+        if not treshold_sign:
+            raise ValueError("No treshold sign given.")
+        if not treshold_sign in ["<",">","<=",">=","=="]:
+            raise ValueError(f"Invalid treshold sign: {treshold_sign}")
+        else :
+            filtered_df =  dataframe[dataframe[column].apply(lambda x: eval(f'{x} {treshold_sign} {value}'))]
+            print(f"Filtered {len(dataframe)-len(filtered_df)} samples with {column} {treshold_sign} {value}")
+            return filtered_df
+    else:
+        filtered_df = dataframe[~dataframe[column].str.contains(f"[{value}]", regex=True)]
+        print(f"Filtered {len(dataframe)-len(filtered_df)} samples with {column} {value}")
+        return filtered_df
+ 
+def return_constrained_data(data_frame, off_target_constraints, bulge_column = None, mismatch_column = None):
+    '''
+    This function takes an OT data frame and returns a data frame after applying given constraint.
+    Args:
+    1. data_frame - data frame with the data
+    2. off_target_constraints - integer, the constraint to apply
+    3. bulge_column - column with the bulges
+    4. mismatch_column - column with the mismatches
+    ------------
+    Returns: data frame with the constrained data.
+    '''
+    if off_target_constraints == 1: # No constraints
+        return data_frame
+    elif off_target_constraints == 2: # Mismatch only remove all OTS with bulges - bulge < 1
+        if bulge_column:
+            return remove_unwanted_samples(data_frame,bulge_column,0,True, "==")
+        else:
+            raise ValueError("No bulge column given.")
+    elif off_target_constraints == 3: # Bulge only - get all OTS with bulges - bulge >0
+        if bulge_column is None or mismatch_column is None:
+            raise ValueError("No bulge or mismatch column given.")
+        with_bulges = remove_unwanted_samples(data_frame,bulge_column,0,True, ">")
+        return remove_unwanted_samples(with_bulges,mismatch_column,0,True, "==")
+
+
+# def split_all_guide_seq_to(data_path, output_path, output_name):
+#     data = pd.read_csv(data_path)
+    
+#     data.rename(columns={'Align.sgRNA': 'realigned_target',
+#        'distance':'missmatches', 'Align.#Bulges':'bulges', 'Label':'Read_count'}, inplace=True)
+    
+#     print(f'len before: {len(data)}')
+#     data.drop_duplicates(subset=['offtarget_sequence','target','chromStart','chromEnd'],keep='first',inplace=True)
+#     print(f'len after: {len(data)}')
+#     data.to_csv(os.path.join(output_path,f'{output_name}.csv'),index=False)
+
+
+def add_inserertion_deletion(data, align_target_column, off_target_column, bulges_column):
+    '''
+    This function extract from a given sgRNA,OT pair the amount of deletions and insertions if any.
+    It assigns the corresponding value to the data frame.
+    '''
+    # Keep only bulges
+    only_bulges = data[data[bulges_column] > 0]
+    # Inseretions - DNA BULGE
+    only_bulges['insertion'] = only_bulges[align_target_column].apply(lambda x: x.count('-'))
+    # Deletions - RNA BULGE
+    only_bulges['deletion'] = only_bulges[off_target_column].apply(lambda x: x.count('-'))
+    data['insertion'] = data['deletion'] = 0
+    data.loc[only_bulges.index,'insertion'] = only_bulges['insertion']
+    data.loc[only_bulges.index,'deletion'] = only_bulges['deletion']
+    bulges_count = len(data[data[bulges_column] > 0])
+    insertion_deletion_count = len(data[(data['insertion'] > 0) | (data['deletion'] > 0)])
+    print(f"Number of rows where bulges > 0: {bulges_count}")
+    print(f"Number of rows where insertion or deletion > 0: {insertion_deletion_count}")
+    return data
+  
 '''
 function gets path for identified (guideseq output data) folder and calls:
 process_folder function, which creates csv folder named: identified_labeled_sub_only
@@ -670,19 +775,9 @@ argv 2 -  number of duplicated expriments
 argv 3 - keep the identified label folder or erase it
 '''
 if __name__ == '__main__':
-    #preprocess_identified_files("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/40_exp","identified",2,"40",True)
-    #transform_casofiner_into_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Negatives/sgRNA_caso_output.txt")
-    #merge_positive_negative(positives="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_guideseq.csv",negatives="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Negatives/sgRNA_caso_output.csv",output_name="merged_gs_caso",output_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab",target_column="target",remove_bulges=True)
-    # merged_data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies/hendel_changeseq.csv")
-    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Negatives/sgRNA_caso_output.csv")
-    #print(len(set(data['target'])))
-    print(len(data))
-    print(sum(data['Read_count']==0))
-    print(data['Label'].value_counts())
-    data.loc[data['Label'] == 0, 'Read_count'] = 0
-    print(sum(data['Read_count']==0))
-    #data.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed_read_count.csv")
-
+    ### assign epigenetic
+    run_intersection("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vitro-silico-110.csv",
+                     "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Bed",False)
     
     
     

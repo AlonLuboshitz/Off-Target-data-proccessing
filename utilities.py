@@ -1,10 +1,7 @@
 import numpy as np
 import os
-import re
 from itertools import combinations
-from shutil import rmtree
 import pandas as pd
-import ast
 
 
 
@@ -109,7 +106,7 @@ def validate_dictionary_input(answer, dictionary):
  It checks if the input is a valid number and if it is within the range of the list of options
  given by keys of the dictionary'''
     if not answer: # no input was given
-        answer = input(f"Please enter model: {dictionary}\n") # ask for model
+        answer = input(f"Please enter number: {dictionary}\n") # ask for model
     # input was given
     answer = int(answer)
     if answer not in dictionary.keys(): # check if the input is in the dictionary
@@ -118,31 +115,6 @@ def validate_dictionary_input(answer, dictionary):
         return answer
 
 
-def create_guides_list(guides_path,i_line):
-    '''function path to guides txt file and return a list from the i line of the file
-    i_line is the line number to read from the file
-    the returned list objects are gRNA strings separted by comma "," '''
-    with open(guides_path, "r") as f:
-        for i, line in enumerate(f):
-            if i == i_line:
-                line = line.replace("\n","")
-                line2 = line.split(",")
-                guides = [guide.replace(' ','') for guide in line2]
-                break
-    return guides
-def extract_guides_from_partition(partition_info,partition):
-    '''Given partition information and the partition number extract the guides of the partition'''
-    if not isinstance(partition_info,pd.DataFrame):
-        info = pd.read_csv(partition_info)
-    else: info = partition_info
-    partition_info_guides = info[info["Partition"] == partition]["Guides"].values[0]
-    try:
-        partition_guides = ast.literal_eval(partition_info_guides)
-        
-    except Exception as e:
-        print(f"Error: {e}")
-        return e
-    return partition_guides  
         
 '''Function writes 2d array to csv file'''
 def write_2d_array_to_csv(np_array, file_path, header):
@@ -218,6 +190,24 @@ def get_feature_name(feature_column):
         return feature_column_splited[1]
     else:
         return feature_column
+def get_features_string(feature_list, subsets = False, group_ending = None):
+    if len(feature_list) > 1:
+        if subsets:
+            return "_".join(get_feature_name(feature) for feature in feature_list)
+        elif group_ending is None: # subsets False
+            raise ValueError("More than one feature, no subset and no group ending given")
+        else: # group ending given
+            return f"All-{group_ending}"
+    else:
+        return get_feature_name(feature_list[0])
+
+def get_feature_column_suffix(group,feature):
+    subsets= False
+    if "Subset" in group:
+        subsets = True
+        group = group.split("-")[1]
+    feature_name = get_features_string(feature, subsets, group.split("_")[-1])
+    return os.path.join(group,feature_name)
 def extract_scores_labels_indexes_from_files(paths):
     '''Given a list of paths for csv files containing models predicitions scores
 extract the scores and combine them into one np array.
@@ -256,82 +246,6 @@ def get_X_random_indices(N, k, X):
     return all_indices
 
 
-## FILES
-def remove_dir_recursivly(dir_path):
-    try:
-        rmtree(dir_path)
-        print(f"Directory '{dir_path}' and its contents have been removed.")
-    except Exception as e:
-        print(f"Error: {e}") 
-
-def create_paths(folder):
-    '''Create paths list off all the files/folders in the given folder'''
-    paths = []
-    for path in os.listdir(folder):
-        paths.append(os.path.join(folder,path))
-    return paths
-
-'''create folder in spesefic path'''
-def create_folder(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
-        print("created new folder: ", path)
-
-def keep_only_folders(paths_list):
-    '''Given list of paths return only folders from the list'''
-    return [path for path in paths_list if os.path.isdir(path)]
-
-def validate_path(path):
-    '''Validate if path exists or not'''
-    return os.path.exists(path)
-
-def find_target_folders(root_dir, target_subdirs):
-    '''This function will iterate the root directory and return paths to the target folders
-    '''
-    target_folders = []
-    for current_dir, dirs, files in os.walk(root_dir):
-        # Check if both "Scores" and "Combi" are in the current directory
-       if all(subdir in dirs for subdir in target_subdirs):
-            target_folders.append(current_dir)
-    return target_folders
-
-def extract_ensmbel_combi_inner_paths(base_path):
-    '''This function will iterate the base path:
-    Base path -> partitions -> inner folders (number of ensmbels) - > Combi
-    --------
-    Returns a list of paths to the Combi folders from each inner folder'''
-    path_lists = []
-    for partition in os.listdir(base_path): # iterate partition
-        partition_path = os.path.join(base_path,partition)
-        for n_ensmbels_path in os.listdir(partition_path): # iterate inner folders
-            parti_ensmbels_path = os.path.join(partition_path,n_ensmbels_path)
-            if os.path.isdir(os.path.join(parti_ensmbels_path,"Combi")): # if Combi folder exists
-                path_lists.append(parti_ensmbels_path)
-    return path_lists
-
-
-def get_bed_folder(bed_parent_folder):
-    ''' function iterate on bed folder and returns a list of tuples:
-    each tuple: [0] - folder name [1] - list of paths for the bed files in that folder.'''  
-    # create a list of tuples - each tuple contain - folder name, folder path inside the parent bed file folder.
-    subfolders_info = [(entry.name, entry.path) for entry in os.scandir(bed_parent_folder) if entry.is_dir()]
-    # Create a new list of tuples with folder names and the information retrieved from the get bed files
-    result_list = [(folder_name, get_bed_files(folder_path)) for folder_name, folder_path in subfolders_info]
-    return result_list
-
-def get_bed_files(bed_files_folder):
-        
-    '''function retrives bed files
-    args- bed foler
-    return list paths.'''
-    bed_files = []
-    for foldername, subfolders, filenames in os.walk(bed_files_folder):
-        for name in filenames:
-            # check file type the narrow,broad, bed type. $ for ending
-            if re.match(r'.*(\.bed|\.narrowPeak|\.broadPeak)$', name):
-                bed_path = os.path.join(foldername, name)
-                bed_files.append(bed_path)
-    return bed_files
 
 def save_intersect_guides(dataset_1, dataset_2, target_col_1, target_col_2, output_name):
     '''Given two datasets and the target columns to compare
@@ -441,11 +355,9 @@ def concat_change_seq_df():
     merged["Index"] = merged.index
     merged.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed.csv",index=False)
 if __name__ == "__main__":
-    data = get_partition_information("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",7)
-    print(data)
-    
-
-    #union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
+    a =get_feature_column_suffix("Subset1-Binary_epigenetics", ["Chromstate_H3K27ac_peaks_binary","Chromstate_ATAC-seq_peaks_binary","Chromstate_H3K4me3_peaks_binary"])
+    print(a)
+    union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
     # #list_50 = [i for i in range(2,51)]
     # list_50 = [50]
     # dict_50_only_seq = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/Only_seq/1_partition_50/Combi",list_50)

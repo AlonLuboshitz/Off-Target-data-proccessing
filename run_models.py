@@ -6,11 +6,12 @@
 
 FORCE_USE_CPU = False
 
-from features_engineering import generate_features_and_labels, order_data, get_tp_tn, extract_features, get_guides_indexes
-from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_auroc_auprc, evaluate_model, save_model_results
-from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw
+from features_engineering import  order_data, get_tp_tn, extract_features, get_guides_indexes
+from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_auroc_auprc, evaluate_model
+from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw, get_gru_emd
 from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
-from parsing import features_method_dict, cross_val_dict, model_dict
+from parsing import features_method_dict, cross_val_dict, model_dict, class_weights_dict
+from features_and_model_utilities import get_encoding_parameters
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 import pandas as pd
@@ -27,7 +28,17 @@ import tensorflow as tf
 logger = tf.get_logger()
 logger.setLevel(logging.ERROR)
 
-
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
 
 class run_models:
     def __init__(self) -> None:
@@ -37,9 +48,7 @@ class run_models:
         self.shuffle = True
         self.if_os = False
         self.os_valid = False
-        self.bp_presntation = 6
-        self.guide_length = 23
-        self.encoded_length =  self.guide_length * self.bp_presntation
+        self.init_encoded_params = False
         self.init_booleans()
         self.init_model_dict()
         self.init_cross_val_dict()
@@ -54,7 +63,7 @@ class run_models:
 
     def init_booleans(self):
         '''Features booleans'''
-        self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_epi_features = False  
+        self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_features_by_columns = False  
         self.method_init = False
     
     def init_deep_hyper_params(self):
@@ -87,14 +96,19 @@ class run_models:
             raise RuntimeError("Over sampling was not set")
         elif not self.ml_task:
             raise RuntimeError("ML task - classification/regression was not set")
+        elif not self.init_encoded_params:
+            raise RuntimeError("Encoded parameters were not set")
         
 
-    def setup_runner(self, ml_task = None, model_num = None, cross_val = None, features_method = None, over_sampling = None):
+    def setup_runner(self, ml_task = None, model_num = None, cross_val = None, features_method = None, 
+                     over_sampling = None, cw = None, encoding_type = None, if_bulges = None):
         self.set_model_task(ml_task)
         self.set_model(model_num)
         self.set_cross_validation(cross_val)
         self.set_features_method(features_method)
         self.set_over_sampling('n') # set over sampling
+        self.set_class_wieghting(cw)
+        self.set_encoding_parameters(encoding_type, if_bulges)
         self.set_data_reproducibility(False) # set data, model reproducibility
         self.set_model_reproducibility(False)
         self.set_functions_dict()
@@ -113,6 +127,20 @@ class run_models:
                 self.set_ml_seeds()
         else : # set randomness
             self.set_random_seeds(False)
+    
+    def set_class_wieghting(self, cw):
+        answer = validate_dictionary_input(cw, class_weights_dict())
+        if answer == 1:
+            self.cw = True
+        else : self.cw = False
+
+    def set_encoding_parameters(self,enconding_type, if_bulges):
+        self.guide_length, self.bp_presntation = get_encoding_parameters(enconding_type, if_bulges)
+        self.encoded_length =  self.guide_length * self.bp_presntation
+        if self.ml_name == "GRU-EMB":
+            self.bp_presntation = self.bp_presntation**2
+            self.encoded_length =  self.guide_length * self.bp_presntation
+        self.init_encoded_params = True
     '''Set seeds for reproducibility'''
     def set_deep_seeds(self,seed=42):
         tf.random.set_seed(seed) # Set seed for Python's random module (used by TensorFlow internally)
@@ -138,30 +166,27 @@ class run_models:
         self.if_bp = True
         
     def set_epi_window_booleans(self):
-        self.if_only_seq = self.if_bp = self.if_epi_features= False
+        self.if_only_seq = self.if_bp = self.if_features_by_columns= False
         self.if_seperate_epi = True
     
-    def set_epigenetic_feature_booleans(self):
+    def set_features_by_columns_booleans(self):
         self.if_only_seq = self.if_bp = self.if_seperate_epi = False
-        self.if_epi_features = True
+        self.if_features_by_columns = True
 
     def get_model_booleans(self):
         '''Return the booleans for the model
         ----------
         Tuple of - only_seq, bp, seperate_epi, epi_features, data_reproducibility, model_reproducibility'''
-        return self.if_only_seq, self.if_bp, self.if_seperate_epi, self.if_epi_features, self.data_reproducibility, self.model_reproducibility
-    def get_encoding_parameters(self):
-        '''Return the encoded length and bp presentation
-        ----------
-        Tuple of - encoded_length, bp_presntation'''
-        return self.encoded_length, self.bp_presntation
+        return self.if_only_seq, self.if_bp, self.if_seperate_epi, self.if_features_by_columns, self.data_reproducibility, self.model_reproducibility
+   
     ## Model setters ###
     # This functions are used to set the model parameters.
     def set_hyper_params_class_wieghting(self, y_train):
         if self.ml_task == "Classification":
-            class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
-            class_weight_dict = dict(enumerate(class_weights))
-            self.hyper_params['class_weight'] = class_weight_dict
+            if self.cw:
+                class_weights = compute_class_weight(class_weight='balanced',classes= np.unique(y_train),y= y_train)
+                class_weight_dict = dict(enumerate(class_weights))
+                self.hyper_params['class_weight'] = class_weight_dict
         else :  return # no class wieghting for regression
     
     def set_model(self, model_num_answer = None ):
@@ -171,14 +196,14 @@ class run_models:
             raise RuntimeError("Model task need to be setted before the model")
         model_num_answer = validate_dictionary_input(model_num_answer, self.model_dict)
         '''Given an answer - model number, set the ml_type and ml name'''
-        if model_num_answer > 0 and model_num_answer < len(self.model_dict):
-            if model_num_answer < 4: # ML models
-                self.ml_type = "ML"
-            else : # Deep models
-                self.ml_type = "DEEP"
-                self.init_deep_hyper_params()
-            self.ml_name = self.model_dict[model_num_answer]
-            self.model_type_initiaded = True
+    
+        if model_num_answer < 4: # ML models
+            self.ml_type = "ML"
+        else : # Deep models
+            self.ml_type = "DEEP"
+            self.init_deep_hyper_params()
+        self.ml_name = self.model_dict[model_num_answer]
+        self.model_type_initiaded = True
             
     
     def set_model_task(self, task):
@@ -217,10 +242,10 @@ class run_models:
         feature_method_answer = validate_dictionary_input(feature_method_answer, self.features_methods_dict)
         booleans_dict = {
             1: self.set_only_seq_booleans,
-            2: self.set_epigenetic_feature_booleans,
+            2: self.set_features_by_columns_booleans,
             3: self.set_bp_in_seq_booleans,
-            4: self.set_epi_window_booleans,
-            5: self.set_epigenetic_feature_booleans
+            4: self.set_epi_window_booleans
+            
         }   
         booleans_dict[feature_method_answer]()
         self.feature_type = self.features_methods_dict[feature_method_answer]
@@ -332,16 +357,7 @@ class run_models:
     
 
     ## Assistant RUN FUNCTIONS: DATA, MODEL, REGRESSION, CLASSIFICATION, 
-        
-    ## DATA:
-    '''1. CREATE FEATURES VIA feature_engineering.py
-    Use generate_features_and_lables from feature_engineering.py
-    returns x_features, y_features, guide set'''
-    def get_features(self): 
-        self.set_random_seeds(False)
-        return  generate_features_and_labels(self.file_manager.get_merged_data_path() , self.file_manager, self.encoded_length, self.bp_presntation, 
-                                                                        self.if_bp, self.if_only_seq,self.if_seperate_epi,
-                                                                        self.epigenetic_window_size,self.features_columns, self.data_reproducibility)
+    
     # OVER SAMPLING:
     '''1. Get the sampler instace with ratio and set the sampler string'''
     def get_sampler(self,balanced_ratio):
@@ -366,7 +382,10 @@ class run_models:
         elif self.ml_name == "CNN":
             return get_cnn(self.guide_length, self.bp_presntation, self.if_only_seq, self.if_bp, 
                            self.if_seperate_epi, len(self.features_columns), self.epigenetic_window_size, self.bigwig_numer, self.ml_task)
-
+        elif self.ml_name == "RNN":
+            pass
+        elif self.ml_name == "GRU-EMB":
+            return get_gru_emd(task=self.ml_task,input_shape=(self.guide_length,self.bp_presntation),num_of_additional_features=len(self.features_columns),if_flatten=True)
     '''2. Training and Predicting with model:'''
     ## Train model: if Deep learning set class wieghting and extract features
     def train_model(self,X_train, y_train):
@@ -532,7 +551,7 @@ class run_models:
         Example: create_ensebmle(5,"/models",["ATT...TGG",...],seed_addition=10,positive_ratio=[0.5,0.7,0.9])'''
         
         if x_features is None or y_labels is None or guides is None:
-            x_features, y_labels, guides = self.get_features()
+            raise RuntimeError("Cannot create ensemble without data : x_features, y_labels, guides")
         else: # no data given, extract data from the file manager
             guides_idx = self.keep_intersect_guides_indices(guides, guides_train_list) # keep only the train guides indexes
             if (len(guides_idx) == len(guides)): # All guides are for training
@@ -566,7 +585,7 @@ class run_models:
         # Row - model, Column - probalities
         y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
         for index,model_path in enumerate(ensembel_model_list): # iterate on models and predict y_scores
-            model = tf.keras.models.load_model(model_path)
+            model = tf.keras.models.load_model(model_path,safe_mode=False)
             # self.set_random_seeds(seed = (index+1+additional_seed))
             model_predictions = self.predict_with_model(model=model,X_test=x_test).ravel() # predict and flatten to 1d
             y_scores_probs[index] = model_predictions
@@ -610,7 +629,7 @@ class run_models:
     '''Run with epigenetic features, split to groups and run each group and all together.'''    
     def run_with_epigenetic_features(self):
         # 1. set booleans
-        self.set_epigenetic_feature_booleans()
+        self.set_features_by_columns_booleans()
         # run for each feature by its own and by group of features
         features_dict = split_epigenetic_features_into_groups(self.features_columns) # dict of feature by type (score, binary, fold)
         for feature_group in features_dict.values():

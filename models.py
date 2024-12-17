@@ -4,8 +4,8 @@
 from xgboost import XGBClassifier
 from sklearn.linear_model import LogisticRegression
 
-from tensorflow import keras
-from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape
+from tensorflow import keras,argmax
+from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape, Embedding, GRU
 
 ## No random state is initialized, np.random.seed(42) is used in the model runner file if needed
 def get_cnn(sequence_length, bp_presenation, only_seq_info, if_bp,if_seperate_epi, num_of_additional_features, epigenetic_window_size, epigenetic_number, task = None):
@@ -47,10 +47,12 @@ def create_conv_seq_layers(seq_input,sequence_length,bp_presenation):
     return seq_flatten
 def create_conv_epi_layer(epi_input,kernal_size,strides,epigenetic_window_size,epigenetic_number):
     epi_input_reshaped = Reshape((epigenetic_window_size,epigenetic_number))(epi_input)
-    epi_conv_6 = Conv1D(2,kernel_size=kernal_size,kernel_initializer='random_uniform',strides=strides,padding='valid')(epi_input_reshaped)
+    epi_conv_6 = Conv1D(32,kernel_size=kernal_size,kernel_initializer='random_uniform',strides=strides,padding='valid')(epi_input_reshaped)
     epi_acti_6 = keras.layers.LeakyReLU(alpha=0.2)(epi_conv_6)
-    epi_max_pool_3 = MaxPooling1D(pool_size=2,strides=2, padding='same')(epi_acti_6) 
-    epi_seq_flatten = Flatten()(epi_max_pool_3)
+    epi_max_pool_3 = MaxPooling1D(pool_size=2, padding='same')(epi_acti_6) 
+    epi_conv_7 = Conv1D(64,kernel_size=3,kernel_initializer='random_uniform',strides=strides,padding='valid')(epi_max_pool_3)
+    epi_acti_7 = keras.layers.LeakyReLU(alpha=0.2)(epi_conv_7)
+    epi_seq_flatten = Flatten()(epi_acti_7)
     return epi_seq_flatten
 
 def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp,if_seperate_epi,num_of_additional_features,epigenetic_window_size,epigenetic_number, task=None):
@@ -79,15 +81,9 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
     seq_drop_5 = keras.layers.Dropout(0.2)(seq_dense_4)
     
     # Set loss and last neuron for the task
-    if task == "Classification":
-        loss = keras.losses.BinaryCrossentropy()
-        metrics = ['binary_accuracy']
-        output = Dense(1, activation='sigmoid')(seq_drop_5)
-    elif task == "Regression":
-        loss = keras.losses.MeanSquaredError()
-        metrics = ['mean_absolute_error']
-        output = Dense(1, activation='linear')(seq_drop_5)
-    else : RuntimeError("Task must be set to 'Classification' or 'Regression'")
+    loss,metrics,output_activation = task_model_parameters(task)
+    output = Dense(1, activation=output_activation)(seq_drop_5)
+    
     ## Set inputs and outputs sizes for the model to accepet.
     if (only_seq_info or if_bp):
         model = keras.Model(inputs=seq_input, outputs=output)
@@ -104,3 +100,72 @@ def create_convolution_model(sequence_length, bp_presenation,only_seq_info,if_bp
 
 
 
+def get_gru_emd(task, input_shape=(24, 25), embed_dim=44,
+            dense_layers=(128, 64), activation_funs=("relu", "relu"), optimizer="adam", num_of_additional_features=0,if_flatten = False):
+    
+        """
+        Initializes a C_2 model instance.
+
+        Args:
+            model_task (Model_task): Specifies whether the task is classification or regression.
+            batch_size (int, optional): Batch size for training. Defaults to 32.
+            epochs (int, optional): Number of training epochs. Defaults to 10.
+            learning_rate (float, optional): Learning rate for the optimizer. Defaults to 0.001.
+            input_shape (tuple or list, optional): Shape of the primary input. If a list,
+                it is treated as [primary_shape, additional_input_shape]. Defaults to (24, 25).
+            embed_dim (int, optional): Dimensionality of the embedding layer. Defaults to 44.
+            embed_dropout (float, optional): Dropout rate for the embedding layer. Defaults to 0.2.
+            dense_layers (tuple, optional): Sizes of the hidden dense layers. Defaults to (128, 64).
+            activation_funs (tuple, optional): Activation functions for the dense layers. Defaults to ("relu", "relu").
+            optimizer (str, optional): Name of the optimizer to use. Defaults to "adam".
+        """
+
+        sequence_length = input_shape[0]    
+        vocab_size = input_shape[1]
+        if if_flatten:
+            inputs = Input(shape=(sequence_length * vocab_size,))  # Input shape: (600,)
+            reshaped_inputs = Reshape((sequence_length, vocab_size))(inputs)  # Reshape to (24, 25)
+        else : reshaped_inputs = Input(shape=(sequence_length, vocab_size))  # Input shape: (24, 25)
+        
+        # Reduce one-hot rows to integers
+        argmax_layer = keras.layers.Lambda(lambda x: argmax(x, axis=-1), output_shape=(sequence_length,))
+        reduced_input = argmax_layer(reshaped_inputs)
+        print("Reduced input shape:", reduced_input.shape)  # (None, 24)
+
+        # Embedding layer
+        embedding_layer = Embedding(input_dim=vocab_size, output_dim=embed_dim, input_length=sequence_length)
+        embedded_output = embedding_layer(reduced_input)
+        print("After embedding:", embedded_output.shape)  # (None, 24, 44)
+
+        # GRU layer
+        gru = GRU(64, return_sequences=True)
+        gru_output = gru(embedded_output)
+        print("After GRU:", gru_output.shape)  # (None, 24, 64)
+        x = keras.layers.Flatten()(gru_output)
+        if num_of_additional_features > 0 :
+            feature_input = Input(shape=(num_of_additional_features))
+            x = Concatenate()([x, feature_input])
+        for dense_size,activation_func in zip(dense_layers,activation_funs):
+            x = keras.layers.Dense(dense_size,activation=activation_func)(x)
+        loss,metrics,output_activation = task_model_parameters(task)
+        output = Dense(1, activation=output_activation)(x)
+        
+        
+        if num_of_additional_features > 0 :
+            model = keras.Model(inputs=[inputs, feature_input], outputs=output)
+        else:
+            model = keras.Model(inputs=inputs, outputs=output)
+        
+        
+        model.compile(loss=loss, optimizer= keras.optimizers.Adam(learning_rate=1e-3), metrics=metrics)
+        print(model.summary())
+        return model
+        
+def task_model_parameters(task):
+    if task.lower() == "classification":
+        return keras.losses.BinaryCrossentropy(), ['binary_accuracy'], 'sigmoid'
+    elif task.lower() == "regression":
+        return keras.losses.MeanSquaredError(), ['mean_absolute_error'], 'linear'
+    else:
+        raise ValueError("Task must be set to 'Classification' or 'Regression'")
+    
