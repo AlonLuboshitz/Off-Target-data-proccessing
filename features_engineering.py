@@ -1,7 +1,6 @@
 '''
-This is a class to handle processed data and transform it into features
-For the machine learning algorithms
-This includes libaries such: pandas, numpy, common_variables class'''
+This is a module to create feature and labels from data.
+'''
 
 import pandas as pd
 import numpy as np
@@ -20,8 +19,10 @@ Function: takes the data table, create a unique list of gRNAs, Split the data in
 Based on gRNA
 Outputs: 1. Dictionray - {gRNA : Data frame} 2. unique gRNA set
 '''
-def create_data_frames_for_features(data, if_data_reproducibility, target_column):
+def create_data_frames_for_features(data, if_data_reproducibility, target_column, exclude_guides = None):
     data_table = pd.read_csv(data) # open data
+    if not exclude_guides is None:
+        data_table = return_df_without_guides(data_table, exclude_guides, target_column)
     # set unquie guide identifier, sorted if reproducibilty is need with data spliting
     if if_data_reproducibility:
         guides = sorted(set(data_table[target_column])) 
@@ -34,10 +35,20 @@ def create_data_frames_for_features(data, if_data_reproducibility, target_column
     result_dataframes = {grna: df_dict.get(grna, pd.DataFrame()) for grna in guides}
     return (result_dataframes, guides)
 
-
+def return_df_without_guides(data_frame, guide_to_exlucde, data_frame_column):
+    '''
+    Return a dataframe without the guides in guides_to_exclude.
+    Args:
+        data_frame: A dataframe containing the data
+        guide_to_exclude: (Tuple) (guides_description, path to guides to exclude from the data, target_column)
+    '''
+    description, path, target_column = guide_to_exlucde
+    guides_to_exclude = pd.read_csv(path)[target_column].values
+    return data_frame[~data_frame[data_frame_column].isin(guides_to_exclude)]
 def generate_features_and_labels(data_path, manager, if_bp, if_only_seq , 
                                  if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility,
-                                 columns_dict, transform_y_type = False, sequence_coding_type = 1, if_bulges = False):
+                                 columns_dict, transform_y_type = False, sequence_coding_type = 1, if_bulges = False,
+                                 exclude_guides = None):
     '''
     This function generates x and y data for gRNAs and their corresponding off-targets.
     For each (gRNA, OTS) pair it one-hot encodes the sequences and adds epigenetic data if required.
@@ -67,7 +78,7 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
     3. guides - list of unique gRNAs.
     
 '''
-    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility,columns_dict["TARGET_COLUMN"])
+    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility,columns_dict["TARGET_COLUMN"],exclude_guides)
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     ALL_INDEXES.clear() # clear indexes
@@ -78,10 +89,10 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
         if sequence_coding_type == 1: # PiCRISPR style
             seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = nuc_num,
                                     off_target_column=columns_dict["OFFTARGET_COLUMN"],
-                                    target_column=columns_dict["TARGET_COLUMN"]) #int8
+                                    target_column=columns_dict["REALIGNED_COLUMN"]) #int8
         elif sequence_coding_type == 2: # Full encoding
             seq_info = full_one_hot_encoding(dataset_df=guide_data_frame, n_samples=len(guide_data_frame), seq_len=seq_len, nucleotide_num=nuc_num,
-                                  off_target_column=columns_dict["OFFTARGET_COLUMN"], target_column=columns_dict["TARGET_COLUMN"])
+                                  off_target_column=columns_dict["OFFTARGET_COLUMN"], target_column=columns_dict["REALIGNED_COLUMN"])
 
         if if_bp: # epigentic value for every base pair in gRNA
             big_wig_data = get_bp_for_one_hot_enconded(data = guide_data_frame, encoded_length = encoded_length, manager = manager,

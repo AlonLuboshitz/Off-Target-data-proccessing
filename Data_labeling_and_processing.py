@@ -765,7 +765,17 @@ def add_inserertion_deletion(data, align_target_column, off_target_column, bulge
     print(f"Number of rows where bulges > 0: {bulges_count}")
     print(f"Number of rows where insertion or deletion > 0: {insertion_deletion_count}")
     return data
-  
+
+
+
+def replace_N_for_ot(grna, ot):
+    '''This function replaces the N in the grna sequence with the corresponding base from the offtarget sequence.
+    Args:
+    1. grna - guide sequence
+    2. ot - off-target sequence
+    ------------
+    Returns: guide sequence with the N replaced.'''
+    return grna.replace('N',ot)
 '''
 function gets path for identified (guideseq output data) folder and calls:
 process_folder function, which creates csv folder named: identified_labeled_sub_only

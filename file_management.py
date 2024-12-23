@@ -8,14 +8,14 @@ from file_utilities import create_paths
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
-    def __init__(self, models_path = None , ml_results_path = None, train_guides_path = None,
-                  test_guides_path = None,  epigenetics_bed = None , epigenetic_bigwig = None,
-                    vivo_silico_path = None, vivo_vitro_path = None, partition_information_path = None,
+    def __init__(self, models_path = None , ml_results_path = None, guides_path = None,
+                    epigenetics_bed = None , epigenetic_bigwig = None,
+                    vivo_silico_path = None, vivo_vitro_path = None,vitro_silico_path=None, partition_information_path = None,
                     plots_path = None) -> None: 
         self.set_paths = False
-        self.set_all_paths(models = models_path, ml_results = ml_results_path, train_guides = train_guides_path,
-                           test_guides = test_guides_path, vivo_silico = vivo_silico_path,
-                             vivo_vitro = vivo_vitro_path, epi_folder = epigenetics_bed, bigiw_folder = epigenetic_bigwig,
+        self.set_all_paths(models = models_path, ml_results = ml_results_path, guides_path = guides_path,
+                            vivo_silico = vivo_silico_path, vivo_vitro = vivo_vitro_path,
+                              vitro_silico=vitro_silico_path, epi_folder = epigenetics_bed, bigiw_folder = epigenetic_bigwig,
                              partition_information_path=partition_information_path, plots_path = plots_path)
         
         
@@ -67,15 +67,25 @@ class File_management:
             return self.test_data_path
     def get_partition_information_path(self):
         return self.partition_information_path
+    def get_guides_partition_path(self, train = False, test = False):
+        
+        if train:
+            if not "Train" in self.guides_partition_path:
+                self.add_data_type_toguides_path("Train_guides")
+        elif test:
+            if not "Test" in self.guides_partition_path:
+                self.add_data_type_toguides_path("Test_guides")
+        else: raise RuntimeError("No test/train flag given")
+        return self.guides_partition_path
+
     ## Setters:
-    def set_all_paths(self, models, ml_results, train_guides, test_guides, vivo_silico, vivo_vitro, epi_folder, bigiw_folder,partition_information_path, plots_path):
+    def set_all_paths(self, models, ml_results, guides_path, vivo_silico, vivo_vitro,vitro_silico, epi_folder, bigiw_folder,partition_information_path, plots_path):
         self.set_models_path(models)
         self.set_ml_results_path(ml_results)
-        self.set_train_guides_path(train_guides)
-        self.set_test_guides_path(test_guides)
+        self.set_guide_paths(guides_path)
+        
         self.set_epigenetic_paths(epi_folder, bigiw_folder)
-        self.set_vivo_silico_data_path(vivo_silico)
-        self.set_vivo_vitro_data_path(vivo_vitro)
+        self.set_data_set_path(vivo_silico, vivo_vitro, vitro_silico)
         self.set_partition_information_path(partition_information_path)
         self.set_plot_path(plots_path)
         self.set_paths = True
@@ -86,12 +96,20 @@ class File_management:
     def set_ml_results_path(self, ml_results_path):
         self.validate_path_exsits(ml_results_path)
         self.ml_results_path = ml_results_path
-    def set_train_guides_path(self, train_guides_path):
-        self.validate_path_exsits(train_guides_path)
-        self.train_guides_path = train_guides_path
-    def set_test_guides_path(self, test_guides_path):
-        self.validate_path_exsits(test_guides_path)
-        self.test_guides_path = test_guides_path
+    def set_guide_paths(self, guide_path):
+        '''
+        Guides path is a path to folder containing guide for each partition'''
+        self.validate_path_exsits(guide_path)
+        self.guides_partition_path = guide_path
+    def add_data_type_toguides_path(self, data_type):
+        '''
+        Data type - vitro/vivo - /train/test
+        '''
+        self.guides_partition_path = os.path.join(self.guides_partition_path,data_type)
+        self.validate_path_exsits(self.guides_partition_path)
+
+
+  
     def set_epigenetic_paths(self, epigenetics_bed, bigwig):
         self.validate_path_exsits(epigenetics_bed)
         self.validate_path_exsits(bigwig)
@@ -110,39 +128,53 @@ class File_management:
     ## Data paths - silico/vitro negative OTSs ##
     '''These functions dont validate the path, a dataset can have only one of the paths.
     When choosing to use one of the datasets then the path will be validated.'''
-    def set_vivo_silico_data_path(self, vivo_silico_path):
+    def set_data_set_path(self, vivo_silico_path, vivo_vitro_path, vitro_silico_path):
         self.vivo_silico_path = vivo_silico_path
-    def set_vivo_vitro_data_path(self, vivo_vitro_path):
         self.vivo_vitro_path = vivo_vitro_path
+        self.vitro_silico_path = vitro_silico_path
 
-    def set_model_parameters(self,data_type, model_task, cross_validation, model_name, features,class_weight,encoding_type,ots_constriants, transformation = None):
+
+    def set_model_parameters(self,data_type, model_task, cross_validation, model_name,epoch_batch,early_stop, 
+                             features,class_weight,encoding_type,ots_constriants, transformation = None, exclude_guides = None):
         '''This function sets the model parameters to save the model in the corresponding path.
         
         Path: .../Models/{data_type}/{model_task}/{cross_validation}/{model_name}/{features}
               .../Ml_results/{data_type}/{model_task}/{cross_validation}/{model_name}/{features}
         '''
-        if data_type == "silico":
+        if data_type == "vivo-silico":
             self.set_silico_vitro_bools(silico_bool = True)
-        elif data_type == "vitro":
+            self.add_data_type_toguides_path("vivo")
+        elif data_type == "vivo-vitro":
             self.set_silico_vitro_bools(vitro_bool = True)
+            self.add_data_type_toguides_path("vivo")
+        elif data_type == "vitro-silico":
+            self.set_silico_vitro_bools(vitro_bool = True, silico_bool = True)
+            self.add_data_type_toguides_path("vitro")
         else:
             raise RuntimeError("Data type not set")
         if model_task.lower() == "reg_classification":
             model_task = "T_Regression"
             plots_model_task = "Reg_classification"
+        epoch_batch = f'{epoch_batch[0]}epochs_{epoch_batch[1]}_batch'
+        self.add_exlucde_guides(exclude_guides)
         if transformation:
             
-            full_path = os.path.join(model_task,transformation,ots_constriants,encoding_type,class_weight,model_name,cross_validation,features)
-            plots_path = os.path.join(plots_model_task,model_task,transformation,ots_constriants,encoding_type,class_weight,model_name,cross_validation)
+            full_path = os.path.join(model_task,transformation,ots_constriants,encoding_type,class_weight,model_name,epoch_batch,early_stop,cross_validation,features)
+            plots_path = os.path.join(plots_model_task,model_task,transformation,ots_constriants,encoding_type,class_weight,model_name,epoch_batch,early_stop,cross_validation)
         else:
-            full_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,cross_validation,features)
-            plots_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,cross_validation)
+            full_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,epoch_batch,early_stop,cross_validation,features)
+            plots_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,epoch_batch,early_stop,cross_validation)
         self.add_type_to_models_paths(full_path)
         
         self.plots_path = self.add_to_path(self.plots_path,plots_path)
         self.task = model_task
         
-        
+    def add_exlucde_guides(self, exclude_guides = None):
+        if exclude_guides:
+            exclude_guides = exclude_guides[0]
+            self.add_type_to_models_paths(exclude_guides)
+            self.add_to_path(self.plots_path,exclude_guides)
+              
 
 
     def set_silico_vitro_bools(self, silico_bool = False, vitro_bool = False):
@@ -154,7 +186,11 @@ class File_management:
         -----------
         Returns: Error if both bools are false'''
         suffix_str = ""
-        if silico_bool:
+        if silico_bool and vitro_bool: # vitro-silico
+            self.validate_path_exsits(self.vitro_silico_path)
+            self.merged_data_path = self.vitro_silico_path
+            suffix_str = "vitro-silico"
+        elif silico_bool:
             self.validate_path_exsits(self.vivo_silico_path)
             self.merged_data_path = self.vivo_silico_path
             suffix_str = "vivo-silico"
@@ -162,6 +198,7 @@ class File_management:
             self.validate_path_exsits(self.vivo_vitro_path)
             self.merged_data_path = self.vivo_vitro_path
             suffix_str = "vivo-vitro"
+        
         else:
             raise RuntimeError("No silico vitro bools were given data path set")
         if (suffix_str not in self.models_path) and (suffix_str not in self.ml_results_path):
@@ -236,10 +273,10 @@ class File_management:
         3. test - bool, default False, if True set the test partition'''
         if train:
             self.guide_prefix = "Train"
-            self.guides_partition_path = self.train_guides_path
+            self.add_data_type_toguides_path("Train_guides")
         elif test:
             self.guide_prefix = "Test"
-            self.guides_partition_path = self.test_guides_path
+            self.add_data_type_toguides_path("Test_guides")
         else:
             raise ValueError('eather test or train must be set to True')
         
@@ -292,11 +329,7 @@ class File_management:
         for guide_path in guides_path:
             guides += create_guides_list(guide_path, 0)
         return guides
-        if self.train_guides_path:
-            if self.test_data_path:
-                return [self.test_guides_paths]
-            
-
+        
     
     def set_bigwig_files(self,bw_list):
         flag = False

@@ -55,6 +55,14 @@ def class_weights_dict():
         1: "CW",
         2: "No_CW"
     }
+def early_stoping_dict():
+    '''
+    A dictionary for the early stoping.
+    '''
+    return {
+        1: "Early_stop",
+        2: "No_early_stop"
+    }
 def main_argparser():
     parser = argparse.ArgumentParser(description='''Python script to init a model and train it on off-target dataset.
                                      Different models, feature types, cross_validations and tasks can be created.
@@ -102,6 +110,10 @@ def main_argparser():
     parser.add_argument('--encoding_type','-et', type=int, help='Sequence encoding type: 1 - PiCrispr, 2 - Full', default=1)
     parser.add_argument('--off_target_constriants','-otc', type=int, help='Off-target constraints: 1 - No_constraints, 2 - Mismatch_only, 3 - Bulges_only', default=1)
     parser.add_argument('--class_weights','-cw', type=int, help='Class weights: 1 - CW, 2 - No_CW', default=1)
+    parser.add_argument('--deep_params','-dp', nargs='+',type=int, help='Deep learning parameters - epochs, batch', default=None)
+    parser.add_argument('--early_stoping','-es', nargs='+',type=int, help='''Early stoping[0]: 1 - Early_stop, 2 - No_early_stop
+                        Early stoping[1]: paitence size''', default=None)
+    parser.add_argument('--guides_constraints','-gc', type=str,nargs='+', help='(guides_description , path to guides to exclude from the data, target_column)', default=None)
     return parser
 
 def parse_args(argv,parser):
@@ -126,14 +138,19 @@ def parse_args(argv,parser):
 def validate_main_args(args):
     if not os.path.exists(args.config_file):
         raise ValueError("Data columns config file does not exist") 
-    if args.data_type not in ['silico','vitro']:
-        raise ValueError("Data type must be either silico or vitro")
+    if args.data_type not in ['vivo-silico','vivo-vitro','vitro-silico']:
+        raise ValueError("Data type must be either vivo-silico/vivo-vitro/vitro-silico")
     if args.task.lower() not in ['classification','regression','t_regression','reg_classification']:
         raise ValueError("Task must be either Classification, Regression or T_Regression")
     if args.task.lower() == 't_regression' and (args.transformation is None or args.transformation.lower() not in ["log","minmax","z_score"]):
         raise ValueError("Transformation must be given for transformed regression or must be either Log, MinMax or Z_score")
     if args.job.lower() not in ['train','test','evaluation','process']:
         raise ValueError("Job must be either Train\Test\Evaluation")
+    if args.deep_params is not None and len(args.deep_params) != 2:
+        raise ValueError("Deep learning parameters must be given as a list of 2 integers - epochs and batch size")
+    if args.early_stoping is not None and len(args.early_stoping) != 2:
+        raise ValueError("Early stoping parameters must be given as a list of 2 integers - early stoping and patience")
+    args.guides_constraints =  validate_exclude_guides(args.guides_constraints)
     ## Print all args:
     print("Arguments are:")
     for arg, value in vars(args).items():
@@ -145,3 +162,16 @@ def validate_main_args(args):
         data_configs = configs[args.data_name]
         return args, data_configs, data_columns
     
+
+def validate_exclude_guides(exclude_guides = None):
+    '''
+    Validate the exclude_guides- Tuple of (guides_description , path to guides to exclude from the data, target_column)
+    '''
+    if exclude_guides is not None:
+        if len(exclude_guides) != 3:
+            raise ValueError("Exclude guides must be a tuple of 3 elements")
+        if not os.path.exists(exclude_guides[1]):
+            raise ValueError("Path to exclude guides does not exist")
+        return exclude_guides
+    return None
+        

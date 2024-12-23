@@ -7,11 +7,12 @@ from evaluation import evaluation
 from utilities import  split_epigenetic_features_into_groups, print_dict_values,get_feature_column_suffix
 from utilities import write_2d_array_to_csv,  add_row_to_np_array, validate_non_negative_int
 from utilities import get_k_choose_n,  convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio
-from parameters_utilities import with_bulges
-from k_groups_utilities import get_k_groups_ensemble_args, create_guides_list, partition_data_for_histograms
+from data_constraints_utilities import with_bulges
+from k_groups_utilities import get_k_groups_ensemble_args, create_guides_list,get_k_groups_guides, partition_data_for_histograms
+from train_and_test_utilities import split_by_guides
 from features_engineering import generate_features_and_labels
-from features_and_model_utilities import get_features_columns_args, parse_feature_column_dict
-from parsing import features_method_dict, cross_val_dict, model_dict,encoding_dict
+from features_and_model_utilities import get_features_columns_args_ensembles, parse_feature_column_dict
+from parsing import features_method_dict, cross_val_dict, model_dict,encoding_dict, early_stoping_dict
 from parsing import class_weights_dict,off_target_constrians_dict, main_argparser, parse_args, validate_main_args
 from time_loging import log_time, save_log_time, set_time_log
 
@@ -73,7 +74,11 @@ def set_cross_val_args(file_manager, train = False, test = False, cross_val_para
     if cross_val == 1: # leave_one_out
         pass
     elif cross_val == 2: # K_groups
-        pass
+        guide_path = file_manager.get_guides_partition_path(train,test)
+        if len(ARGS.partition) == 1:
+            ARGS.partition = np.arange(1,ARGS.partition[0]+1)
+        t_guides = get_k_groups_guides(guide_path,ARGS.partition,train,test)
+        return t_guides, None, None
     elif cross_val == 3: # Ensemble
         n_models, n_ensmbels, partition_num = parse_ensemble_params(*cross_val_params)
         file_manager.set_partition(partition_num, train, test)
@@ -122,17 +127,22 @@ def init_file_management(params=None, phats = None):
     if not phats: # None
         phats = PHATS
     file_manager = File_management(models_path=phats["Model_path"], ml_results_path=phats["ML_results_path"], 
-                                    train_guides_path=phats["Train_guides"], test_guides_path=phats["Test_guides"],
-                                    vivo_silico_path=phats["Vivo-silico"], vivo_vitro_path=phats["Vivo-vitro"],
-                                    epigenetics_bed=phats["Epigenetic_folder"], epigenetic_bigwig=phats["Big_wig_folder"],
-                                    partition_information_path=phats["Partition_information"], plots_path=phats["Plots_path"])
+                                   guides_path=phats["Guides_path"], vivo_silico_path=phats["Vivo-silico"], 
+                                   vivo_vitro_path=phats["Vivo-vitro"], epigenetics_bed=phats["Epigenetic_folder"], 
+                                   epigenetic_bigwig=phats["Big_wig_folder"], 
+                                   partition_information_path=phats["Partition_information"], plots_path=phats["Plots_path"])
     if not params: # None
-        ml_name, cross_val, feature_type = model_dict()[ARGS.model], cross_val_dict()[ARGS.cross_val], features_method_dict()[ARGS.features_method]
+        ml_name, cross_val, feature_type,epochs_batch,early_stop = model_dict()[ARGS.model], cross_val_dict()[ARGS.cross_val], 
+        features_method_dict()[ARGS.features_method], ARGS.deep_params, ARGS.early_stoping[0]
     else:
-        ml_name, cross_val, feature_type = params
+        ml_name, cross_val, feature_type,epochs_batch,early_stop = params
+    early_stop = early_stoping_dict()[early_stop]
     cw,encoding_type,ots_constraints = class_weights_dict()[ARGS.class_weights], encoding_dict()[ARGS.encoding_type], off_target_constrians_dict()[ARGS.off_target_constriants]
-    file_manager.set_model_parameters(data_type=ARGS.data_type,model_task=ARGS.task,cross_validation=cross_val,model_name=ml_name,
-                                      features=feature_type,class_weight=cw,encoding_type=encoding_type,ots_constriants=ots_constraints, transformation=ARGS.transformation)
+    file_manager.set_model_parameters(data_type=ARGS.data_type, model_task=ARGS.task, cross_validation=cross_val, 
+                                      model_name=ml_name, epoch_batch=epochs_batch,early_stop=early_stop,
+                                      features=feature_type,class_weight=cw,encoding_type=encoding_type,
+                                        ots_constriants=ots_constraints,transformation=ARGS.transformation,
+                                        exclude_guides=ARGS.guides_constraints)
     
     return file_manager
 
@@ -152,7 +162,9 @@ def init_model_runner(ml_task = None, model_num = None, cross_val = None, featur
     if not features_method:
         features_method = ARGS.features_method
     model_runner.setup_runner(ml_task=ml_task, model_num=model_num, cross_val=cross_val,
-                               features_method=features_method,cw=ARGS.class_weights, encoding_type=ARGS.encoding_type, if_bulges=with_bulges(ARGS.off_target_constriants))
+                               features_method=features_method,cw=ARGS.class_weights, encoding_type=ARGS.encoding_type,
+                                 if_bulges=with_bulges(ARGS.off_target_constriants), early_stopping=ARGS.early_stoping
+                                 ,deep_parameteres=ARGS.deep_params)
     return model_runner
 
 def init_model_runner_file_manager(model_params = None):
@@ -183,13 +195,14 @@ def get_x_y_data(file_manager, model_runner_booleans, features_columns = None):
     if_only_seq, if_bp, if_seperate_epi, if_features_by_columns, data_reproducibility, model_repro = model_runner_booleans
     if not features_columns: # if feature columns not given set for the defualt columns
         #### CHANGE to validate column with booleans
-        features_columns = ARGS.epi_features_columns
+        features_columns = ARGS.features_columns
     log_time(f"Features_generation_{encoding_dict()[ARGS.encoding_type]}_start")
     x,y,guides=  generate_features_and_labels(file_manager.get_merged_data_path() , file_manager,
                                          if_bp, if_only_seq, if_seperate_epi,
                                          ARGS.epigenetic_window_size, features_columns, 
                                          data_reproducibility,COLUMNS, ARGS.transformation.lower(),
-                                         sequence_coding_type=ARGS.encoding_type, if_bulges= with_bulges(ARGS.off_target_constriants))
+                                         sequence_coding_type=ARGS.encoding_type, if_bulges= with_bulges(ARGS.off_target_constriants),
+                                         exclude_guides = ARGS.guides_constraints)
     log_time(f"Features_generation_{encoding_dict()[ARGS.encoding_type]}_end")
     return x,y,guides
 
@@ -316,7 +329,7 @@ def evaluate_all_partitions():
 
 def evaluate_ensemble_partition():
     ml_results_base_path,feature_dict,plots_path,partition_info_path,eval_obj = set_evaluation_args()
-    eval_obj.evaluate_partitions(ml_results_base_path, ARGS.partition, ARGS.n_ensmbels, ARGS.n_models,feature_dict,ARGS.other_feature_columns,plots_path,partition_info_path)
+    eval_obj.evaluate_partitions_ensmbele(ml_results_base_path, ARGS.partition, ARGS.n_ensmbels, ARGS.n_models,feature_dict,ARGS.other_feature_columns,plots_path,partition_info_path)
 
 def set_evaluation_args():
     ARGS.cross_val = 3
@@ -462,15 +475,67 @@ def test_k_groups_with_ensemble_other_features():
 
 
    
-def run_k_groups(train = False, test = False):
+def run_k_groups(train = False, test = False,process=False,evaluation=False, method = None):
+    if train:
+        train_dict = train_k_groups()
+        train_dict[method]()
+    elif test:
+        test_dict = test_k_groups()
+        test_dict[method]()
+
+def train_k_groups():
+    return {
+        1: train_k_groups_only_seq,
+        2: train_k_groups_by_features,
+    }
+def test_k_groups():
+    return {
+        1: test_k_groups_only_seq,
+        2: test_k_groups_by_features,
+    }
+def test_k_groups_by_features():
     pass
 def run_leave_one_out(train = False, test = False):
     pass
+def train_k_groups_by_features():
+    runner,file_manager = init_model_runner_file_manager()
+    train_guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = True, test = False)
+    model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
 
-def train_k_groups():
-    pass
-def test_k_groups():
-    pass
+def train_k_groups_only_seq():
+    '''
+    This function trains a model for each partition.
+    In total k models will be created with the suffix partition_number.keras
+    '''
+    runner, file_manager , x_features, y_features, all_guides, guides, n_models, n_ensmbels = init_run()
+    models_path = file_manager.get_model_path()
+    seed=10
+    args = [(os.path.join(models_path, f"{partition}.keras"),guides[partition],seed,x_features,y_features,all_guides )for partition in ARGS.partition]
+    processes = min(os.cpu_count(), len(ARGS.partition))
+    with Pool(processes=processes) as pool:
+        pool.starmap(runner.create_model, args)
+       
+def test_k_groups_only_seq(if_plot = True):
+    '''
+    This functions tests every model in k_cross partition and calculate it evaluation metric.
+    NOTE: ADD ARGUMENTS FOR FEATURES AND MULTIPROCESSING
+    '''
+    runner, file_manager , x_features, y_features, all_guides, guides, n_models, n_ensmbels = init_run()
+    models_path = file_manager.get_model_path()
+    scores_dictionary = {}
+    for partition in ARGS.partition:
+        temp_path = os.path.join(models_path, f"{partition}.keras")
+        scores, test, idx = runner.test_model(temp_path, guides[partition], x_features, y_features, all_guides)
+        scores_dictionary[partition] = (scores,test,idx)
+    evaluation_obj = evaluation(ARGS.task)
+    results = evaluation_obj.get_k_groups_results(scores_dictionary)
+    ml_results = file_manager.get_ml_results_path()
+    results.to_csv(os.path.join(ml_results, "results.csv"), index=False)
+    if if_plot:
+        plots_path = file_manager.get_plots_path()
+        evaluation_obj.plot_k_groups_results(scores_dictionary,plots_path, features_method_dict()[ARGS.features_method])
+        
+    
 def train_leave_one_out():
     pass
 def test_leave_one_out():
@@ -522,13 +587,13 @@ def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params
     model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
     
     if n_ensmbels == 1 and multi_process:  # multiprocess bool for activating this function from another function.
-        arg_list = get_features_columns_args(runner= runner, file_manager = file_manager, t_guides = train_guides, 
+        arg_list = get_features_columns_args_ensembles(runner= runner, file_manager = file_manager, t_guides = train_guides, 
                                              model_base_path = model_base_path, ml_results_base_path = ml_results_base_path,
                                                n_models = n_models, n_ensmbels = n_ensmbels, features_dict = features_dict, multi_process = False)
         with Pool(processes=10) as pool:
             pool.starmap(create_ensembels_for_a_given_feature, arg_list) 
     else: # multi_process = True/False and n_ensmbels > 1
-        arg_list = get_features_columns_args(runner= runner, file_manager = file_manager, t_guides = train_guides, 
+        arg_list = get_features_columns_args_ensembles(runner= runner, file_manager = file_manager, t_guides = train_guides, 
                                              model_base_path = model_base_path, ml_results_base_path = ml_results_base_path,
                                                n_models = n_models, n_ensmbels = n_ensmbels, features_dict = features_dict, multi_process = multi_process)
         for args in arg_list:
@@ -659,11 +724,11 @@ def test_ensemble_by_features(model_params= None, cross_val_params= None, multi_
     model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
     arg_list = []
     if n_ensmbels == 1 and multi_process: # multiprocess each feature
-        arg_list = get_features_columns_args(runner, file_manager, t_guides, model_base_path, ml_results_base_path, n_models, n_ensmbels, features_dict, multi_process = False)
+        arg_list = get_features_columns_args_ensembles(runner, file_manager, t_guides, model_base_path, ml_results_base_path, n_models, n_ensmbels, features_dict, multi_process = False)
         with Pool(processes=10) as pool:
             pool.starmap(test_ensemble_via_epi_feature_2, arg_list)
     else:
-        arg_list = get_features_columns_args(runner, file_manager, t_guides, model_base_path, ml_results_base_path, n_models, n_ensmbels, features_dict, multi_process = multi_process)
+        arg_list = get_features_columns_args_ensembles(runner, file_manager, t_guides, model_base_path, ml_results_base_path, n_models, n_ensmbels, features_dict, multi_process = multi_process)
         for arg in arg_list:
             test_ensemble_via_epi_feature_2(*arg)
     
