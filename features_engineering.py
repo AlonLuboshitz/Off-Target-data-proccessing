@@ -40,11 +40,17 @@ def return_df_without_guides(data_frame, guide_to_exlucde, data_frame_column):
     Return a dataframe without the guides in guides_to_exclude.
     Args:
         data_frame: A dataframe containing the data
-        guide_to_exclude: (Tuple) (guides_description, path to guides to exclude from the data, target_column)
+        guide_to_exclude: (Tuple) (guides_description, path to guides to exclude from the data, target_columns)
     '''
-    description, path, target_column = guide_to_exlucde
-    guides_to_exclude = pd.read_csv(path)[target_column].values
+    description, path, target_columns = guide_to_exlucde
+    guides_to_exclude = set()
+    guides_data = pd.read_csv(path)
+    for column in target_columns:
+        guides_to_exclude.update(guides_data[column].dropna().unique())  # Remove NaN values and add unique guides
+    
+    # Return the dataframe without the excluded guides
     return data_frame[~data_frame[data_frame_column].isin(guides_to_exclude)]
+    
 def generate_features_and_labels(data_path, manager, if_bp, if_only_seq , 
                                  if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility,
                                  columns_dict, transform_y_type = False, sequence_coding_type = 1, if_bulges = False,
@@ -72,6 +78,7 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
     12. transform_y_type - the type of transformation to apply to the y values.
     13. sequence_coding_type - the type of sequence encoding to use -  defualt is 1 - PiCRISPR style. 2 -  nuc*nuc per base pair.
     14. if_bulges - boolean to include bulges in the sequence encoding.
+    15. exclude_guides - (tuple) (guides_description, path to guides to exclude from the data, target_column)
     Returns:
     1. x_data_all - list of x data for each gRNA.
     2. y_labels_all - list of y labels for each gRNA.

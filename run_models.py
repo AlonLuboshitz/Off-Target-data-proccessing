@@ -4,8 +4,7 @@
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
 # "Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"
 
-FORCE_USE_CPU = False
-
+FORCE_CPU = False
 from features_engineering import  order_data, get_tp_tn, extract_features, get_guides_indexes
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_auroc_auprc, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw, get_gru_emd, argmax_layer
@@ -19,29 +18,13 @@ from imblearn.over_sampling import RandomOverSampler, SMOTE
 import pandas as pd
 import numpy as np
 import time
-import logging
 import os
 
-if FORCE_USE_CPU:
-    os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
-os.environ["CUDA_VISIBLE_DEVICES"]="1"  
 import tensorflow as tf
 
 
-logger = tf.get_logger()
-logger.setLevel(logging.ERROR)
 
-gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-    try:
-        # Currently, memory growth needs to be the same across GPUs
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-    except RuntimeError as e:
-        # Memory growth must be set before GPUs have been initialized
-        print(e)
+
 
 class run_models:
     def __init__(self) -> None:
@@ -55,14 +38,42 @@ class run_models:
         self.init_model_dict()
         self.init_cross_val_dict()
         self.init_features_methods_dict()
+        self.set_computation_power(FORCE_CPU)
         self.epigenetic_window_size = 0
         self.features_columns = ""       
     ## initairs ###
     # This functions are used to init necceseray parameters in order to run a model.
     # If the parameters are not setted before running the model, the program will raise an error.
 
-   
-
+    def set_computation_power(self, force_cpu=False):
+        '''
+        This function checks if there is an available GPU for computation.
+        If GPUs are available, it enables memory growth. 
+        If force_cpu is True, it forces the usage of CPU instead of GPU.
+        '''
+        if force_cpu:
+            # Forcing CPU usage by hiding GPUs
+            os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+            self.gpu_available = False
+            print("Forcing CPU computation, no GPU will be used.")
+            return
+        gpus = tf.config.list_physical_devices('GPU')  # Stable API for listing GPUs
+        if gpus:
+            try:
+                # Enabling memory growth for each GPU
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                logical_gpus = tf.config.list_logical_devices('GPU')  # Logical devices are virtual GPUs
+                print(f"{len(gpus)} Physical GPUs, {len(logical_gpus)} Logical GPUs")
+                gpu_available = True  # Indicating that GPU is available
+            except RuntimeError as e:
+                # Handle the error if memory growth cannot be set
+                print(f"Error enabling memory growth: {e}")
+                gpu_available = False
+        else:
+            gpu_available = False
+            print("No GPU found. Using CPU.")
+        self.gpu_available = gpu_available
     def init_booleans(self):
         '''Features booleans'''
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_features_by_columns = False  
@@ -308,7 +319,8 @@ class run_models:
         '''This function returns the following atributes by their names:
         Ml_name, Cross_validation_method, Features_type, epochs, batch_size'''
         return self.ml_name, self.cross_validation_method, self.feature_type, [self.epochs,self.batch_size], self.early
-               
+    def get_gpu_availability(self):
+        return self.gpu_available
     ## Over sampling setter
     def set_over_sampling(self, over_sampling):
         if self.os_valid:
@@ -449,6 +461,7 @@ class run_models:
             model.fit(X_train,y_train,**self.hyper_params)
         else :
             model.fit(X_train,y_train)
+        tf.keras.backend.clear_session()
         return model
     
     def predict_with_model(self, model, X_test):
@@ -599,6 +612,7 @@ class run_models:
         
         for j in range(n_models):
             temp_path = os.path.join(output_path,f"model_{j+1}.keras")
+            print(f'Creating model {j+1} out of {n_models}')
             self.create_model(output_path=temp_path,guides_train_list=guides_train_list,seed_addition=(j+1+seed_addition),x_features=x_features,y_labels=y_labels,guides=guides)
 
     

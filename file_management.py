@@ -171,7 +171,7 @@ class File_management:
         
     def add_exlucde_guides(self, exclude_guides = None):
         if exclude_guides:
-            exclude_guides = exclude_guides[0]
+            exclude_guides = "Exclude_" + exclude_guides[0]
             self.add_type_to_models_paths(exclude_guides)
             self.add_to_path(self.plots_path,exclude_guides)
               
@@ -230,9 +230,17 @@ class File_management:
         self.models_path = self.add_to_path(self.models_path,type)
   
     ## ENSMBELS:    
-    def add_partition_path(self):
-        partition_str = "-".join(map(str,self.partition)) # Join the partition numbers into str seperated by '-'
-        self.add_type_to_models_paths(f'{partition_str}_partition')
+    def add_partition_path(self, partition_str = None):
+        '''
+        This function adds the partition number to the model and model results phats.
+        If partition_str is given the function will use it.
+        if not it will use the partition list setted.
+        '''
+        if partition_str:
+            self.add_type_to_models_paths(partition_str)
+        else:
+            partition_str = "-".join(map(str,self.partition)) # Join the partition numbers into str seperated by '-'
+            self.add_type_to_models_paths(f'{partition_str}_partition')
     
     def set_n_ensembels(self, n_ensembels):
         validate_non_negative_int(n_ensembels)
@@ -260,7 +268,8 @@ class File_management:
     
     
     def set_partition(self, partition_list, train = False, test = False):
-        '''Function to set the partition number
+        '''
+        This function sets the partition number
         The partition number argument is a list of numbers.
         Each number is a partition number.
         The fuction check if the partition number is in the range of the number of partitions
@@ -268,7 +277,7 @@ class File_management:
         Other wise it raise an exception
         
         Args: 
-        1. partition_list - list of ints, partitions numbers
+        1. partition_list - [list] of ints, partitions numbers. If the first partition is "All" than no partition is needed.
         2. train - bool, default False, if True set the train partition
         3. test - bool, default False, if True set the test partition'''
         if train:
@@ -283,8 +292,15 @@ class File_management:
         # Check for number of partitions
         if os.path.exists(self.guides_partition_path):
             self.partition = []
+            if isinstance(partition_list,list) and len(partition_list) > 0:
+                if isinstance(partition_list[0],str):
+                    if partition_list[0].lower() == "all":
+                        self.partition = "All"
+                        self.add_partition_path("All")
+                        return
+                    else : raise Exception('If first partition is STR it must be "All"')  
             for partition in partition_list:
-                    
+                
                 # check for partition
                 if partition > 0 and partition <= len(os.listdir(self.guides_partition_path)):
                     self.partition.append(partition)
@@ -314,6 +330,8 @@ class File_management:
      
         if self.guides_partition_path:
             guides_list = os.listdir(self.guides_partition_path)
+            if self.partition == "All":
+                return None
             if self.partition:
                 guides_path = []
                 for partition in self.partition:

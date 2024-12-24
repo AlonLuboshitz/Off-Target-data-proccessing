@@ -104,7 +104,7 @@ def main_argparser():
                          help='''Dictionary names: 1 - Change_seq, 2 - Hendel, 3 - Hendel_Changeseq
                         The name of the data dict need to parse from the json file''', required=False)
     parser.add_argument('--data_type','-dt', type=str, help='''Data type: silico/vitro''', required=True)
-    parser.add_argument('--partition','-p', type=int, nargs='+',help='Partition number given via list', required=False)
+    parser.add_argument('--partition','-p', type=str_or_int, nargs='+',help='Partition number given via list', required=False)
     parser.add_argument('--n_models','-nm', type=int, help='Number of models in each ensmbel', required=False)
     parser.add_argument('--n_ensmbels','-ne', type=int, help='Number of ensmbels', required=False)
     parser.add_argument('--encoding_type','-et', type=int, help='Sequence encoding type: 1 - PiCrispr, 2 - Full', default=1)
@@ -113,7 +113,7 @@ def main_argparser():
     parser.add_argument('--deep_params','-dp', nargs='+',type=int, help='Deep learning parameters - epochs, batch', default=None)
     parser.add_argument('--early_stoping','-es', nargs='+',type=int, help='''Early stoping[0]: 1 - Early_stop, 2 - No_early_stop
                         Early stoping[1]: paitence size''', default=None)
-    parser.add_argument('--guides_constraints','-gc', type=str,nargs='+', help='(guides_description , path to guides to exclude from the data, target_column)', default=None)
+    parser.add_argument('--exclude_guides','-eg', type=str, nargs='+', help='[List] Path to a data frame with sgRNAs, column/s to get.', default=None)
     return parser
 
 def parse_args(argv,parser):
@@ -133,8 +133,15 @@ def parse_args(argv,parser):
     # Read the JSON file and load it as a dictionary
     return args
 
+# Custom function to handle both int and str types
+def str_or_int(value):
+    try:
+        # Attempt to convert to an integer
+        return int(value)
+    except ValueError:
+        # If conversion fails, return the original string
+        return value
 
- 
 def validate_main_args(args):
     if not os.path.exists(args.config_file):
         raise ValueError("Data columns config file does not exist") 
@@ -150,7 +157,7 @@ def validate_main_args(args):
         raise ValueError("Deep learning parameters must be given as a list of 2 integers - epochs and batch size")
     if args.early_stoping is not None and len(args.early_stoping) != 2:
         raise ValueError("Early stoping parameters must be given as a list of 2 integers - early stoping and patience")
-    args.guides_constraints =  validate_exclude_guides(args.guides_constraints)
+    args.exclude_guides =  validate_exclude_guides(args.exclude_guides)
     ## Print all args:
     print("Arguments are:")
     for arg, value in vars(args).items():
@@ -160,18 +167,50 @@ def validate_main_args(args):
         configs = json.load(f)
         data_columns = configs["Columns_dict"]
         data_configs = configs[args.data_name]
+        args,data_columns = set_task_label(args, data_columns)
+        args = set_method(args)
         return args, data_configs, data_columns
     
 
 def validate_exclude_guides(exclude_guides = None):
     '''
-    Validate the exclude_guides- Tuple of (guides_description , path to guides to exclude from the data, target_column)
+    Validate the exclude_guides- List of [path, column...,...]
+    This function will return the tuple of (guide_dict_name, data_path, data_column) from the arg.
     '''
-    if exclude_guides is not None:
-        if len(exclude_guides) != 3:
-            raise ValueError("Exclude guides must be a tuple of 3 elements")
-        if not os.path.exists(exclude_guides[1]):
-            raise ValueError("Path to exclude guides does not exist")
-        return exclude_guides
-    return None
-        
+    if exclude_guides is None:
+        return None
+    data_path = exclude_guides[0]
+    if not os.path.exists(data_path):
+        raise ValueError("Data path does not exist")
+    data_columns = exclude_guides[1:]
+    sgrna_description = "_".join(data_columns)
+    return (sgrna_description, data_path, data_columns)
+    
+def set_task_label(args, columns):
+    '''
+    This function will set the Y_LABEL_COLUMN in the columns dict according to the task.
+    '''
+    if args.task.lower() == 'classification':
+        columns["Y_LABEL_COLUMN"] = columns["BINARY_LABEL_COLUMN"]
+        args.transformation = ""
+    else: 
+        columns["Y_LABEL_COLUMN"] = columns["REGRESSION_LABEL_COLUMN"]  
+    return args, columns
+
+
+
+def set_method(args):
+    if args.features_method == 2 and args.features_columns is None:
+        raise ValueError("Features columns must be given for features by columns method")
+    else:
+        try:
+            with open(args.features_columns, 'r') as f: # Read the features columns dict json file
+                args.features_columns = json.load(f)
+        except:
+            raise ValueError("Features columns must be json file")
+    if args.features_method == 3 and args.epigenetic_bigwig is None:
+        raise ValueError("Epigenetic bigwig folder must be given for base pair epigenetics in sequence")
+    if args.features_method == 4 and (args.epigenetic_bigwig is None or args.epigenetic_window_size is None):
+        raise ValueError("Epigenetic bigwig folder and epigenetic window size must be given for spatial epigenetics")
+    
+    return args

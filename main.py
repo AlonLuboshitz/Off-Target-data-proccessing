@@ -23,7 +23,7 @@ import numpy as np
 import sys
 import time
 
-global ARGS, PHATS, COLUMNS, TRAIN, TEST
+global ARGS, PHATS, COLUMNS, TRAIN, TEST, MULTI_PROCESS
 
 
 
@@ -51,14 +51,17 @@ def set_args(argv):
     print_dict_values(COLUMNS)
     time.sleep(1)
 
+def set_multi_process(gpu_availability):
+    '''
+    This function set multi process to True if the gpu is NOT available.
+    Other wise use the GPU without multiprocessing.
+    '''
+    global MULTI_PROCESS
+    if not gpu_availability:
+        MULTI_PROCESS = True
+    else:
+        MULTI_PROCESS = False
 
-def set_task_label():
-    global COLUMNS
-    if ARGS.task == 'Classification':
-        COLUMNS["Y_LABEL_COLUMN"] = COLUMNS["BINARY_LABEL_COLUMN"]
-        ARGS.transformation = ""
-    else: 
-        COLUMNS["Y_LABEL_COLUMN"] = COLUMNS["REGRESSION_LABEL_COLUMN"]  
         
 
 def set_cross_val_args(file_manager, train = False, test = False, cross_val_params = None, cross_val = None ):
@@ -142,7 +145,7 @@ def init_file_management(params=None, phats = None):
                                       model_name=ml_name, epoch_batch=epochs_batch,early_stop=early_stop,
                                       features=feature_type,class_weight=cw,encoding_type=encoding_type,
                                         ots_constriants=ots_constraints,transformation=ARGS.transformation,
-                                        exclude_guides=ARGS.guides_constraints)
+                                        exclude_guides=ARGS.exclude_guides)
     
     return file_manager
 
@@ -152,6 +155,7 @@ def init_model_runner(ml_task = None, model_num = None, cross_val = None, featur
     --------- 
     Returns the run_models object.'''
     from run_models import run_models
+    
     model_runner = run_models()
     if not ml_task: # Not none
         ml_task = ARGS.task
@@ -165,6 +169,7 @@ def init_model_runner(ml_task = None, model_num = None, cross_val = None, featur
                                features_method=features_method,cw=ARGS.class_weights, encoding_type=ARGS.encoding_type,
                                  if_bulges=with_bulges(ARGS.off_target_constriants), early_stopping=ARGS.early_stoping
                                  ,deep_parameteres=ARGS.deep_params)
+    set_multi_process(model_runner.get_gpu_availability())
     return model_runner
 
 def init_model_runner_file_manager(model_params = None):
@@ -202,7 +207,7 @@ def get_x_y_data(file_manager, model_runner_booleans, features_columns = None):
                                          ARGS.epigenetic_window_size, features_columns, 
                                          data_reproducibility,COLUMNS, ARGS.transformation.lower(),
                                          sequence_coding_type=ARGS.encoding_type, if_bulges= with_bulges(ARGS.off_target_constriants),
-                                         exclude_guides = ARGS.guides_constraints)
+                                         exclude_guides = ARGS.exclude_guides)
     log_time(f"Features_generation_{encoding_dict()[ARGS.encoding_type]}_end")
     return x,y,guides
 
@@ -212,30 +217,14 @@ def init_evaluation_and_process(base_path, multi_process = False):
     evaluation_obj = evaluation(ARGS.task)
     evaluation_obj.process_single_ensemble_scores(base_path,multi_process)
 
-def set_method(args):
-    if args.features_method == 2 and args.features_columns is None:
-        raise ValueError("Features columns must be given for features by columns method")
-    else:
-        try:
-            with open(args.features_columns, 'r') as f: # Read the features columns dict json file
-                args.features_columns = json.load(f)
-        except:
-            raise ValueError("Features columns must be json file")
-    if args.features_method == 3 and args.epigenetic_bigwig is None:
-        raise ValueError("Epigenetic bigwig folder must be given for base pair epigenetics in sequence")
-    if args.features_method == 4 and (args.epigenetic_bigwig is None or args.epigenetic_window_size is None):
-        raise ValueError("Epigenetic bigwig folder and epigenetic window size must be given for spatial epigenetics")
-    
-    return args.features_method
+
 def run():
     set_args(sys.argv)
     global ARGS
     log_time("Main_Run_start")
-    set_task_label()
-    method = set_method(ARGS)
     train,test,process,evaluation = set_job(ARGS)
     cross_val_dict = cross_val()
-    cross_val_dict[ARGS.cross_val](train,test,process,evaluation,method)
+    cross_val_dict[ARGS.cross_val](train,test,process,evaluation,ARGS.features_method)
     log_time("Main_Run_end")
 
 def cross_val():
@@ -399,7 +388,7 @@ def train_k_groups_with_ensemble_only_seq():
     log_time("Train_k_groups_with_ensemble_only_seq_start")
     multi_process_args = get_k_groups_ensemble_args(ARGS.partition, ARGS.n_models, ARGS.n_ensmbels,False,None, ARGS.features_method)
     ARGS.cross_val = 3 # Set cross val to ensemble
-    if ARGS.n_ensmbels == 1 :
+    if ARGS.n_ensmbels == 1 and MULTI_PROCESS:
         processes = min(os.cpu_count(), len(ARGS.partition))
         with Pool(processes=processes) as pool:
             pool.starmap(create_ensmble_only_seq, multi_process_args)
@@ -414,7 +403,7 @@ def test_k_groups_with_ensemble_only_seq():
     log_time("Test_k_groups_with_ensemble_only_seq_start")
     multi_process_args = get_k_groups_ensemble_args(ARGS.partition, ARGS.n_models, ARGS.n_ensmbels,False, None, ARGS.features_method) # If n_ensembles = 1
     ARGS.cross_val = 3 # Set cross val to ensemble
-    if ARGS.n_ensmbels == 1:
+    if ARGS.n_ensmbels == 1 and MULTI_PROCESS:
         processes = min(os.cpu_count(), len(ARGS.partition))
         with Pool(processes=processes) as pool:
             pool.starmap(test_ensemble_via_onlyseq_feature, multi_process_args)
@@ -431,7 +420,7 @@ def train_k_groups_with_ensembles_epi_features():
     multi_process_args = get_k_groups_ensemble_args(ARGS.partition, ARGS.n_models, ARGS.n_ensmbels,False,None, ARGS.features_method)
     ARGS.cross_val = 3
     # For each partition create arguments for the spesific partition. 
-    if ARGS.n_ensmbels == 1:
+    if ARGS.n_ensmbels == 1 and MULTI_PROCESS:
         processes = min(os.cpu_count(), len(ARGS.partition))
         with Pool(processes=processes) as pool:
             pool.starmap(create_ensembels_by_all_feature_columns, multi_process_args)
@@ -443,14 +432,14 @@ def test_k_groups_with_ensembles_epi_features():
     global ARGS
     multi_process_args = get_k_groups_ensemble_args(ARGS.partition, ARGS.n_models, ARGS.n_ensmbels,False,None, ARGS.features_method)
     ARGS.cross_val = 3
-    if ARGS.n_ensmbels == 1:
+    if ARGS.n_ensmbels == 1 and MULTI_PROCESS:
         processes = min(os.cpu_count(), len(ARGS.partition))
         with Pool(processes=processes) as pool:
             pool.starmap(test_ensemble_by_features, multi_process_args)
     else:
         for arg in multi_process_args:
             test_ensemble_by_features(*arg)
-    
+##### NOTE: MAYBE REMOVE THIS FUNCTION WHERE ALL FEATURES ARE ADDED IN ONE FUNCTION #### 
 def train_k_groups_with_ensemble_other_features():
     ARGS.cross_val = 3
     multi_process_args = get_k_groups_ensemble_args(ARGS.partition, ARGS.n_models, ARGS.n_ensmbels,False,ARGS.other_feature_columns, ARGS.features_method)
@@ -473,7 +462,7 @@ def test_k_groups_with_ensemble_other_features():
         for arg in multi_process_args:
             test_ensemble_by_features(*arg)
 
-
+#####################################################################
    
 def run_k_groups(train = False, test = False,process=False,evaluation=False, method = None):
     if train:
@@ -511,10 +500,13 @@ def train_k_groups_only_seq():
     models_path = file_manager.get_model_path()
     seed=10
     args = [(os.path.join(models_path, f"{partition}.keras"),guides[partition],seed,x_features,y_features,all_guides )for partition in ARGS.partition]
-    processes = min(os.cpu_count(), len(ARGS.partition))
-    with Pool(processes=processes) as pool:
-        pool.starmap(runner.create_model, args)
-       
+    if MULTI_PROCESS:
+        processes = min(os.cpu_count(), len(ARGS.partition))
+        with Pool(processes=processes) as pool:
+            pool.starmap(runner.create_model, args)
+    else:
+        for arg in args:
+            runner.create_model(*arg)       
 def test_k_groups_only_seq(if_plot = True):
     '''
     This functions tests every model in k_cross partition and calculate it evaluation metric.
@@ -574,7 +566,8 @@ def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params
     2. cross_val_params: tuple - cross val parameters for the file manager
     3. multi_process: bool - if True the function will multiprocess the features in the group.'''
     if not feature_dict: # None
-        features_dict = parse_feature_column_dict(ARGS.features_columns)
+        ######### NOTE: ADD ONLY_EPIGENETICS! VALIDATE THIS!
+        features_dict = parse_feature_column_dict(ARGS.features_columns, only_epigenetics=True)
     else:
         features_dict = feature_dict
     arg_list = []
@@ -586,7 +579,7 @@ def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params
         train_guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = True, test = False, cross_val_params = cross_val_params)
     model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
     
-    if n_ensmbels == 1 and multi_process:  # multiprocess bool for activating this function from another function.
+    if n_ensmbels == 1 and multi_process and MULTI_PROCESS:  # multiprocess bool for activating this function from another function.
         arg_list = get_features_columns_args_ensembles(runner= runner, file_manager = file_manager, t_guides = train_guides, 
                                              model_base_path = model_base_path, ml_results_base_path = ml_results_base_path,
                                                n_models = n_models, n_ensmbels = n_ensmbels, features_dict = features_dict, multi_process = False)
@@ -644,7 +637,7 @@ def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, 
     # Generate argument list for each ensemble
     ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10),x_,y_,all_guides) for i in range(1, n_ensembles+1)]
     # Create_ensmbel accpets - n_models, output_path, guides, additional_seed for reproducibility
-    if multi_process and n_ensembles > 1:
+    if multi_process and n_ensembles > 1 and MULTI_PROCESS:
         # Create a pool of processes
         cpu_count = os.cpu_count()
         num_proceses = min(cpu_count, n_ensembles)
@@ -680,7 +673,7 @@ def test_ensemble_via_onlyseq_feature(model_params = None,cross_val_params=None,
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
     args = [(runner, ensmbel, tested_guides, score_path, x_features, y_features, all_guides) for ensmbel in ensmbels_paths]
-    if n_ensmbels>1 and multi_process: 
+    if n_ensmbels>1 and multi_process and MULTI_PROCESS: 
         with Pool(processes=10) as pool:
             pool.starmap(test_enmsbel_scores, args)
     else:
@@ -723,7 +716,7 @@ def test_ensemble_by_features(model_params= None, cross_val_params= None, multi_
     
     model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
     arg_list = []
-    if n_ensmbels == 1 and multi_process: # multiprocess each feature
+    if n_ensmbels == 1 and multi_process and MULTI_PROCESS: # multiprocess each feature
         arg_list = get_features_columns_args_ensembles(runner, file_manager, t_guides, model_base_path, ml_results_base_path, n_models, n_ensmbels, features_dict, multi_process = False)
         with Pool(processes=10) as pool:
             pool.starmap(test_ensemble_via_epi_feature_2, arg_list)
@@ -744,7 +737,7 @@ def test_ensemble_via_epi_feature_2(group, feature, runner, file_manager, t_guid
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
     args = [(runner, ensmbel, t_guides, score_path,x_features,y_features,all_guides) for ensmbel in ensmbels_paths]
-    if multi_process: # can run multiprocess
+    if multi_process and MULTI_PROCESS: # can run multiprocess
         with Pool(processes=10) as pool:
             pool.starmap(test_enmsbel_scores, args)
     else: 

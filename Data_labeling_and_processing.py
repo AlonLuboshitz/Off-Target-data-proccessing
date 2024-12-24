@@ -7,7 +7,8 @@ import pybedtools
 import time
 from file_utilities import validate_path, create_folder, remove_dir_recursivly, get_bed_files
 
-ORDERED_COLUMNS = ['chrom','chromStart','chromEnd','Position','Filename','strand','offtarget_sequence','target','realigned_target','Read_count','missmatches','insertion','deletion','bulges','Label']
+ORDERED_COLUMNS_IDENTIFIED_GS = ['chrom','chromStart','chromEnd','Position','Filename','strand','offtarget_sequence','target','realigned_target','Read_count','missmatches','insertion','deletion','bulges','Label']
+NORMAL_ORDERED_COLUMNS = ['chrom','chromStart','chromEnd','offtarget_sequence','target','strand','realigned_target','Read_count','missmatches','insertion','deletion','bulges']
 #### Identified guideseq preprocessing functions ####
 
 def process_folder(input_folder):
@@ -190,7 +191,7 @@ def mergning(files, n_duplicates, file_ending, folder_path):
 }).reset_index()
         
         print ('after grouping: ',len(grouped_df))
-        grouped_df = grouped_df[ORDERED_COLUMNS]
+        grouped_df = grouped_df[ORDERED_COLUMNS_IDENTIFIED_GS]
         # append df to final list
         final_file_list.append((grouped_df,file_name)) 
     return final_file_list
@@ -379,7 +380,7 @@ def add_info_to_casofinder_file(data):
     data = upper_case_series(data,colum_name="offtarget_sequence") # upcase all oftarget in data
     print(data.head(5))
     print(data.info())
-    new_data = pd.DataFrame(columns=ORDERED_COLUMNS) # create new data with spesific columns
+    new_data = pd.DataFrame(columns=ORDERED_COLUMNS_IDENTIFIED_GS) # create new data with spesific columns
     for column in data.columns:
         new_data[column] = data[column] # set data in the new df from the old one
     print(new_data.head(5))
@@ -565,9 +566,9 @@ def assign_epigenetics(off_target_data,intersection,file_ending,score_type_dict=
             # Assign intersection indexes in the off-target data with 1 for binary column and values to other columns
             for key in score_type_dict.keys():
                 if key == "binary":
-                    off_target_data.loc[intersection["Index"], columns_dict["binary"]] = 1
+                    off_target_data.loc[off_target_data["Index"].isin(intersection["Index"]), columns_dict["binary"]] = 1
                 else :
-                    off_target_data.loc[intersection["Index"], columns_dict[key]] = values_dict[key]
+                    off_target_data.loc[off_target_data["Index"].isin(intersection["Index"]), columns_dict[key]] = values_dict[key]
             print("OT data after assignment:\n",off_target_data.head(5))
         except KeyError as e:
               print(off_target_data,': file has no intersections output will be with 0')
@@ -744,15 +745,87 @@ def return_constrained_data(data_frame, off_target_constraints, bulge_column = N
 #     data.drop_duplicates(subset=['offtarget_sequence','target','chromStart','chromEnd'],keep='first',inplace=True)
 #     print(f'len after: {len(data)}')
 #     data.to_csv(os.path.join(output_path,f'{output_name}.csv'),index=False)
-
-
-def add_inserertion_deletion(data, align_target_column, off_target_column, bulges_column):
+def ot_data_frame_to_convention_columns(data_frame=None, target_column=None, off_target_column=None, chrom=None, realigned_target=None,
+                                             chrom_start=None, chrom_end=None, strand=None, bulges=None, insertions=None,
+                                               deletions=None,  label=None, read_count=None, mismatches=None):
+    '''
+    This function takes a data frame with OT data and transform it columns to the convention columns.
+    So the new data frame will have the same columns like all data frames.
+    true_ot = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT.csv")
+    true_ot = ot_data_frame_to_convention_columns(data_frame=true_ot, target_column= 'sgRNA',off_target_column= 'Align.off-target',
+                                                  chrom= 'chrom', realigned_target= 'Align.sgRNA', chrom_start='Align.chromStart',
+                                                   chrom_end= 'Align.chromEnd',strand= 'Align.strand',bulges= 'Align.#Bulges',insertions=None,
+                                                   deletions=None, label='label',read_count=None,mismatches='Align.#Mismatches')
+    
+    true_ot.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT.csv",index=False)
+    print(true_ot.head(5))  
+                              
+    
+    
+    '''
+    if not isinstance(data_frame, pd.DataFrame):
+        if os.path.exists(data_frame):
+            data_frame = pd.read_csv(data_frame)
+        else:
+            raise ValueError("No data frame given.")
+    if not (target_column and off_target_column and chrom and chrom_start and chrom_end and (label or read_count)):
+        raise ValueError("No essential columns given.")
+    renamed_columns = {target_column: 'target', off_target_column: 'offtarget_sequence', chrom: 'chrom',
+                       chrom_start: 'chromStart', chrom_end: 'chromEnd'}
+    data_frame.rename(columns=renamed_columns, inplace=True)
+    # Check if label is continuous or binary
+    if read_count:
+        if check_continous_values(data_frame[read_count].values): # read_count is regression
+            data_frame.rename(columns={read_count: 'Read_count'}, inplace=True)
+        if label:
+            data_frame.rename(columns={label: 'Label'}, inplace=True)
+        else : # Add label to the data frame
+            data_frame["Label"] = 0
+            add_label_by_countiniuos_values(data_frame, 'Read_count', 'Label')
+    else: # Only binary label
+        data_frame.rename(columns={label: 'Label'}, inplace=True)
+        data_frame['Read_count'] = 0
+    if strand:
+        renamed_columns[strand] = 'strand'
+    if realigned_target:
+        renamed_columns[realigned_target] = 'realigned_target'
+    else:
+        data_frame['realigned_target'] = data_frame['target']
+    data_frame.rename(columns=renamed_columns, inplace=True)
+    if bulges:
+        if insertions:
+            renamed_columns[insertions] = 'insertion'
+        else: data_frame['insertion'] = 0
+        if deletions:
+            renamed_columns[deletions] = 'deletion'
+        else: data_frame['deletion'] = 0
+        data_frame = add_inserertion_deletion(data_frame, 'realigned_target', 'offtarget_sequence', bulges)
+        renamed_columns[bulges] = 'bulges'
+        
+    if mismatches:
+        renamed_columns[mismatches] = 'missmatches'
+    data_frame.rename(columns=renamed_columns, inplace=True)
+    
+    if not "Index" in data_frame.columns:
+        data_frame["Index"] = data_frame.index
+    return data_frame
+def check_continous_values(values):
+    if values.value_counts() > 2:
+        return True
+    elif values.value_counts() == 2:
+        return False
+def add_label_by_countiniuos_values(data, continous_column, label_column):
+    data[label_column] = data[data[continous_column] > 0].astype(int)
+    return data
+def add_inserertion_deletion(data, align_target_column, off_target_column, bulges_column = None):
     '''
     This function extract from a given sgRNA,OT pair the amount of deletions and insertions if any.
     It assigns the corresponding value to the data frame.
     '''
     # Keep only bulges
-    only_bulges = data[data[bulges_column] > 0]
+    if bulges_column:
+        only_bulges = data[data[bulges_column] > 0]
+    else: only_bulges = data.copy()
     # Inseretions - DNA BULGE
     only_bulges['insertion'] = only_bulges[align_target_column].apply(lambda x: x.count('-'))
     # Deletions - RNA BULGE
@@ -760,6 +833,9 @@ def add_inserertion_deletion(data, align_target_column, off_target_column, bulge
     data['insertion'] = data['deletion'] = 0
     data.loc[only_bulges.index,'insertion'] = only_bulges['insertion']
     data.loc[only_bulges.index,'deletion'] = only_bulges['deletion']
+    if not bulges_column:
+        data["bulges"] = 0
+        data.loc[only_bulges.index,'bulges'] = only_bulges['insertion'] + only_bulges['deletion']
     bulges_count = len(data[data[bulges_column] > 0])
     insertion_deletion_count = len(data[(data['insertion'] > 0) | (data['deletion'] > 0)])
     print(f"Number of rows where bulges > 0: {bulges_count}")
@@ -786,8 +862,9 @@ argv 3 - keep the identified label folder or erase it
 '''
 if __name__ == '__main__':
     ### assign epigenetic
-    run_intersection("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vitro-silico-110.csv",
+    run_intersection("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto.csv",
                      "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Bed",False)
+                          
     
     
     

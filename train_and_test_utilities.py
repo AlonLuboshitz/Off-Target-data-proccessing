@@ -50,6 +50,7 @@ def keep_intersect_guides_indices(guides, test_guides):
     Args:
     1. guides - list of guides
     2. test_guides - list of guides to keep if exists in guides'''
+    if test_guides == None: return list(range(len(guides))) # return all guides
     return [idx for idx, guide in enumerate(guides) if guide in test_guides]
 
 def split_by_indexes( x_features, y_labels, indices):
@@ -86,6 +87,8 @@ def split_by_guides(guides, guides_t_list, x_features, y_labels):
     Returns: x_train, y_train concataned arrays and the indexes of the guides kept.
     x_train,y_tarin, guides_idx
     '''
+    
+
     guides_idx = keep_intersect_guides_indices(guides, guides_t_list) # keep only the train/test guides indexes
     if (len(guides_idx) == len(guides)): # All guides are for training
         x_train = np.concatenate(x_features, axis= 0)

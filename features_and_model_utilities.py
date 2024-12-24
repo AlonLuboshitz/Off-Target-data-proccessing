@@ -46,7 +46,7 @@ Epigenetic feature utilities
 '''
            
 
-def parse_feature_column_dict(feature_column_dict):
+def parse_feature_column_dict(feature_column_dict, only_epigenetics = False):
     '''
     This function adds all the features to a list called All_features.
     If there is only one list of features it just return this dict.
@@ -56,9 +56,14 @@ def parse_feature_column_dict(feature_column_dict):
     if len(feature_column_dict) == 1:
         return feature_column_dict
     for keys,features in feature_column_dict.items():
+        if only_epigenetics:
+            if "epigenetic" not in keys.lower():
+                feature_column_dict.pop(keys)
+                continue
         if "Subset" in keys:
             continue
         all_features.extend(features)
+    
     feature_column_dict["All_features"] = all_features
     return feature_column_dict
 
@@ -89,6 +94,19 @@ def get_features_columns_args_ensembles(runner = None,file_manager = None, t_gui
             arg_list.append((group, [feature],runner, file_manager,t_guides,model_base_path,ml_results_base_path, n_models, n_ensmbels,multi_process))
     return arg_list    
 
-
+################## TASK UTILITIES ##################
+def set_task_column(task, args):
+    '''
+    This function sets the task column for the given task.
+    '''
+    if task == "Binary":
+        args["task_column"] = "binary"
+    elif task == "Regression":
+        args["task_column"] = "regression"
+    elif task == "Multi":
+        args["task_column"] = "multi"
+    else:
+        raise ValueError("Invalid task")
+    return args
 
 ############################## DEEP LEARNING UTILITIES ##############################

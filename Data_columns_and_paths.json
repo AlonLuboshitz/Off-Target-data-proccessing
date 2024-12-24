@@ -13,7 +13,7 @@
     "Guides_path" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Ofir_partition",
     "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vivo-silico-78_withEpigenetic.csv",
     "Vivo-vitro" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vivo-vitro-78_withEpigenetic.csv",
-    "Vitro-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vitro-silico-78_withEpigenetic.csv",
+    "Vitro-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vitro-silico-110_withEpigenetic.csv",
     "Model_path" : "/localdata/alon/Models/Change-seq",
     "ML_results_path" : "/localdata/alon/ML_results/Change-seq",
     "Epigenetic_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics",
