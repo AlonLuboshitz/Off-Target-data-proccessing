@@ -6,11 +6,11 @@
 
 FORCE_CPU = False
 from features_engineering import  order_data, get_tp_tn, extract_features, get_guides_indexes
-from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_auroc_auprc, evaluate_model
+from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_classification_model, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw, get_gru_emd, argmax_layer
-from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
+from utilities import validate_dictionary_input
 from parsing import features_method_dict, cross_val_dict, model_dict, class_weights_dict
-from features_and_model_utilities import get_encoding_parameters
+from features_and_model_utilities import get_encoding_parameters, split_epigenetic_features_into_groups
 from train_and_test_utilities import split_to_train_and_val, split_by_guides
 from sklearn.utils.class_weight import compute_class_weight
 
@@ -19,12 +19,16 @@ import pandas as pd
 import numpy as np
 import time
 import os
-
+import signal
 import tensorflow as tf
 
 
-
-
+def tf_clean_up():
+    tf.keras.backend.clear_session()
+    print("GPU memory cleared.")
+def set_signlas_clean_up():
+    signal.signal(signal.SIGINT, tf_clean_up)
+    signal.signal(signal.SIGSTOP, tf_clean_up)
 
 class run_models:
     def __init__(self) -> None:
@@ -40,7 +44,8 @@ class run_models:
         self.init_features_methods_dict()
         self.set_computation_power(FORCE_CPU)
         self.epigenetic_window_size = 0
-        self.features_columns = ""       
+        self.features_columns = "" 
+
     ## initairs ###
     # This functions are used to init necceseray parameters in order to run a model.
     # If the parameters are not setted before running the model, the program will raise an error.
@@ -66,6 +71,7 @@ class run_models:
                 logical_gpus = tf.config.list_logical_devices('GPU')  # Logical devices are virtual GPUs
                 print(f"{len(gpus)} Physical GPUs, {len(logical_gpus)} Logical GPUs")
                 gpu_available = True  # Indicating that GPU is available
+                #set_signlas_clean_up()
             except RuntimeError as e:
                 # Handle the error if memory growth cannot be set
                 print(f"Error enabling memory growth: {e}")
@@ -268,7 +274,7 @@ class run_models:
             self.ml_task = "Classification"
         elif task.lower() == "regression" or task.lower() == "t_regression":
             self.ml_task = "Regression"
-        else : raise ValueError("Task must be classification or regression")
+        else : raise ValueError("Task must be classification or regression/t_regression")
 
     def set_cross_validation(self, cross_val_answer = None):
         if not self.model_type_initiaded:
@@ -584,7 +590,7 @@ class run_models:
             return y_scores_probs
         else: 
             evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
-        auroc,auprc = evaluate_auroc_auprc(y_test = y_test, y_pos_scores_probs = y_scores_probs)
+        auroc,auprc = evaluate_classification_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
         print(f"Ith: {i_iter}\{iterations} split is done")
         # write scores
@@ -650,9 +656,9 @@ class run_models:
     def test_model(self, model_path, tested_guide_list,x_features=None, y_labels=None,guides=None):
         x_test, y_test, guides_idx = split_by_guides(guides, tested_guide_list, x_features, y_labels)
         all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
-        model = tf.keras.models.load_model(model_path, safe_mode=False)
+        #model = tf.keras.models.load_model(model_path, safe_mode=False)
 
-        #model = tf.keras.models.load_model(model_path, custom_objects={'argmax_layer': argmax_layer})
+        model = tf.keras.models.load_model(model_path, custom_objects={'argmax_layer': argmax_layer})
         model_predictions = self.predict_with_model(model=model,X_test=x_test).ravel() # predict and flatten to 1d
         return model_predictions, y_test, all_guides_idx
     ## RUN TYPES:

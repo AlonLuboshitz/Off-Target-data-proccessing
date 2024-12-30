@@ -1,3 +1,22 @@
+'''
+The file_management class validates the following:
+PARTITIONS: 
+In the ensemble and k fold cross validation models the model needs to train on partitions.
+Related functions: self.add_partition_path, set_partition, get_guides_partition.
+
+OFF-Target data:
+This module validates the off-target data paths and the type of data.
+Type: vivo-silico, vivo-vitro, vitro-silico.
+Type related functions: set_silico_vitro_bools, add_data_type_toguides_path, set_data_set_path.
+
+Job type: test or train.
+
+Epigenetic data:
+.....
+
+'''
+
+
 import os
 
 #import pyBigWig
@@ -62,9 +81,7 @@ class File_management:
         if len(self.glb_max_dict) > 0 :
             return self.glb_max_dict
         else : raise RuntimeError("No max values setted for bigwig files")
-    def get_seperate_test_data(self):
-        if self.test_data_path:
-            return self.test_data_path
+    
     def get_partition_information_path(self):
         return self.partition_information_path
     def get_guides_partition_path(self, train = False, test = False):
@@ -77,7 +94,8 @@ class File_management:
                 self.add_data_type_toguides_path("Test_guides")
         else: raise RuntimeError("No test/train flag given")
         return self.guides_partition_path
-
+    def get_train_on_other_data(self):
+        return self.other_test_data_initiated
     ## Setters:
     def set_all_paths(self, models, ml_results, guides_path, vivo_silico, vivo_vitro,vitro_silico, epi_folder, bigiw_folder,partition_information_path, plots_path):
         self.set_models_path(models)
@@ -88,6 +106,7 @@ class File_management:
         self.set_data_set_path(vivo_silico, vivo_vitro, vitro_silico)
         self.set_partition_information_path(partition_information_path)
         self.set_plot_path(plots_path)
+        self.other_test_data_initiated = False
         self.set_paths = True
 
     def set_models_path(self, models_path):
@@ -101,9 +120,14 @@ class File_management:
         Guides path is a path to folder containing guide for each partition'''
         self.validate_path_exsits(guide_path)
         self.guides_partition_path = guide_path
+    
     def add_data_type_toguides_path(self, data_type):
         '''
-        Data type - vitro/vivo - /train/test
+        This function adds the data type to the training/testing guides path.
+        The orignal path is the guides_partition_path.
+
+        Job: adding Train or Test the path. - diffrenet guides for training and testing.
+        Type: adding vivo or vitro to the path. - different data types may hold different guides partitions.
         '''
         self.guides_partition_path = os.path.join(self.guides_partition_path,data_type)
         self.validate_path_exsits(self.guides_partition_path)
@@ -135,7 +159,8 @@ class File_management:
 
 
     def set_model_parameters(self,data_type, model_task, cross_validation, model_name,epoch_batch,early_stop, 
-                             features,class_weight,encoding_type,ots_constriants, transformation = None, exclude_guides = None):
+                             features,class_weight,encoding_type,ots_constriants, transformation = None,
+                               exclude_guides = None, test_on_other_data = None):
         '''This function sets the model parameters to save the model in the corresponding path.
         
         Path: .../Models/{data_type}/{model_task}/{cross_validation}/{model_name}/{features}
@@ -155,8 +180,11 @@ class File_management:
         if model_task.lower() == "reg_classification":
             model_task = "T_Regression"
             plots_model_task = "Reg_classification"
+        else:
+            plots_model_task = ""
         epoch_batch = f'{epoch_batch[0]}epochs_{epoch_batch[1]}_batch'
         self.add_exlucde_guides(exclude_guides)
+        self.set_seperate_test_data(test_on_other_data)
         if transformation:
             
             full_path = os.path.join(model_task,transformation,ots_constriants,encoding_type,class_weight,model_name,epoch_batch,early_stop,cross_validation,features)
@@ -173,7 +201,7 @@ class File_management:
         if exclude_guides:
             exclude_guides = "Exclude_" + exclude_guides[0]
             self.add_type_to_models_paths(exclude_guides)
-            self.add_to_path(self.plots_path,exclude_guides)
+            self.plots_path = self.add_to_path(self.plots_path,exclude_guides)
               
 
 
@@ -208,16 +236,22 @@ class File_management:
         else:
             raise Exception(f"Suffix {suffix_str} already in model or results paths:\n {self.models_path}\n{self.ml_results_path}")
     
-    def set_seperate_test_data(self, test_data_path,guides_path):
-        '''This function sets the test data path and the guides path for a different test data then the initiated one.
+    def set_seperate_test_data(self, other_data_tuple = None):
+        '''This function sets the data path and for a different test data then the initiated one.
+        If the other data is None, do nothing.
+        If given add the ML_results path the name of the data to test on.
         Args:
-        1. test_data_path - str, path to the test data
-        2. guides_path - str, path to the guides for the test data
+        1. other_data_tuple - tuple () - 0 - path to the test data, 1 - name of the data
         '''
-        self.validate_path_exsits(test_data_path)
-        self.test_data_path = True
-        self.merged_data_path = test_data_path
-        self.test_guides_paths = guides_path
+        if not other_data_tuple: # None do nothing
+            return
+        path, name = other_data_tuple
+        name = f'on_{name}'
+        self.validate_path_exsits(path)
+        self.merged_data_path = path
+        self.ml_results_path = self.add_to_path(self.ml_results_path,name)
+        self.plots_path = self.add_to_path(self.plots_path,name)
+        self.other_test_data_initiated = True
     def add_type_to_models_paths(self, type):
         '''Given a type create folders in ML_results and Models with the type
         type will be anything to add:
@@ -229,7 +263,7 @@ class File_management:
         self.ml_results_path = self.add_to_path(self.ml_results_path,type)
         self.models_path = self.add_to_path(self.models_path,type)
   
-    ## ENSMBELS:    
+    ## ENSMBELS and K fold partitions and paramaters ##    
     def add_partition_path(self, partition_str = None):
         '''
         This function adds the partition number to the model and model results phats.
@@ -259,7 +293,9 @@ class File_management:
     
      
     def add_to_path(self, path, path_to_add):
-        '''Function take two paths, concatenate togther, create a folder and return the path'''
+        '''
+        This function take two paths, concatenate tham togther, create a folder and return the new path.
+        '''
         temp_path = os.path.join(path, path_to_add)
         if not os.path.exists(temp_path):
             os.makedirs(temp_path)
@@ -269,17 +305,34 @@ class File_management:
     
     def set_partition(self, partition_list, train = False, test = False):
         '''
-        This function sets the partition number
-        The partition number argument is a list of numbers.
-        Each number is a partition number.
+        This function sets the partition of the train/test fold.
+        It it used in ensemble models and k fold cross validation where each ensmble/model is trained on a different partition.
+
+        The partition number argument is a list of numbers or a list of one string "All".
+        if numbers: Each number is a partition number.
         The fuction check if the partition number is in the range of the number of partitions
-        If so it set the partition number list
-        Other wise it raise an exception
-        
+        If so it set the partition number list other wise it raise an exception.
+
+        If the partition is "All" than the function sets the partition to "All" and no partition is needed.
+        I.E. all guides are for training or testing.
+        If the partition is All and job is Test, there are no more guides to test on in the original data, than the test_on_other_data should be given!
+
         Args: 
         1. partition_list - [list] of ints, partitions numbers. If the first partition is "All" than no partition is needed.
         2. train - bool, default False, if True set the train partition
-        3. test - bool, default False, if True set the test partition'''
+        3. test - bool, default False, if True set the test partition
+        
+        '''
+                
+        if self.check_if_partition_is_all(partition_list): # partition is all
+            if test: # All + test means that the other test data should beeen initiated
+                if self.other_test_data_initiated:
+                    return
+                else:
+                    raise Exception("Test on other data not set while partition is All and jon is Test.")
+        if self.partition == "All": # partition already set to all in prevouis function
+            return        
+        
         if train:
             self.guide_prefix = "Train"
             self.add_data_type_toguides_path("Train_guides")
@@ -292,13 +345,7 @@ class File_management:
         # Check for number of partitions
         if os.path.exists(self.guides_partition_path):
             self.partition = []
-            if isinstance(partition_list,list) and len(partition_list) > 0:
-                if isinstance(partition_list[0],str):
-                    if partition_list[0].lower() == "all":
-                        self.partition = "All"
-                        self.add_partition_path("All")
-                        return
-                    else : raise Exception('If first partition is STR it must be "All"')  
+            
             for partition in partition_list:
                 
                 # check for partition
@@ -311,6 +358,20 @@ class File_management:
             raise Exception('Guides path not set')
         self.add_partition_path()
 
+
+    def check_if_partition_is_all(self, partition_list):
+        '''
+        This function first validate the partition list is not an empty list.
+        Than checks if the first element is a string and if it is "All"'''
+        if isinstance(partition_list,list) and len(partition_list) > 0:
+            if isinstance(partition_list[0],str):
+                if partition_list[0].lower() == "all":
+                    self.partition = "All"
+                    self.add_partition_path("All_guides")
+                    return True
+                else : raise Exception('If first partition is STR it must be "All"')  
+            return False
+        else: raise Exception('Partition list is empty')
     def get_partition(self):
         if self.partition:
             return self.partition
@@ -321,29 +382,33 @@ class File_management:
     
     
     def get_guides_partition(self):
-        '''Function to get the guides for the partition setted
-        If partition/path not setted, raise exception
-        Else sort the list of guides by partition number and 
-        return the GUIDES in the partition guides path
+        '''
+        This function returns the guide for the partition once setted in the self.partition argument.
+        If the self.partition/path not setted, raises an exception.
+
+        Else sort the list of guides by partition number and return the GUIDES in the partition guides path.
+
+        If the partition is "All" than return None - functions that use the guides will know to use all guides.
+
+        Returns: [list] of guides or None.
         '''
         guides = []
-     
+        if self.partition == "All":
+            return None
+        
+        ## Checks path existence and set the guides paths.
         if self.guides_partition_path:
             guides_list = os.listdir(self.guides_partition_path)
-            if self.partition == "All":
-                return None
             if self.partition:
                 guides_path = []
-                for partition in self.partition:
+                for partition in self.partition: # concatenate to the guide path the test/train prefix and the partition numner
                     guides_txt = f'{self.guide_prefix}_guides_{partition}_partition.txt'
                     if guides_txt not in guides_list:
                         raise RuntimeError(f'Guides for partition {partition} not found')
                     guides_path.append(os.path.join(self.guides_partition_path,guides_txt))
-                              
-               
-                
             else : raise Exception('Partition not set')
         else : raise Exception('Guides path not set')
+        ## Create the guides list from the guides paths.
         for guide_path in guides_path:
             guides += create_guides_list(guide_path, 0)
         return guides

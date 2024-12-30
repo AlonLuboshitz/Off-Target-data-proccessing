@@ -19,10 +19,11 @@ Function: takes the data table, create a unique list of gRNAs, Split the data in
 Based on gRNA
 Outputs: 1. Dictionray - {gRNA : Data frame} 2. unique gRNA set
 '''
-def create_data_frames_for_features(data, if_data_reproducibility, target_column, exclude_guides = None):
+def create_data_frames_for_features(data, if_data_reproducibility, target_column, exclude_guides = None, test_on_other_data = False):
     data_table = pd.read_csv(data) # open data
-    if not exclude_guides is None:
-        data_table = return_df_without_guides(data_table, exclude_guides, target_column)
+    if exclude_guides: # exlucde not empty
+        if not test_on_other_data: # 
+            data_table = return_df_without_guides(data_table, exclude_guides, target_column)
     # set unquie guide identifier, sorted if reproducibilty is need with data spliting
     if if_data_reproducibility:
         guides = sorted(set(data_table[target_column])) 
@@ -54,7 +55,7 @@ def return_df_without_guides(data_frame, guide_to_exlucde, data_frame_column):
 def generate_features_and_labels(data_path, manager, if_bp, if_only_seq , 
                                  if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility,
                                  columns_dict, transform_y_type = False, sequence_coding_type = 1, if_bulges = False,
-                                 exclude_guides = None):
+                                 exclude_guides = None, test_on_other_data = False):
     '''
     This function generates x and y data for gRNAs and their corresponding off-targets.
     For each (gRNA, OTS) pair it one-hot encodes the sequences and adds epigenetic data if required.
@@ -79,13 +80,15 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
     13. sequence_coding_type - the type of sequence encoding to use -  defualt is 1 - PiCRISPR style. 2 -  nuc*nuc per base pair.
     14. if_bulges - boolean to include bulges in the sequence encoding.
     15. exclude_guides - (tuple) (guides_description, path to guides to exclude from the data, target_column)
+    16. test_on_other_data - boolean - if True dont exclude guides from that data
     Returns:
     1. x_data_all - list of x data for each gRNA.
     2. y_labels_all - list of y labels for each gRNA.
     3. guides - list of unique gRNAs.
     
 '''
-    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility,columns_dict["TARGET_COLUMN"],exclude_guides)
+    splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility,
+                                                                columns_dict["TARGET_COLUMN"],exclude_guides,test_on_other_data)
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     ALL_INDEXES.clear() # clear indexes
@@ -119,7 +122,10 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
         else : # add features into 
             x_data = guide_data_frame[features_columns].values
             x_data = np.append(seq_info, x_data, axis = 1)
-        ALL_INDEXES.append(guide_data_frame.index)
+        if "Index" in guide_data_frame.columns:
+            ALL_INDEXES.append(guide_data_frame["Index"])
+        else:
+            ALL_INDEXES.append(guide_data_frame.index)
         x_data_all.append(x_data)
         
         y_labels_all.append(guide_data_frame[[columns_dict["Y_LABEL_COLUMN"]]].values) # add label values by extracting from the df by series values.
@@ -529,3 +535,22 @@ def get_duplicates(file_manager):
             file.write(f"OTS: {ots[0]}, gRNA: {ots[1]}\n")
 
     
+def keep_indexes_per_guide(data_frame = None, target_column = None):
+    '''
+    This function returns a list of indexes for each guide in the data frame.
+    Args:
+    1. data_frame: (str -path/ panda df) - The data frame containing the data.
+    2. target_column: (str) - The name of the target column.
+    Returns:
+    A dictionary where keys are the guide names and values are the indexes of the data points.
+    '''
+    if isinstance(data_frame, str):
+        data_frame = pd.read_csv(data_frame)
+    elif not isinstance(data_frame, pd.DataFrame):
+        raise ValueError("The data_frame must be a string or a pandas DataFrame.")
+    guides = data_frame[target_column].unique() # create a unique list of guides
+    if "Index" in data_frame.columns:
+        guides_indexes = {guide: data_frame[data_frame[target_column] == guide]["Index"].values for guide in guides}
+    else:
+        guides_indexes = {guide: data_frame[data_frame[target_column] == guide].index for guide in guides}
+    return guides_indexes

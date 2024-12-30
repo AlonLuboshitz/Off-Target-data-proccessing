@@ -29,6 +29,7 @@ def model_dict():
             5: "RNN",
             6: "GRU-EMB"
         }
+
 def encoding_dict():
     '''
     A dictionary for the sequence encoding types.
@@ -47,6 +48,7 @@ def off_target_constrians_dict():
         2: "Mismatch_only",
         3: "Bulges_only"
     }
+
 def class_weights_dict():
     '''
     A dictionary for the class weights.
@@ -55,6 +57,7 @@ def class_weights_dict():
         1: "CW",
         2: "No_CW"
     }
+
 def early_stoping_dict():
     '''
     A dictionary for the early stoping.
@@ -63,6 +66,7 @@ def early_stoping_dict():
         1: "Early_stop",
         2: "No_early_stop"
     }
+
 def main_argparser():
     parser = argparse.ArgumentParser(description='''Python script to init a model and train it on off-target dataset.
                                      Different models, feature types, cross_validations and tasks can be created.
@@ -114,6 +118,9 @@ def main_argparser():
     parser.add_argument('--early_stoping','-es', nargs='+',type=int, help='''Early stoping[0]: 1 - Early_stop, 2 - No_early_stop
                         Early stoping[1]: paitence size''', default=None)
     parser.add_argument('--exclude_guides','-eg', type=str, nargs='+', help='[List] Path to a data frame with sgRNAs, column/s to get.', default=None)
+    parser.add_argument('--test_on_other_data','-tood', type=str, nargs= '+', help='''Test on other data:
+                        [list] l[0] - path to json file (dictionary with keys as data names and values paths to data)
+                        l[1] - data name to test on - should match the keys in the json file.''', default=None)
     return parser
 
 def parse_args(argv,parser):
@@ -158,6 +165,7 @@ def validate_main_args(args):
     if args.early_stoping is not None and len(args.early_stoping) != 2:
         raise ValueError("Early stoping parameters must be given as a list of 2 integers - early stoping and patience")
     args.exclude_guides =  validate_exclude_guides(args.exclude_guides)
+    args = validate_test_on_other_data(args)
     ## Print all args:
     print("Arguments are:")
     for arg, value in vars(args).items():
@@ -171,6 +179,43 @@ def validate_main_args(args):
         args = set_method(args)
         return args, data_configs, data_columns
     
+def set_test_on_other_data(test_on_other_data = None):
+    '''
+    Validate the test_on_other_data argument.
+    Argument is [list] - [0] path to json file.
+    [1] - key in the json file. 
+    This function will return the tuple of (path_to_the_data, data_name) from the arg.
+    '''
+    if test_on_other_data is None:
+        return None
+    dictionary_datas_path = test_on_other_data[0]
+    if not os.path.exists(dictionary_datas_path):
+        raise ValueError(f"Test on other data dictionary dont exists: {dictionary_datas_path}")
+    with open(dictionary_datas_path, 'r') as f:
+        data_dict = json.load(f)
+    data_name = test_on_other_data[1]
+    data_path = data_dict[data_name]
+    if not os.path.exists(data_path):
+        raise ValueError(f"Data path does not exist: {data_path}")
+    return (data_path,data_name)
+
+def validate_test_on_other_data(args):
+    '''
+    This function validates that if job is test and partitions is all then test_on_other_data must be given.'''
+    if isinstance(args.partition[0],str):
+        if ((args.job.lower() == "test" or args.job.lower() == "evaluation") and args.partition[0].lower() == 'all'): # other data should be given
+            try:
+                args.test_on_other_data = set_test_on_other_data(args.test_on_other_data)
+            except ValueError as e:
+                print(e)
+                raise ValueError("Test on other data must be given for partition == all and job == test")
+            if args.test_on_other_data is None:
+                raise ValueError("Test on other data must be given for partition == all and job == test")
+        else : # partition is not all/ job is not test
+            args.test_on_other_data = None # set to None
+    else: # partition is int
+        args.test_on_other_data = None
+    return args
 
 def validate_exclude_guides(exclude_guides = None):
     '''
@@ -196,8 +241,6 @@ def set_task_label(args, columns):
     else: 
         columns["Y_LABEL_COLUMN"] = columns["REGRESSION_LABEL_COLUMN"]  
     return args, columns
-
-
 
 def set_method(args):
     if args.features_method == 2 and args.features_columns is None:

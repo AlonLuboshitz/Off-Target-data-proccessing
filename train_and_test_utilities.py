@@ -28,8 +28,8 @@ def split_to_train_and_val(x, y, task, seed = 42, val_size = 0.1):
         indices = np.arange(len(y))  # Create indices for the samples
         train_indices, test_indices = train_test_split(indices, test_size=val_size, stratify=stratify_mask, random_state=seed)
         # Split each array in X using the indices
-        X_train = [array[train_indices] for array in X_train]
-        x_val = [array[test_indices] for array in X_train]
+        X_train = [array[train_indices] for array in x]
+        x_val = [array[test_indices] for array in x]
         y_train = y[train_indices]
         y_val = y[test_indices]
     else : # split directly
@@ -96,3 +96,4 @@ def split_by_guides(guides, guides_t_list, x_features, y_labels):
     else:
         x_train, y_train = split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
     return x_train, y_train, guides_idx
+

@@ -129,8 +129,7 @@ def get_gru_emd(task, input_shape=(24, 25), embed_dim=44,
         
         # Reduce one-hot rows to integers
         reduced_input = keras.layers.Lambda(argmax_layer)(reshaped_inputs)
-        #argmax_layer = keras.layers.Lambda(lambda x: argmax(x, axis=-1), output_shape=(sequence_length,))
-        #reduced_input = argmax_layer(reshaped_inputs)
+        
         print("Reduced input shape:", reduced_input.shape)  # (None, 24)
 
         # Embedding layer
@@ -144,7 +143,7 @@ def get_gru_emd(task, input_shape=(24, 25), embed_dim=44,
         print("After GRU:", gru_output.shape)  # (None, 24, 64)
         x = keras.layers.Flatten()(gru_output)
         if num_of_additional_features > 0 :
-            feature_input = Input(shape=(num_of_additional_features))
+            feature_input = Input(shape=(num_of_additional_features,))
             x = Concatenate()([x, feature_input])
         for dense_size,activation_func in zip(dense_layers,activation_funs):
             x = keras.layers.Dense(dense_size,activation=activation_func)(x)

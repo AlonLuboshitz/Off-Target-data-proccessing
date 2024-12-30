@@ -2,26 +2,28 @@
 from multiprocessing import Pool
 
 from file_management import File_management
-from file_utilities import create_paths, keep_only_folders, find_target_folders
+from file_utilities import create_paths, keep_only_folders
 from evaluation import evaluation
-from utilities import  split_epigenetic_features_into_groups, print_dict_values,get_feature_column_suffix
+from utilities import   print_dict_values
 from utilities import write_2d_array_to_csv,  add_row_to_np_array, validate_non_negative_int
 from utilities import get_k_choose_n,  convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio
 from data_constraints_utilities import with_bulges
 from k_groups_utilities import get_k_groups_ensemble_args, create_guides_list,get_k_groups_guides, partition_data_for_histograms
 from train_and_test_utilities import split_by_guides
-from features_engineering import generate_features_and_labels
-from features_and_model_utilities import get_features_columns_args_ensembles, parse_feature_column_dict
+from features_engineering import generate_features_and_labels, keep_indexes_per_guide
+from features_and_model_utilities import get_features_columns_args_ensembles, parse_feature_column_dict,split_epigenetic_features_into_groups, get_feature_column_suffix
 from parsing import features_method_dict, cross_val_dict, model_dict,encoding_dict, early_stoping_dict
 from parsing import class_weights_dict,off_target_constrians_dict, main_argparser, parse_args, validate_main_args
 from time_loging import log_time, save_log_time, set_time_log
-
+from ensemble_utilities import get_scores_combi_paths_for_ensemble
 import os
 import json
 import random
 import numpy as np
 import sys
 import time
+import atexit
+
 
 global ARGS, PHATS, COLUMNS, TRAIN, TEST, MULTI_PROCESS
 
@@ -77,6 +79,8 @@ def set_cross_val_args(file_manager, train = False, test = False, cross_val_para
     if cross_val == 1: # leave_one_out
         pass
     elif cross_val == 2: # K_groups
+        if ARGS.test_on_other_data: ### Testing on other data -> testing on all the guides in that data
+            return None, None, None
         guide_path = file_manager.get_guides_partition_path(train,test)
         if len(ARGS.partition) == 1:
             ARGS.partition = np.arange(1,ARGS.partition[0]+1)
@@ -135,8 +139,7 @@ def init_file_management(params=None, phats = None):
                                    epigenetic_bigwig=phats["Big_wig_folder"], 
                                    partition_information_path=phats["Partition_information"], plots_path=phats["Plots_path"])
     if not params: # None
-        ml_name, cross_val, feature_type,epochs_batch,early_stop = model_dict()[ARGS.model], cross_val_dict()[ARGS.cross_val], 
-        features_method_dict()[ARGS.features_method], ARGS.deep_params, ARGS.early_stoping[0]
+        ml_name, cross_val, feature_type,epochs_batch,early_stop = model_dict()[ARGS.model], cross_val_dict()[ARGS.cross_val], features_method_dict()[ARGS.features_method], ARGS.deep_params, ARGS.early_stoping[0]
     else:
         ml_name, cross_val, feature_type,epochs_batch,early_stop = params
     early_stop = early_stoping_dict()[early_stop]
@@ -145,8 +148,7 @@ def init_file_management(params=None, phats = None):
                                       model_name=ml_name, epoch_batch=epochs_batch,early_stop=early_stop,
                                       features=feature_type,class_weight=cw,encoding_type=encoding_type,
                                         ots_constriants=ots_constraints,transformation=ARGS.transformation,
-                                        exclude_guides=ARGS.exclude_guides)
-    
+                                        exclude_guides=ARGS.exclude_guides, test_on_other_data=ARGS.test_on_other_data)
     return file_manager
 
 def init_model_runner(ml_task = None, model_num = None, cross_val = None, features_method = None):
@@ -154,8 +156,8 @@ def init_model_runner(ml_task = None, model_num = None, cross_val = None, featur
     If no parameters are given, the function will use the default parameters passed in the arguments to main.py.
     --------- 
     Returns the run_models object.'''
-    from run_models import run_models
-    
+    from run_models import run_models, tf_clean_up
+    atexit.register(tf_clean_up)
     model_runner = run_models()
     if not ml_task: # Not none
         ml_task = ARGS.task
@@ -207,7 +209,7 @@ def get_x_y_data(file_manager, model_runner_booleans, features_columns = None):
                                          ARGS.epigenetic_window_size, features_columns, 
                                          data_reproducibility,COLUMNS, ARGS.transformation.lower(),
                                          sequence_coding_type=ARGS.encoding_type, if_bulges= with_bulges(ARGS.off_target_constriants),
-                                         exclude_guides = ARGS.exclude_guides)
+                                         exclude_guides = ARGS.exclude_guides,test_on_other_data=file_manager.get_train_on_other_data())
     log_time(f"Features_generation_{encoding_dict()[ARGS.encoding_type]}_end")
     return x,y,guides
 
@@ -219,7 +221,10 @@ def init_evaluation_and_process(base_path, multi_process = False):
 
 
 def run():
+    
     set_args(sys.argv)
+    
+
     global ARGS
     log_time("Main_Run_start")
     train,test,process,evaluation = set_job(ARGS)
@@ -246,7 +251,10 @@ def run_ensemble(train = False, test = False,process=False,evaluation=False, met
         process_dict = process_ensemble()
         process_dict[method]()
     elif evaluation:
-        evaluate_ensemble_partition()
+        if ARGS.test_on_other_data:
+            evaluate_ensemble_by_guides_in_other_data()
+        else:
+            evaluate_ensemble_partition()
     else: 
         raise ValueError("Job must be either Train or Test")
    
@@ -286,7 +294,7 @@ def process_ensemble_by_features(cross_val_params = None, multi_process = True):
     file_manager = init_file_management()
     set_cross_val_args(file_manager,test=True,cross_val_params=cross_val_params,cross_val=3)
     ml_results_base_path = file_manager.get_ml_results_path()
-    scores_combis_paths =  find_target_folders(ml_results_base_path, ["Scores", "Combi"]) # Get all the base_paths containing scores and combi folders 
+    scores_combis_paths = get_scores_combi_paths_for_ensemble(ml_results_base_path,ARGS.n_ensmbels,ARGS.n_models)
     ## if n_ensembles is greater than 1 the multi process will be in the inner function.
     if ARGS.n_ensmbels == 1 and multi_process: # can do multi processing
         processes = min(os.cpu_count(), len(scores_combis_paths))
@@ -295,8 +303,7 @@ def process_ensemble_by_features(cross_val_params = None, multi_process = True):
     else: # n_ensembles > 1
         for path in scores_combis_paths:
             init_evaluation_and_process(path, multi_process)
-    
-    
+ 
 def run_k_groups_with_ensemble(train = False, test = False,process=False,evaluation= False, method = None):
     if train:
         train_dict = train_k_groups_with_ensemble()
@@ -319,7 +326,13 @@ def evaluate_all_partitions():
 def evaluate_ensemble_partition():
     ml_results_base_path,feature_dict,plots_path,partition_info_path,eval_obj = set_evaluation_args()
     eval_obj.evaluate_partitions_ensmbele(ml_results_base_path, ARGS.partition, ARGS.n_ensmbels, ARGS.n_models,feature_dict,ARGS.other_feature_columns,plots_path,partition_info_path)
-
+def evaluate_ensemble_by_guides_in_other_data():
+    file_manager = init_file_management()
+    ml_results_path = file_manager.get_ml_results_path()
+    scores_combi_paths = get_scores_combi_paths_for_ensemble(ml_results_path,ARGS.n_ensmbels,ARGS.n_models,True)
+    eval_obj = evaluation(ARGS.task)
+    guide_indexes = keep_indexes_per_guide(file_manager.get_merged_data_path(),COLUMNS["TARGET_COLUMN"])
+    eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,ARGS.n_models,guide_indexes,file_manager.get_plots_path())
 def set_evaluation_args():
     ARGS.cross_val = 3
     file_manager = init_file_management()
@@ -327,6 +340,7 @@ def set_evaluation_args():
     # go back to the base path
     ml_results_base_path = os.path.dirname(ml_results_base_path)
     eval_obj = evaluation(ARGS.task)
+
     feature_dict = split_epigenetic_features_into_groups(ARGS.epi_features_columns)
     plots_path = file_manager.get_plots_path()
     partition_info_path = file_manager.get_partition_information_path()
@@ -515,10 +529,16 @@ def test_k_groups_only_seq(if_plot = True):
     runner, file_manager , x_features, y_features, all_guides, guides, n_models, n_ensmbels = init_run()
     models_path = file_manager.get_model_path()
     scores_dictionary = {}
-    for partition in ARGS.partition:
-        temp_path = os.path.join(models_path, f"{partition}.keras")
-        scores, test, idx = runner.test_model(temp_path, guides[partition], x_features, y_features, all_guides)
-        scores_dictionary[partition] = (scores,test,idx)
+    if ARGS.test_on_other_data: # Test on other data so 
+        models = create_paths(models_path)
+        for model in models:
+            scores, test, idx = runner.test_model(model, guides, x_features, y_features, all_guides)
+            scores_dictionary[model] = (scores,test,idx)
+    else:
+        for partition in ARGS.partition:
+            temp_path = os.path.join(models_path, f"{partition}.keras")
+            scores, test, idx = runner.test_model(temp_path, guides[partition], x_features, y_features, all_guides)
+            scores_dictionary[partition] = (scores,test,idx)
     evaluation_obj = evaluation(ARGS.task)
     results = evaluation_obj.get_k_groups_results(scores_dictionary)
     ml_results = file_manager.get_ml_results_path()
@@ -566,7 +586,7 @@ def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params
     2. cross_val_params: tuple - cross val parameters for the file manager
     3. multi_process: bool - if True the function will multiprocess the features in the group.'''
     if not feature_dict: # None
-        ######### NOTE: ADD ONLY_EPIGENETICS! VALIDATE THIS!
+        ### NOTE: ONLY EPIGENETICS IS SET TO TRUE!!!
         features_dict = parse_feature_column_dict(ARGS.features_columns, only_epigenetics=True)
     else:
         features_dict = feature_dict
@@ -710,7 +730,7 @@ def test_ensemble_by_features(model_params= None, cross_val_params= None, multi_
         runner, file_manager  = init_model_runner_file_manager(model_params)
         t_guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = False, test = True, cross_val_params = cross_val_params)
     if not features_dict: # None
-        features_dict = parse_feature_column_dict(ARGS.features_columns)
+        features_dict = parse_feature_column_dict(ARGS.features_columns,only_epigenetics=True)
     else:
         features_dict = features_dict
     
@@ -745,57 +765,7 @@ def test_ensemble_via_epi_feature_2(group, feature, runner, file_manager, t_guid
             test_enmsbel_scores(*arg)
     del x_features, y_features
 
-def test_on_other_data(model_path, test_folder_path, test_guide_path, other_data, silico):
-    '''This function test one model performance on other data. For example training the model on
-    one data set and testing it on another data set.
-    The function creates the file manager and runner.
-    Args:
-    1. model_path: str - the path to the models folder
-    2. test_folder_path: str - the path to save the prediction of the model
-    3. test_guide_path: str - the path to the test guides
-    4. other_data: list - [paths] paths to the other data [0] silico, [1] vitro
-    5. silico - bool, indicating if the data is silico or vitro
-    ----------
-    example: test_on_other_data(model_path="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive"
-                       ,test_folder_path="/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives",
-                       test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides/tested_guides_12_partition.txt",
-                       other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None],silico=True)
-                       
-    model_path="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive"
-    test_folder_path="/localdata/alon/ML_results/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positives"
-    test_guide_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides/tested_guides_12_partition.txt"
-    other_data=["/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",None]
-    silico=True
-    positive_parts = os.listdir(model_path)
-    model_paths = [os.path.join(model_path,part) for part in positive_parts]
-    test_folder_paths = [os.path.join(test_folder_path,part) for part in positive_parts]
-    for test_folder_path in test_folder_paths:
-        if not os.path.exists(test_folder_path):
-            os.makedirs(test_folder_path)
-    args = [(model_path,test_folder_path,test_guide_path,other_data,silico) for model_path,test_folder_path in zip(model_paths,test_folder_paths)]
-    with Pool(processes=10) as pool:
-        pool.starmap(test_on_other_data,args)'''
-    file_manager = File_management("", "", EPIGENETIC_FOLDER, BIG_WIG_FOLDER, other_data[0] ,other_data[1])
-    file_manager.set_ml_results_path(test_folder_path)
-    file_manager.set_models_path(model_path)
-    try:
-        set_silico(file_manager) if silico else set_vitro(file_manager)
-    except Exception as e:
-        print(e)
-    runner = init_run_models(file_manager)
-    runner.set_model(4,False)
-    runner.set_cross_validation(3,False)
-    runner.set_features_method(1,False)
-    runner.setup_runner()
-    guides = create_guides_list(test_guide_path, 0)
-    score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
-    #ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
-    #ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
-    ensmbels_paths = file_manager.get_model_path()
-    #for ensmbel in ensmbels_paths:
-            #test_enmsbel_scores(runner, ensmbel, guides, score_path)
-    test_enmsbel_scores(runner,ensmbels_paths,guides,score_path)
-    
+
 
 
 def set_reproducibility_data(file_manager, run_models, data_path):
@@ -951,8 +921,11 @@ def performance_by_data(train, test, evalute):
 if __name__ == "__main__":
     
     set_time_log(keep_time=True,time_logs_paths="/home/dsi/lubosha/Off-Target-data-proccessing/Time_logs")
-    run()
-    ## FIX SAFE MODE IN RUN_MODELS!!!!!!!!!!!!!! #
+    
+    try:
+        run()
+    except Exception as e:
+        print(e)
     #evalaute_all_partitions()
     # partition_data_for_histograms("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv",
     #                               partition_information_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",

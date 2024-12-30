@@ -3,12 +3,12 @@ import pandas as pd
 from itertools import combinations
 import os
 from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve, mean_squared_error
-from utilities import get_X_random_indices, extract_scores_labels_indexes_from_files, get_feature_name
+from utilities import get_X_random_indices, extract_scores_labels_indexes_from_files
 from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv
 from k_groups_utilities import get_partition_information
-from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank
+from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp
 from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder
-
+from features_and_model_utilities import get_feature_name,get_features_string
 from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
 from multiprocessing import Pool
  
@@ -31,7 +31,8 @@ class evaluation():
             if task.lower() == "reg_classification":
                 self.task = "reg_classification"
                 self.combi_suffix = "Combi_reg"
-            self.results_header = ["Auroc","Auprc","N-rank","Auroc_std","Auprc_std","N-rank_std"]
+                #NOTE: CHECK THE ADDDITION OF LAST TP
+            self.results_header = ["Auroc","Auprc","N-rank","Last-TP","Auroc_std","Auprc_std","N-rank_std","Last-tp_std"]
         self.set_data_evaluation_columns()
     def set_only_positive(self, only_pos= False):
         self.only_positive = False
@@ -42,9 +43,10 @@ class evaluation():
     def set_features(self, features):
         self.features = features
     def set_data_evaluation_columns(self):
-        # NOTE: TO ADD FN-RANK
         if self.task.lower() == "classification" or self.task.lower() == "reg_classification":
-            self.data_evaluation_columns = ['feature', 'auroc', 'auroc_std','auroc_pval', 'auprc', 'auprc_std','auprc_pval', 'n-rank', 'n-rank_std','n-rank_pval']
+            #NOTE: CHECK THE ADDDITION OF LAST TP
+
+            self.data_evaluation_columns = ['feature', 'auroc', 'auroc_std','auroc_pval', 'auprc', 'auprc_std','auprc_pval', 'n-rank', 'n-rank_std','n-rank_pval', 'last-tp', 'last-tp_std','last-tp_pval']
             self.k_group_columns = ['partition','auroc', 'auprc', 'n-rank', 'last-tp']
         elif self.task.lower() == "regression" or self.task.lower() == "t_regression":
             self.data_evaluation_columns = ['feature', 'pearson', 'pearson_std','pearson_pval', 'spearman', 'spearman_std','spearman_pval', 'mse', 'mse_std','mse_pval']
@@ -121,14 +123,62 @@ vs the labels. The results will be saved in the combi path for the same ensmbel.
             for path in ensmbel_scores_paths:
                 self.process_score_path(*path)
     
+    def evaluate_test_per_guide(self, ml_results_paths, n_ensembles, n_models, indexes_dict , plots_path, ):
+        '''
+        This function evaluates ensembles on all the test data and per 1 guideRNA in the test data.
+        For each ensmbel/s and for each sgRNA + all sgRNAS, it will process the scores and evalaute the metrics.
+        For each guide it will plot the results and save them. 
+        '''
+        # get the scores for each ensmbel
+        feature_dict = init_feature_dict_for_all_scores(ml_results_paths, n_models)
+        guides_dict = split_feature_dict_by_indexes(feature_dict, indexes_dict)
+
+        ###### guides_dict = {guide: {feature : (y_scores, y_test)}} #########
+        for guide, features in guides_dict.items(): # for each guide plots and evaluate all metrics
+            guide_path = os.path.join(plots_path,guide)
+            create_folder(guide_path)
+            y_s,y_labels,y_i = next(iter(features.values()))
+            positives,negatives = np.count_nonzero(y_labels), len(y_labels) - np.count_nonzero(y_labels)
+            plot_evalutions_for_multiple_models(task= self.task, output_path=guide_path,plot_title=guide,
+                                                results=None,scores_dictionary=features, positives=positives,
+                                                negatives=negatives)
+        # All guides
+        all_guides_path = os.path.join(plots_path,"All_guides")
+        create_folder(all_guides_path)
+        y_s,y_labels,y_i = next(iter(feature_dict.values()))
+        positives,negatives = np.count_nonzero(y_labels), len(y_labels) - np.count_nonzero(y_labels)
+
+        plot_evalutions_for_multiple_models(task= self.task, output_path=all_guides_path,plot_title="All_guides",
+                                                results=None,scores_dictionary=feature_dict, positives=positives,
+                                                negatives=negatives)
 
     def evaluate_all_partitions_multiple_metrics(self,args):
         self.evaluate_all_partitions(*args, metric="difference")
         self.evaluate_all_partitions(*args, metric="ratio")
         self.evaluate_all_partitions(*args, metric="log_ratio")
-    def evaluate_all_partitions(self,ml_results_path, partitions, n_ensembles, n_models, epi_features_dict, other_feature_dict, plots_path, partition_info_path,metric="difference", if_plot = True):
-        '''This function evalautes all the paritions.
-        It first checks if for each partition the results are already evaluated.'''
+    ##NOTE: REMOVE OTHER_FEATURE_DICT from every evaluation function.
+    def evaluate_all_partitions(self,ml_results_path, partitions, n_ensembles, n_models, epi_features_dict,
+                                 other_feature_dict, plots_path, partition_info_path,metric="difference", if_plot = True):
+        '''
+        This function evalautes all the partitions. 
+        In each partition it will compare the metric given, between each feature to the only-seq.
+        It first checks if for each partition the results are already evaluated.
+        Than init a dictionary to hold the results for each feature in the parition.
+        Compare the feature to the only sequence by the metric given.
+        Calculate p-values and mean,std for all partitions.
+        Plot the results and save them.
+        Args:
+        1. ml_results_path - (str) path to the ml results folder.
+        2. partitions - (list) list of partitions to evaluate.
+        3. n_ensembles - (int) number of ensembles in the results.
+        4. n_models - (int) number of models in the results.
+        5. epi_features_dict - (dict) dictionary with the epigenetic features to evaluate.
+        6. remove this
+        7. plots_path - (str) path to save the plots.
+        8. partition_info_path - (str) path to the partition information.
+        9. metric - (str) the metric to compare the features. Options: difference, ratio, log_ratio.
+        10. if_plot - (bool) if to plot the results.
+        '''
         temp_data_path = os.path.join(plots_path,f'{partitions[0]}_partition',f'{n_ensembles}_ensembles',f'{n_models}_models',f'data.csv')
         if not os.path.exists(temp_data_path): # data dont exists - create it
                 self.evaluate_partitions_ensmbele(ml_results_path, [partitions[0]], n_ensembles, n_models, epi_features_dict, other_feature_dict, plots_path, partition_info_path, True)
@@ -211,13 +261,62 @@ vs the labels. The results will be saved in the combi path for the same ensmbel.
                 args = (results_means_and_std,"all_features",partition_p_vals,plots_path,self.task,n_models)
                 plot_ensembles_by_features_and_task(args,self.task,partition_info)
             save_bar_plot_data(results_means_and_std,partition_p_vals,plots_path,columns=self.data_evaluation_columns)
+    
 def init_partitions_dict_by_features(data_path, compare_to, partitions_number, n_models):
     data = pd.read_csv(data_path)
     features = list(data["feature"].values)
     features.remove(compare_to)
     return {feature: {n_models:np.zeros(shape=(partitions_number,3))} for feature in features}
-
-
+def keep_indexes_from_scores_labels_indexes(y_scores, y_test, indexes, spesific_indexes):
+    '''
+    Given a list of scores, labels and indexes, keep only the spesific indexes given
+    Args:
+    1. y_scores - np.array of scores - 
+    '''
+    positional_indexes = np.where(np.isin(indexes, spesific_indexes))[0] # get the postional indexes of the spesific indexes
+    ## NOTE: add a check for y_score shape.
+    selected_y_scores = y_scores[positional_indexes]
+    selected_y_test = y_test[positional_indexes]
+    return selected_y_scores, selected_y_test, spesific_indexes
+def init_feature_dict_for_all_scores(ml_results_paths, n_models):
+    '''
+    This function will return a dictionary with all the features and their scores, labels and indexes.
+    Args:
+    1. ml_results_paths - list of paths to the ml results folders.
+    -----------
+    Returns: dictionary {feature: (y_scores, y_test, indexes)}'''
+    features_dict = {}
+    for i,ml_results_path in enumerate(ml_results_paths):
+        
+        if "Only_sequence" in ml_results_path:
+            feature = "Only-seq"
+        else : 
+            ### NOTE: After the fixtation of the features names in main/feature utilities, this part should be changed accordingly
+            feature = ml_results_path.split("/")[-1]
+            splited_feature = feature.split("_")
+            if len(splited_feature) <= 3: # one feature
+                feature = splited_feature[0]
+            else : # subset
+                feature = f'{splited_feature[0]}_{splited_feature[3]}_{splited_feature[6]}'
+        y_scores, y_test, indexes = extract_scores_labels_indexes_from_files(create_paths(os.path.join(ml_results_path, "Scores")))
+        y_scores = np.mean(y_scores, axis = 0)
+        features_dict[feature] = (y_scores, y_test, indexes)
+    return features_dict
+def split_feature_dict_by_indexes(features_dict, indexes_dict):
+    '''
+    This function will split the features dict by the indexes given.
+    Args:
+    1. (dict) features_dict - dictionary with the features and their scores, labels and indexes.
+    2. (dict) indexes_dict - dictionary with the indexes to split the features.
+    -----------
+    Returns: dictionary {guide: {feature : (y_scores, y_test)}}
+    '''
+    guides_dict = {}
+    for guide,indexes in indexes_dict.items():
+        guides_dict[guide] = {}
+        for feature, (y_scores, y_test, all_indexes) in features_dict.items():
+            guides_dict[guide][feature] = keep_indexes_from_scores_labels_indexes(y_scores, y_test, all_indexes, indexes)
+    return guides_dict
 def compare_feature_in_partition(partition_data,compare_to,metric):
     '''This function will return a comparison metric between the compare_to label to all other labels.
     It will return the metric for all partitions to check.
@@ -272,7 +371,8 @@ Dict returned : {n_keys : (n_ensmbels,[auroc,auprc,n-rank]) }'''
 
     return all_n_models
 def eval_ensembles_in_folder(ensmbel_folder_path, n_models_in_ensmbel,combi_suffix, if_single_amount_of_models = False):
-    '''Given a path to a folder containing multiple folders of models
+    '''
+    Given a path to a folder containing multiple folders of models
     Iterate over each folder and return the results of each ensmbel
     n_models_in_ensmbel is a number of models in each ensmbel.
     If if_single_amount_of_models is True, the calculation will be only for the given amount of models
@@ -344,11 +444,22 @@ vs the labels. The results will be saved in the combi path for the same ensmbel.
             process_score_path(*path)
         
 
-def process_score_path(score_path, combi_path, only_positive = False, combi_suffix = "Combi" , header = None, task = None):
+def process_score_path(score_path, combi_path, only_positive = False, combi_suffix = "Combi" , header = None, 
+                       task = None):
     
-    '''Given a score path containing csv files with predictions score and label scores
+    '''
+    Given a score path containing csv files with np.array - number of models - predictions score and row of label scores, OTS indexes.
     Extract the scores, labels and indexes from the files and evaluate all the combinatorical results.
-    Keep the results in the combi_path given'''
+    Keep the results in the combi_path given or return the results.
+    Args:
+    1. score_path - (str) the path to the scores files.
+    2. combi_path - (str) the path to save the combinatorical results.
+    3. only_positive - (bool) if to evaluate only positive OTSs.
+    4. combi_suffix - (str) the suffix to add to the combi folder.
+    5. header - (list) the header of the results.
+    6. task - (str) the task of the model. (classification, regression)
+    
+    '''
     y_scores, y_test, indexes = extract_scores_labels_indexes_from_files([score_path])
     if only_positive: # evaluate only positive OTSs
         y_scores, y_test, indexes = keep_positive_OTSs_labels(y_scores, y_test, indexes)
@@ -469,7 +580,7 @@ def get_last_fn_index(tpr_arr):
         raise ValueError("TPR array is empty.")
     return np.where(tpr_arr == 1)[0][0]
 
-def get_last_fn_ratio(predictions, labels):
+def get_last_fn_ratio(predictions, labels, tpr = None):
     """
     Calculate the ratio of the last false negative index to the total number of labels,
     adjusted by the number of positive labels.
@@ -481,7 +592,8 @@ def get_last_fn_ratio(predictions, labels):
     Returns:
     - last_fn_ratio (float): Adjusted ratio of the last false negative index.
     """
-    fpr,tpr,_ = roc_curve(labels, predictions)
+    if tpr is None:
+        fpr,tpr,_ = roc_curve(labels, predictions)
     last_fn_index = get_last_fn_index(tpr)
     active_labels = np.count_nonzero(labels)
     total_labels = len(labels)
@@ -516,7 +628,7 @@ def evaluate_model(y_test, y_scores, task = None):
     returns: dict of the evaluation metrics in regression or auroc,auprc in classification.
     '''
     if task.lower() == "classification":
-        return evaluate_auroc_auprc(y_test, y_scores)
+        return evaluate_classification_model(y_test, y_scores)
     elif task.lower() == "reg_classification":
         tpr,fpr,percision, perc_base = convert_continous_values_to_fpr_tpr(y_test, y_scores)
         return auc(fpr,tpr), auc(tpr,percision), get_auc_by_tpr(get_tpr_by_n_expriments(y_scores,y_test,1000))[0],get_last_fn_ratio(y_scores, y_test)
@@ -525,15 +637,17 @@ def evaluate_model(y_test, y_scores, task = None):
     else:
         raise RuntimeError(f"Task {task} is not supported")
 
-def evaluate_auroc_auprc( y_test, y_pos_scores_probs):
+def evaluate_classification_model( y_test, y_pos_scores_probs, return_rates = False):
     # # Calculate AUROC,AUPRC
     fpr, tpr, tresholds = roc_curve(y_test, y_pos_scores_probs)
     auroc = auc(fpr, tpr)
-    # Calculate AUPRC
+    percesion, recall, tresholds = precision_recall_curve(y_test, y_pos_scores_probs)
     auprc = average_precision_score(y_test, y_pos_scores_probs)
     # Calculate N-rank
-    n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_pos_scores_probs,y_test,1000))[0]
-    last_fn_ratio = get_last_fn_ratio(y_pos_scores_probs, y_test)
+    n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_pos_scores_probs,y_test,1000,tpr))[0]
+    last_fn_ratio = get_last_fn_ratio(labels=None,predictions=None,tpr=tpr)
+    if return_rates:
+        return ((auroc, auprc, n_rank, last_fn_ratio), (fpr, tpr, percesion, recall))
     return (auroc,auprc,n_rank,last_fn_ratio)
 
 def evalaute_regression(y_test, y_scores):
@@ -608,7 +722,7 @@ def saving_regression_results(pearson, spearman, mse, file_left_out, table, ml_t
     return table
 
 
-def plot_evalutions_for_multiple_models(  task, output_path, plot_title, results = None, scores_dictionary = None):
+def plot_evalutions_for_multiple_models(  task, output_path, plot_title, results = None, scores_dictionary = None, positives= None,negatives = None):
     '''
     This function iterates the scores dictionary and extract the evlaution for each model in the dict.
     Than plots the results of each model togther.
@@ -630,21 +744,24 @@ def plot_evalutions_for_multiple_models(  task, output_path, plot_title, results
         predictions, test, indexes = scores
         metrics_dict = append_values_metrics_by_task(test,predictions,metrics_dict,task)
         model_names.append(model_name)
-    plot_multiple_models_by_task(metrics_dict, model_names, task, output_path, plot_title)
-def plot_classifications_metrics_multiple_models(metrics_dict, titles, output_path, plot_title):
+    plot_multiple_models_by_task(metrics_dict, model_names, task, output_path, plot_title, positives, negatives)
+def plot_classifications_metrics_multiple_models(metrics_dict, titles, output_path, plot_title, positives=None, negatives=None):
     plot_roc(fpr_list=metrics_dict["fprs"],tpr_list=metrics_dict["tprs"],aurocs=metrics_dict["aucs"],
              titles=titles,output_path=output_path,general_title=plot_title)
     plot_pr(recall_list=metrics_dict['recalls'],precision_list=metrics_dict['percs'],
             auprcs=metrics_dict['auprcs'],titles=titles,output_path=output_path,general_title=plot_title)
     n_rank_vals, n_rank_tprs = zip(*metrics_dict["n_ranks"])
     plot_n_rank(n_rank_values=n_rank_vals,n_tpr_arrays=n_rank_tprs,titles=titles,output_path=output_path,general_title=plot_title)
+    last_fn_indexes, last_fn_ratios, tpr_values = zip(*metrics_dict["last_fn_values"])
+    plot_last_tp(last_fn_indexes,last_fn_ratios,tpr_values,titles,output_path,plot_title,positives,negatives)
+
 def plot_regression_metrics_multiple_models(scores_dict, titles, output_path, plot_title):
     pass
-def plot_multiple_models_by_task(scores_dict, titles,  task, output_path, plot_title):
+def plot_multiple_models_by_task(scores_dict, titles,  task, output_path, plot_title, positives = None, negatives = None):
     if task.lower() == "classification":
-        plot_classifications_metrics_multiple_models(scores_dict, titles, output_path, plot_title)
+        plot_classifications_metrics_multiple_models(scores_dict, titles, output_path, plot_title, positives, negatives)
     elif task.lower() == "regression":
-        plot_regression_metrics_multiple_models(scores_dict, titles, output_path, plot_title)
+        plot_regression_metrics_multiple_models(scores_dict, titles, output_path, plot_title, positives)
     else:
         raise RuntimeError(f"Task: {task} is not supported")
 def append_values_metrics_by_task(test,prediction,metrics_dict = None, task = None):
@@ -674,7 +791,10 @@ def append_values_to_classification_metrics( test, predictions, metrics_dict = N
     n_tpr = get_tpr_by_n_expriments(None,None,1000,tpr)
     n_rank_ = get_auc_by_tpr(n_tpr)[0]
     n_rank = (n_rank_, n_tpr)
+    last_fn_index = get_last_fn_index(tpr)
     last_fn_ratio = get_last_fn_ratio(predictions, test)
+    fn_values = (last_fn_index,last_fn_ratio,tpr[:last_fn_index])
+
     metrics_dict["fprs"].append(fpr)
     metrics_dict["tprs"].append(tpr)
     metrics_dict["aucs"].append(auc(fpr, tpr))
@@ -682,7 +802,7 @@ def append_values_to_classification_metrics( test, predictions, metrics_dict = N
     metrics_dict["recalls"].append(recall)
     metrics_dict["auprcs"].append((average_precision_score(test, predictions),np.sum(test[test > 0]) / len(test)))
     metrics_dict["n_ranks"].append(n_rank) 
-    metrics_dict["last_fn_ratios"].append(last_fn_ratio)
+    metrics_dict["last_fn_values"].append(fn_values)
     return metrics_dict
 def init_classification_metrics():
     return {
@@ -693,7 +813,7 @@ def init_classification_metrics():
         "recalls": [],
         "auprcs": [],
         "n_ranks": [],
-        "last_fn_ratios": []
+        "last_fn_values": []
     }
 def init_regression_metrics():
     return {

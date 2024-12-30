@@ -1,2 +1,6 @@
 python "/home/alon/masterfiles/pythonscripts/data_processing.py" "/home/alon/masterfiles/guideseq40files/guideseq" "/home/alon/masterfiles/guideseq40files/outputs" "/home/alon/masterfiles/guideseq40files/bedfiles"
 "/home/alon/masterfiles/guideseq40files/guideseq/0610params/combined_output" "/home/alon/masterfiles/guideseq50files/guideseq/0610params/combined_output"
+
+
+cd /localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/
+cd /localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models
