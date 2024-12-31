@@ -22,6 +22,8 @@ def split_to_train_and_val(x, y, task, seed = 42, val_size = 0.1):
             - validation_data: Validation data (generated if not provided).
     """
     if task.lower() == "regression": # create binary bins for the labels
+        positives = sum(y > 0)
+        pos_indices = np.where(y > 0)[0]
         stratify_mask = (y > 0).astype(int)
     else: stratify_mask = y # Classification already labels
     if isinstance(x,list):
@@ -34,7 +36,7 @@ def split_to_train_and_val(x, y, task, seed = 42, val_size = 0.1):
         y_val = y[test_indices]
     else : # split directly
         X_train, x_val, y_train, y_val = train_test_split(x, y, test_size=val_size,
-                                                                stratify=y, random_state=seed)
+                                                                stratify=stratify_mask, random_state=seed)
     return (X_train,y_train, (x_val, y_val))
 
 def keep_diffrence_guides_indices( guides, test_guides):
