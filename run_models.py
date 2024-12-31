@@ -4,11 +4,11 @@
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
 # "Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"
 
-FORCE_CPU = False
+FORCE_CPU = True
 from features_engineering import  order_data, get_tp_tn, extract_features, get_guides_indexes
 from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_classification_model, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw, get_gru_emd, argmax_layer
-from utilities import validate_dictionary_input
+from utilities import validate_dictionary_input, get_memory_usage
 from parsing import features_method_dict, cross_val_dict, model_dict, class_weights_dict
 from features_and_model_utilities import get_encoding_parameters, split_epigenetic_features_into_groups
 from train_and_test_utilities import split_to_train_and_val, split_by_guides
@@ -467,6 +467,7 @@ class run_models:
             model.fit(X_train,y_train,**self.hyper_params)
         else :
             model.fit(X_train,y_train)
+        print(f"Memory Usage train model: {get_memory_usage():.2f} MB")
         tf.keras.backend.clear_session()
         return model
     
