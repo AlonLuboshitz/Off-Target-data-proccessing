@@ -3,7 +3,13 @@ import os
 from itertools import combinations
 import pandas as pd
 
+import psutil
 
+# Function to get memory usage
+def get_memory_usage():
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    return memory_info.rss / (1024 ** 2)  # Memory in MB
 
 ### DATA UTILITIES ###
 

@@ -4,7 +4,7 @@ from multiprocessing import Pool
 from file_management import File_management
 from file_utilities import create_paths, keep_only_folders
 from evaluation import evaluation
-from utilities import   print_dict_values
+from utilities import   print_dict_values, get_memory_usage
 from utilities import write_2d_array_to_csv,  add_row_to_np_array, validate_non_negative_int
 from utilities import get_k_choose_n,  convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio
 from data_constraints_utilities import with_bulges
@@ -23,7 +23,6 @@ import numpy as np
 import sys
 import time
 import atexit
-
 
 global ARGS, PHATS, COLUMNS, TRAIN, TEST, MULTI_PROCESS
 
@@ -210,6 +209,7 @@ def get_x_y_data(file_manager, model_runner_booleans, features_columns = None):
                                          data_reproducibility,COLUMNS, ARGS.transformation.lower(),
                                          sequence_coding_type=ARGS.encoding_type, if_bulges= with_bulges(ARGS.off_target_constriants),
                                          exclude_guides = ARGS.exclude_guides,test_on_other_data=file_manager.get_train_on_other_data())
+    print(f"Memory Usage features: {get_memory_usage():.2f} MB")
     log_time(f"Features_generation_{encoding_dict()[ARGS.encoding_type]}_end")
     return x,y,guides
 
@@ -640,7 +640,7 @@ def create_ensembels_for_a_given_feature(group, feature,runner, file_manager,tra
     log_time(f'Create_ensmbels_with_epigenetic_features_{group}_{feature}_end')
     # Delete data free memory
     del x_features, y_features
-def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, y_, all_guides, multi_process = False): 
+def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, y_, all_guides, multi_process = False, start_from = 3): 
     '''This function creates n ensembles with n models for each ensemble.
     It will use the file manager to create train folders for each ensmbel.
     It will use the model runner to train the model in that folder.
@@ -655,7 +655,7 @@ def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, 
     8. all_guides: list of all guides in the data
     9. multi_process: bool - if True and the number of ensmebles is bigger than 1, the function will multiprocess the ensembles.'''
     # Generate argument list for each ensemble
-    ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10),x_,y_,all_guides) for i in range(1, n_ensembles+1)]
+    ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10),x_,y_,all_guides) for i in range(start_from, n_ensembles+1)]
     # Create_ensmbel accpets - n_models, output_path, guides, additional_seed for reproducibility
     if multi_process and n_ensembles > 1 and MULTI_PROCESS:
         # Create a pool of processes
@@ -923,6 +923,7 @@ if __name__ == "__main__":
     set_time_log(keep_time=True,time_logs_paths="/home/dsi/lubosha/Off-Target-data-proccessing/Time_logs")
     
     try:
+        ## NOTE: CHANGE START_FROM IN CREATE ENSEMBLE
         run()
     except Exception as e:
         print(e)
