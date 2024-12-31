@@ -84,3 +84,32 @@ def get_bed_files(bed_files_folder):
                 bed_path = os.path.join(foldername, name)
                 bed_files.append(bed_path)
     return bed_files
+
+
+def copy_ensmebles():
+    import os
+    import shutil
+
+    # Define the source and destination base directories
+    source_base = "/localdata/alon/ML_results/Change-seq/vivo-vitro/Classification/CNN/Ensemble/Epigenetics_by_features/7_partition/7_partition_50/binary"
+    dest_base = "/localdata/alon/ML_results/Change-seq/vivo-vitro/Classification/CNN/Ensemble/Epigenetics_by_features/7_partition/1_ensembels/50_models/binary"
+
+    # Iterate through all folders in the source binary directory
+    for folder in os.listdir(source_base):
+        source_scores_dir = os.path.join(source_base,f'{folder}/Scores' )
+        dest_scores_dir = os.path.join(dest_base, f'{folder}/Scores')
+        
+        # Check if the source Scores directory exists
+        if os.path.exists(source_scores_dir):
+            source_file = os.path.join(source_scores_dir, "ensmbel_1.csv")
+            # Check if the file exists before copying
+            if os.path.exists(source_file):
+                # Create the destination Scores directory if it doesn't exist
+                os.makedirs(dest_scores_dir, exist_ok=True)
+                # Copy the file to the destination directory
+                shutil.copy(source_file, dest_scores_dir)
+                print(f"Copied {source_file} to {dest_scores_dir}")
+            else:
+                print(f"File not found: {source_file}")
+        else:
+            print(f"Scores directory not found in: {os.path.join(source_base, folder)}")

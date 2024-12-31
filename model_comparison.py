@@ -6,8 +6,8 @@
 1. Create input files for the model
 2. Run the model and create output files'''
 import pandas as pd
-
-
+from External_models_predictions.Nuclea_seq.modeling import log10_crispr_specificity
+from Data_labeling_and_processing import replace_N_for_ot
 ## GLOBALS ##
 External_models_folder = "/home/dsi/lubosha/Off-Target-data-proccessing/External_models_predictions"
 #### DATA
@@ -23,6 +23,9 @@ def create_input(original_data_path, target_column, off_target_column, model_nam
     elif model_name == "MOFF":
         print("Create input for MOFF")
         create_input_moff_score(original_data_path, target_column, off_target_column, output_path, data_name)
+    elif model_name == "Nulceq-seq":
+        print("Create input for Nulceq-seq")
+        add_nuclea_seq_scores(original_data_path, target_column, off_target_column, output_path, data_name)
     else:
         raise ValueError("Model name not recognized")
 
@@ -70,6 +73,45 @@ def create_input_moff_score(original_data_path, target_column, off_target_column
     full_output_path = full_output_path + "_input_toMOFF_score.csv"
     filtered_data.to_csv(full_output_path, header=False, index=False)
 
+def add_nuclea_seq_scores(original_data_path, target_column, off_target_column, output_path, data_name):
+    original_data = pd.read_csv(original_data_path)
+    otss_data = original_data[[target_column, off_target_column]]
+    otss_data['Nuclea_seq'] = 0
+    otss_data = get_nuclea_seq_scores(otss_data, target_column, off_target_column)
+    if len(original_data) != len(otss_data):
+        raise ValueError("The number of points in the model output and the original data is not the same.")
+    else: 
+        print(f"Adding Nuclea_seq scores to the original data frame")
+        original_data['Nuclea_seq'] = otss_data['Nuclea_seq']
+        print(original_data[[target_column,off_target_column,"Nuclea_seq"]].head(5))
+
+def get_nuclea_seq_scores(data_frame, target_column, off_target_column):
+    '''
+    NOTE: Finish the dealing with nuclea-seq outputs.
+    This function send to the Nuclea_seq all OTSs,Gnras with TGG pam in the end.
+    This is what the model trained on.
+    Args:
+    1. data_frame: data frame with the OTSs, gRNAs.
+    2. target_column: column name of the target
+    3. off_target_column: column name of the off-target
+    Returns: series of the scores of the OTSs
+    '''
+    # Trim the PAM from the target sequence
+    
+    data_frame['targets'] = data_frame[target_column].str[:-3]
+    data_frame['off_targets'] = data_frame[off_target_column].str[:-3]
+    # Run the model
+    for i in range(len(data_frame)):
+        try:
+            data_frame.loc[i,"Nuclea_seq"] = log10_crispr_specificity("WT", "TGG", data_frame.loc[i,"targets"], data_frame.loc[i,"off_targets"])
+        except:
+            replace_N_for_ot()
+            print(i)
+#     data_frame["Nuclea_seq"] = data_frame.apply(
+#     lambda row: log10_crispr_specificity("WT", "TGG", row["targets"], row["off_targets"]), 
+#     axis=1
+# )
+    return data_frame
 def remove_unwanted_otss(valid_coding, data, off_target_column, indices_path=None):
     '''This functions removes off-targets that contain unwanted codings from the data frame.
     Args: 1. valid_coding: list of codings that can be kept, all other will be removed.
@@ -154,3 +196,6 @@ def combine_external_model_outputs(model_output_path, original_data_path, model_
     new_output = original_data_path.split(".")[0] + "_with_model_scores.csv"
     original_data.to_csv(new_output, index=False)  # Save the updated data frame
 
+
+add_nuclea_seq_scores(original_data_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/test_vivo_silico.csv",
+                      target_column="realigned_target",off_target_column="offtarget_sequence",output_path="",data_name="")

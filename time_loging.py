@@ -1,6 +1,6 @@
 import time
 import os  
-from parsing import model_dict, cross_val_dict
+from parsing import model_dict, cross_val_dict, features_method_dict
 global TIME_LIST, KEEP_TIME, TIME_LOGS_PATHS
 TIME_LIST = []
 def set_time_log(keep_time = False, time_logs_paths = None):
@@ -22,9 +22,13 @@ def save_log_time(args):
     global TIME_LIST, TIME_LOGS_PATHS, KEEP_TIME
     model = model_dict()[args.model]
     cross_val = cross_val_dict()[args.cross_val]
-    
+    feature_method = features_method_dict()[args.features_method]
+    params = parse_cross_val_params(args.cross_val, args)
+    logs_description = f'{args.data_type}_{cross_val}_{feature_method}_{model}_{params}.txt'
     if KEEP_TIME:
-        with open(os.path.join(TIME_LOGS_PATHS, f"time_logs_{model}_{cross_val}_{args.data_type}_ens:{args.n_ensmbels}_N:{args.n_models}.txt"), "w") as f:
+        with open(os.path.join(TIME_LOGS_PATHS, logs_description), "w") as f:
+            if args.features_method == 2: # with features write the features
+                f.write(f"Features: {args.features_columns}\n")
             n = len(TIME_LIST)
             for i in range(n // 2):  # Loop only through half of the list
                 first_event, first_time = TIME_LIST[i]
@@ -36,3 +40,12 @@ def save_log_time(args):
             if n % 2 == 1:
                 middle_event, middle_time = TIME_LIST[n // 2]
                 f.write(f"{middle_event}: N/A\n")
+
+def parse_cross_val_params(cross_val, args):
+    if cross_val == 1: # Leave one out
+        return ""
+    elif cross_val == 2: # KFold
+        return {"partitions" :args.partition}
+    elif cross_val == 3: # Ensemble
+        return {"ensembles": args.n_ensmbels,
+                "models": args.n_models}

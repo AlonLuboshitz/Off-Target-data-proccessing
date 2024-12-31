@@ -135,79 +135,7 @@ def add_row_to_np_array(y_scores, y_test):
     if y_scores.shape[1] != y_test.shape[0]:
         raise Exception("y_scores must have the same number of columns as y_test number of values")
     return np.vstack((y_scores, y_test))
-    
-def split_epigenetic_features_into_groups(features_columns):
-    '''Give a list of features combine the features into groups based on
-      their endings - binary, score, enrichment, etc.
-      
-      Returns a dictionary with the groups as keys and the features as values.'''
 
-    # Create a dictionary to store groups based on endings
-    groups = {}
-    # Group strings based on their endings
-    for feature in features_columns:
-        ending = feature.split("_")[-1]  # last part after _ "can be score, enrichment, etc.."
-        groups.setdefault(ending, []).append(feature)
-    return groups  
-
-def set_features_columns_by_string( feature_string, split_by,epi_feature_columns = None,other_columns = None,method = None):
-    '''This function take a string of epigentic features and return a list of the features matching the
-the features columns
-features_columns - name of the epigenetic features columns
-epi_string - string of epigenetic features
-split_by - how to split the epi_string
---------
-returns a list of the features matching the epi_string'''
-    if method == 2: # epi_features
-        if epi_feature_columns is None:
-            raise Exception("epi_feature_columns  must be given")
-        feature_columns = epi_feature_columns
-    elif method == 5: # other features
-        if other_columns is None:
-            raise Exception("other_columns  must be given")
-        feature_columns = other_columns
-    elif method == 6: # all features
-        if epi_feature_columns is None or other_columns is None:
-            raise Exception("epi_feature_columns and other_columns  must be given")
-        feature_columns = epi_feature_columns + other_columns
-    if feature_string == "All":
-        return feature_columns
-    epi_features = feature_string.split(split_by)
-    return_list = []
-    for feature in epi_features:
-        feature = feature.strip().lower()  # Remove whitespace and convert to lowercase
-        if feature == "chromstate" or feature == "binary" or feature == "peaks":
-            continue
-        for column in feature_columns:
-            if feature in column.strip().lower():
-                return_list.append(column)
-    return return_list
-    
-def get_feature_name(feature_column):
-    '''This function splits the feature column by _ and returns the name of the feature'''
-    feature_column_splited = feature_column.split("_")
-    if feature_column_splited[0] == 'Chromstate':
-        return feature_column_splited[1]
-    else:
-        return feature_column
-def get_features_string(feature_list, subsets = False, group_ending = None):
-    if len(feature_list) > 1:
-        if subsets:
-            return "_".join(get_feature_name(feature) for feature in feature_list)
-        elif group_ending is None: # subsets False
-            raise ValueError("More than one feature, no subset and no group ending given")
-        else: # group ending given
-            return f"All-{group_ending}"
-    else:
-        return get_feature_name(feature_list[0])
-
-def get_feature_column_suffix(group,feature):
-    subsets= False
-    if "Subset" in group:
-        subsets = True
-        group = group.split("-")[1]
-    feature_name = get_features_string(feature, subsets, group.split("_")[-1])
-    return os.path.join(group,feature_name)
 def extract_scores_labels_indexes_from_files(paths):
     '''Given a list of paths for csv files containing models predicitions scores
 extract the scores and combine them into one np array.

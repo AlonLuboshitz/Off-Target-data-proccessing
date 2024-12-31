@@ -3,8 +3,8 @@ import numpy as np
 import os
 import ast
 from Data_labeling_and_processing import return_constrained_data
-from parameters_utilities import get_ot_constraint_name
-from file_utilities import create_folder
+from data_constraints_utilities import get_ot_constraint_name
+from file_utilities import create_folder, validate_path
 def create_k_balanced_groups(dataset, target_column, label_column, k, output_name, seperate_grna_path, y_labels_tup = None, constrained_guides = None):
     '''Given y_labels and k, create k groups with rougly eqaul amount of labels in each group
     Args: 
@@ -91,10 +91,11 @@ def write_guides_seperatley(k_groups, guides, output_path):
         k_groups - list of lists with the indices of the guides
         guides - list of all the guides
         output_path - path to save the groups'''
-    
+    train_path = create_folder(output_path, "Train_guides")
+    test_path = create_folder(output_path, "Test_guides")
     for i, group in enumerate(k_groups): # iterate on each group
-        train_temp_path = os.path.join(output_path,f"Train_guides_{i+1}_partition.txt")
-        test_temp_path = os.path.join(output_path,f"Test_guides_{i+1}_partition.txt")
+        train_temp_path = os.path.join(train_path,f"Train_guides_{i+1}_partition.txt")
+        test_temp_path = os.path.join(test_path,f"Test_guides_{i+1}_partition.txt")
         all_indexes = set(range(len(guides)))
         with open(test_temp_path, "w") as test_file:
             for index in group:
@@ -174,7 +175,27 @@ def get_k_groups_ensebmle_args_other_features(partitions, n_models, n_ensmbels, 
         multi_process_args.append((None,cross_val_params,False, other_feature_columns))
     return multi_process_args
 
-
+def get_k_groups_guides(guides_path, partition_list, train = False, test = False):
+    '''
+    This function returns a dictionary of partition_num : guides for each partition in the partition path.
+    ARGS:
+    guides_path - path to folder with train/test partitions guides
+    partition_list - list of ints of partition numbers
+    train - flag to get train guides
+    test - flag to get test guides
+    '''
+    if train:
+        prefix = "Train_guides"
+    elif test:
+        prefix = "Test_guides"
+    else:
+        raise ValueError("Train or test flag is not given")
+    
+    k_partitions = {}
+    for partition in partition_list:
+        temp_path = os.path.join(guides_path, f"{prefix}_{partition}_partition.txt")
+        k_partitions[partition] =  create_guides_list(temp_path, 0)
+    return k_partitions
 ##########################################
 '''
 Partition utilities
@@ -263,4 +284,21 @@ def get_partition_information(partition_summary_path, partition_number):
         'sgRNAs': partition_data['Guides_amount'].values[0]
     }
 
+def split_given_partition_into_test_train_folders(file_path, output_path):
+    '''
+    Split given partition where each row is the guides in the partition into test and train folders.
+    '''
+    df = pd.read_csv(file_path)  # Read CSV without headers
+    # Step 2: Process data
+    guides = []  # Flattened list of all guides
+    k_groups = []  # List of partitions (indices)
+    current_index = 0
+    for _, row in df.iterrows():
+        group_guides = [g for g in row.dropna().tolist() if g]  # Remove NaNs and empty strings
+        group_indices = list(range(current_index, current_index + len(group_guides)))
+        guides.extend(group_guides)
+        k_groups.append(group_indices)
+        current_index += len(group_guides)
+    # Step 4: Call the function
+    write_guides_seperatley(k_groups, guides, output_path)
 

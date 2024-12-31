@@ -6,8 +6,66 @@ from file_utilities import create_paths
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 
+def plot_n_rank(n_rank_values, n_tpr_arrays, titles, output_path, general_title):
+    if len(n_rank_values) != len(n_tpr_arrays) != len(titles):
+        raise ValueError('All input lists must have the same length.')
+    #NOTE: check why tpr != 1
+    n_tpr_arrays,n_rank_values,titles = argsort_by(n_rank_values, n_tpr_arrays,n_rank_values,titles,descending=True) 
 
+    plt.figure(figsize=(8, 6))
+    for i in range(len(n_rank_values)):
+        x_values = np.arange(1, len(n_tpr_arrays[i]) + 1)
+        plt.plot(x_values, n_tpr_arrays[i], lw=2, label=f'{titles[i]} (N-rank = {n_rank_values[i]:.2f})')
+    plt.xlabel('Number of experiments', fontsize=14)
+    plt.ylabel('True positive rate', fontsize=14)
+    plt.yticks(fontsize=12)
+    plt.title('Receiver Operating Characteristic (ROC) Curve by N experiments')
+    plt.legend(loc='lower right',fontsize=11)
+    plt.grid(True)
+    if not "N_rank" in general_title:
+        general_title = general_title + "_N_rank"
+    plt.tight_layout()  # Adjust layout to minimize whitespace
+    plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+    plt.close()  # Close the figure to free memory
+def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, titles, output_path, general_title, positives, negatives):
+    '''
+    This functions plost the last true positive index and TPR for that point for each model.
+    Args:
+    1. last_tp_values: (list) of last true positive index values for each model.
+    2. tpr_arrays: (list) of true positive rates for each model.
+    3. titles: (list) of titles for each model.
+    4. output_path: (str) output path for saving the plot.
+    5. general_title: (str) general title for the plot.
+    6. information_dict: (dict) of information to add to the plot.
+    '''
+    if len(last_tp_index) != len(last_tp_ratio) != len(tpr_arrays) != len(titles):
+        raise ValueError('All input lists must have the same length.')
+    # argsort in asecnding order by the last tp values
+    last_tp_indices_sorted,tpr_arrays_sorted,titles_sorted = argsort_by(last_tp_index,last_tp_index, tpr_arrays,titles )
 
+    
+    # Create a figure
+    plt.figure(figsize=(8, 6))
+    for i in range(len(last_tp_indices_sorted)):
+        x_values = np.arange(1, len(tpr_arrays_sorted[i]) + 1)
+        color = plt.rcParams['axes.prop_cycle'].by_key()['color'][i % len(plt.rcParams['axes.prop_cycle'].by_key()['color'])]
+        plt.plot(x_values, tpr_arrays_sorted[i], lw=2,color=color, label=f'{titles_sorted[i]} (Last TP = {last_tp_indices_sorted[i]})')
+        plt.axvline(x=last_tp_indices_sorted[i], color=color,lw=1, linestyle='--')
+
+    plt.xlabel('Number of experiments', fontsize=14)
+    plt.ylabel('True positive rate', fontsize=14)
+    plt.yticks(fontsize=12)
+    plt.title('Last true positive index')
+    info_label = f'Positives: {positives}\nTotal: {positives + negatives}'
+    plt.plot([], [], ' ', label=info_label)  # Invisible line with empty style
+
+    plt.legend(loc='lower right',fontsize=11)
+    plt.grid(True)
+    if not "Last_TP" in general_title:
+        general_title = general_title + "_Last_TP"
+    plt.tight_layout()  # Adjust layout to minimize whitespace
+    plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+    plt.close()  # Close the figure to free memory
 def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
     '''This function plots the ROC curve for 1 or more models.
     Args:
@@ -21,20 +79,27 @@ def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
     Show the figure and saves it.'''
     if len(fpr_list) != len(tpr_list) != len(aurocs) != len(titles):
         raise ValueError('All input lists must have the same length.')
+    fpr_list,tpr_list,titles,aurocs = argsort_by(aurocs,  fpr_list, tpr_list, titles,aurocs, descending=True)
+
     plt.figure(figsize=(8, 6))
     for i in range(len(fpr_list)):
         plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.2f})')
     
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
-    plt.xlabel('False Positive Rate', fontsize=14)
+    plt.xlabel('False positive rate', fontsize=14)
     plt.xticks(fontsize=12)
-    plt.ylabel('True Positive Rate', fontsize=14)
+    plt.ylabel('True positive rate', fontsize=14)
     plt.yticks(fontsize=12)
     plt.title('Receiver Operating Characteristic (ROC) Curve')
     plt.legend(loc='lower right',fontsize=11)
     plt.grid(True)
-    plt.show()
-    plt.savefig(output_path + f"/{general_title}.png")
+    
+    if not "AUROC" in general_title:
+        general_title = general_title + "_AUROC"
+    plt.tight_layout()  # Adjust layout to minimize whitespace
+    plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+    plt.close()  # Close the figure to free memory
+   
 def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_title):
     '''This function plots the Precision-Recall curve for 1 or more models.
     Args:
@@ -48,6 +113,8 @@ def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_ti
     Show the figure and saves it.'''
     if len(recall_list) != len(precision_list) != len(auprcs) != len(titles):
         raise ValueError('All input lists must have the same length.')
+    auprcs_ = [auprc[0] for auprc in auprcs]
+    recall_list, precision_list, auprcs, titles = argsort_by(auprcs_,  recall_list, precision_list, auprcs,titles,descending=True)
     plt.figure(figsize=(8, 6))
     for i in range(len(recall_list)):
         plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUC = {auprcs[i][0]:.2f})')
@@ -60,8 +127,11 @@ def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_ti
     
     plt.legend(loc='upper right',fontsize=11)
     plt.grid(True)
-    plt.show()
-    plt.savefig(output_path + f"/{general_title}.png")
+    if not "AUPRC" in general_title:
+        general_title = general_title + "_AUPRC"
+    plt.tight_layout()  # Adjust layout to minimize whitespace
+    plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+    plt.close()  # Close the figure to free memory
 def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path):
     '''This function plots a scatter plot with a linear regression line, and adds the correlation coefficient and p-value to the plot.
     Args:
@@ -93,21 +163,40 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
 
 
 
+def argsort_by(argsort_by,  *lists, descending=False):
+    argsort_by = np.array(argsort_by)
+    indices = np.argsort(argsort_by)
+    if descending:
+        indices = indices[::-1]
+    sorted_lists = []
+    for lst in lists:
+        sort_lst_ = [lst[i] for i in indices]
+        sorted_lists.append(sort_lst_)
+    sorted_lists = tuple(sorted_lists)  # Collect sorted lists into a tuple
 
+
+
+    return sorted_lists
 
 def plot_binary_feature_heatmap(data_paths, plots_paths):
+   
     # Get all data tables paths
     all_tables = create_paths(data_paths)
-    all_tables = [(pd.read_csv(table),table.split(".csv")[0].split("/")[-1]) for table in all_tables] 
+    all_tables = [(pd.read_csv(table), table.split(".csv")[0].split("/")[-1]) for table in all_tables] 
     all_tables.sort(key=lambda x: x[1])    
     # Number of tables
     num_tables = len(all_tables)
 
+    # Determine grid dimensions for 2 rows
+    num_rows = 2
+    num_cols = int(np.ceil(num_tables / num_rows))
+
     # Create a grid of subplots
-    fig, axes = plt.subplots(1, num_tables, figsize=(5 * num_tables, 8), sharey=True)
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(6 * num_cols, 8 * num_rows), sharey=True)
+    axes = axes.flatten()  # Flatten for easy indexing
 
     # Iterate over tables and axes
-    for  (table_tuple,ax) in zip(all_tables, axes):
+    for idx, (table_tuple, ax) in enumerate(zip(all_tables, axes)):
         # Extract `geo_fold_pos` and `geo_fold_negative`
         table, table_name = table_tuple
         table.set_index("Index", inplace=True)
@@ -115,8 +204,8 @@ def plot_binary_feature_heatmap(data_paths, plots_paths):
 
         # Transpose the data for heatmap
         heatmap_data = heatmap_data.T
-        
-        # Create heatmap
+
+        # Create heatmap rotated for readability
         sns.heatmap(
             heatmap_data,
             ax=ax,
@@ -124,21 +213,23 @@ def plot_binary_feature_heatmap(data_paths, plots_paths):
             fmt=".2f",
             cmap="coolwarm",
             cbar=True,
-            xticklabels=table.index,
-            yticklabels=["geo_fold_pos", "geo_fold_negative"],
+            xticklabels=heatmap_data.columns,
+            yticklabels=heatmap_data.index,
         )
-        
-        # Title for each subplot
         ax.set_title(f"{table_name}", fontsize=14)
-        ax.set_xlabel("Features", fontsize=12)
+        ax.set_ylabel("Features", fontsize=12)
+        ax.tick_params(axis="x", rotation=90)  # Rotate x-axis labels for better readability
+
+    # Turn off any unused axes
+    for ax in axes[num_tables:]:
+        ax.axis('off')
 
     # Set common ylabel
-    fig.text(0.04, 0.5, "Metrics", va="center", rotation="vertical", fontsize=14)
 
     # Save the plot before calling plt.show()
     output_file = plots_paths + "binary_feature_heatmap.png"
+    plt.tight_layout()
     plt.savefig(output_file)
-
 
 
 
@@ -460,4 +551,20 @@ if __name__ == "__main__":
     # plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
     # plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
     # plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)
-    plot_binary_feature_heatmap("/home/dsi/lubosha/Off-Target-data-proccessing/Feature_correlations/Change-seq/Vivo-vitro/Binary","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-vitro/Feature_correlation/Binary")
+    pass
+    # list_arg = [0.3, 0.7, 0.1, 0.5]  # The list by which to sort
+    # from sklearn.metrics import roc_curve  
+    # fprs = []
+    # tprs =[]
+    # for i in range(4):
+    #     tpr,fpr,_ = roc_curve([0,1,1,0],[0.1,0.2,0.3,0.4])
+    #     tprs.append(tpr)
+    #     fprs.append(fpr)
+    # list1 = ['a', 'b', 'c', 'd']  # Example list 1
+
+    # list2 = [[1,2,3], np.array(2), np.array(3),np.array(4) ]  # Example list 2
+    # list3 = [10, 20, 30, 40]  # Example list 3
+    # titles = ['Title1', 'Title2', 'Title3', 'Title4']  # Another list to sort by the same indices
+    
+    # # Call the function to sort based on `argsort_by`
+    # list_arg, fprs,tprs, sorted_list3, sorted_titles = argsort_by(list_arg,list_arg, fprs, tprs, list3, titles, descending=True)

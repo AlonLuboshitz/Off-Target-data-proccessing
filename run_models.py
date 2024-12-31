@@ -4,47 +4,36 @@
 # ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
 # "Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"
 
-FORCE_USE_CPU = False
-
+FORCE_CPU = False
 from features_engineering import  order_data, get_tp_tn, extract_features, get_guides_indexes
-from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_auroc_auprc, evaluate_model
-from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw, get_gru_emd
-from utilities import validate_dictionary_input, split_epigenetic_features_into_groups
+from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_classification_model, evaluate_model
+from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw, get_gru_emd, argmax_layer
+from utilities import validate_dictionary_input
 from parsing import features_method_dict, cross_val_dict, model_dict, class_weights_dict
-from features_and_model_utilities import get_encoding_parameters
+from features_and_model_utilities import get_encoding_parameters, split_epigenetic_features_into_groups
+from train_and_test_utilities import split_to_train_and_val, split_by_guides
 from sklearn.utils.class_weight import compute_class_weight
+
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 import pandas as pd
 import numpy as np
 import time
-import logging
 import os
-
-if FORCE_USE_CPU:
-    os.environ["CUDA_VISIBLE_DEVICES"]="-1" 
-os.environ["CUDA_VISIBLE_DEVICES"]="1"  
+import signal
 import tensorflow as tf
 
-logger = tf.get_logger()
-logger.setLevel(logging.ERROR)
 
-gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-    try:
-        # Currently, memory growth needs to be the same across GPUs
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-    except RuntimeError as e:
-        # Memory growth must be set before GPUs have been initialized
-        print(e)
+def tf_clean_up():
+    tf.keras.backend.clear_session()
+    print("GPU memory cleared.")
+def set_signlas_clean_up():
+    signal.signal(signal.SIGINT, tf_clean_up)
+    signal.signal(signal.SIGSTOP, tf_clean_up)
 
 class run_models:
     def __init__(self) -> None:
-        self.ml_type = "" # String inputed by user
-        self.ml_name = ""
-        self.ml_task = None # class/reg
+        self.ml_type = self.ml_name = self.ml_task = None
+        
         self.shuffle = True
         self.if_os = False
         self.os_valid = False
@@ -53,23 +42,69 @@ class run_models:
         self.init_model_dict()
         self.init_cross_val_dict()
         self.init_features_methods_dict()
+        self.set_computation_power(FORCE_CPU)
         self.epigenetic_window_size = 0
-        self.features_columns = ""       
+        self.features_columns = "" 
+
     ## initairs ###
     # This functions are used to init necceseray parameters in order to run a model.
     # If the parameters are not setted before running the model, the program will raise an error.
 
-   
-
+    def set_computation_power(self, force_cpu=False):
+        '''
+        This function checks if there is an available GPU for computation.
+        If GPUs are available, it enables memory growth. 
+        If force_cpu is True, it forces the usage of CPU instead of GPU.
+        '''
+        if force_cpu:
+            # Forcing CPU usage by hiding GPUs
+            os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+            self.gpu_available = False
+            print("Forcing CPU computation, no GPU will be used.")
+            return
+        gpus = tf.config.list_physical_devices('GPU')  # Stable API for listing GPUs
+        if gpus:
+            try:
+                # Enabling memory growth for each GPU
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                logical_gpus = tf.config.list_logical_devices('GPU')  # Logical devices are virtual GPUs
+                print(f"{len(gpus)} Physical GPUs, {len(logical_gpus)} Logical GPUs")
+                gpu_available = True  # Indicating that GPU is available
+                #set_signlas_clean_up()
+            except RuntimeError as e:
+                # Handle the error if memory growth cannot be set
+                print(f"Error enabling memory growth: {e}")
+                gpu_available = False
+        else:
+            gpu_available = False
+            print("No GPU found. Using CPU.")
+        self.gpu_available = gpu_available
     def init_booleans(self):
         '''Features booleans'''
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_features_by_columns = False  
         self.method_init = False
     
-    def init_deep_hyper_params(self):
+
+    def init_deep_parameters(self, epochs = 5, batch_size = 1024, verbose = 2):
         '''Deep learning hyper parameters'''
-        self.hyper_params = {'epochs': 5, 'batch_size': 1024, 'verbose' : 2}# Add any other fit parameters you need
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.verbose = verbose
+        self.hyper_params = {'epochs': self.epochs, 'batch_size': self.batch_size, 'verbose' : self.verbose, 'callbacks' : [], 'validation_data': None}# Add any other fit parameters you need
     
+    def init_early_stoping(self):
+        '''Early stopping for deep learning models'''
+        
+        if self.early:
+            if self.paitence > 0:
+                early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=self.paitence, restore_best_weights=True)
+            else : early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=self.epochs, restore_best_weights=True)
+            
+        self.hyper_params.setdefault('callbacks', []).append(early_stopping)
+   
+
+
     def init_model_dict(self):
         ''' Create a dictionary for ML models'''
         self.model_dict = model_dict()
@@ -101,13 +136,28 @@ class run_models:
         
 
     def setup_runner(self, ml_task = None, model_num = None, cross_val = None, features_method = None, 
-                     over_sampling = None, cw = None, encoding_type = None, if_bulges = None):
+                     over_sampling = None, cw = None, encoding_type = None, if_bulges = None , early_stopping = None , deep_parameteres = None):
+        '''
+        This function sets the parameters for the model.
+        Args:
+        1. ml_task - classification or regression (str)
+        2. model_num - number of the model to use (int)
+        3. cross_val - cross validation method # Maybe can remove (int)
+        4. features_method - what feature included in the model (int)
+        5. over_sampling - if to use over sampling/downsampling (str)
+        6. cw - class wieghting - 1- true, 2 -false (int)
+        7. encoding_type - encoding type for the model and features (int)
+        8. if_bulges - if to include bulges in the encoding (Bool)
+        9. early_stopping - if to use early stopping - Tuple (Bool, number of epochs)
+        10. deep_parameteres - Tuple of epochs, batch size, verbose
+        '''
         self.set_model_task(ml_task)
-        self.set_model(model_num)
+        self.set_model(model_num, deep_parameteres)
         self.set_cross_validation(cross_val)
         self.set_features_method(features_method)
         self.set_over_sampling('n') # set over sampling
         self.set_class_wieghting(cw)
+        self.set_early_stopping(early_stopping[0],early_stopping[1])
         self.set_encoding_parameters(encoding_type, if_bulges)
         self.set_data_reproducibility(False) # set data, model reproducibility
         self.set_model_reproducibility(False)
@@ -133,7 +183,16 @@ class run_models:
         if answer == 1:
             self.cw = True
         else : self.cw = False
-
+    
+    def set_early_stopping(self, if_early = 1,paitence = None):
+        self.early = False
+        self.paitence = 0
+        if if_early == 1:
+            self.early = True
+            if paitence > 0:
+                self.paitence = int(paitence)
+            self.init_early_stoping()
+    
     def set_encoding_parameters(self,enconding_type, if_bulges):
         self.guide_length, self.bp_presntation = get_encoding_parameters(enconding_type, if_bulges)
         self.encoded_length =  self.guide_length * self.bp_presntation
@@ -143,6 +202,7 @@ class run_models:
         self.init_encoded_params = True
     '''Set seeds for reproducibility'''
     def set_deep_seeds(self,seed=42):
+        self.seed = seed
         tf.random.set_seed(seed) # Set seed for Python's random module (used by TensorFlow internally)
         tf.keras.utils.set_random_seed(seed)  # sets seeds for base-python, numpy and tf
         tf.config.experimental.enable_op_determinism()
@@ -155,7 +215,7 @@ class run_models:
             loc_seed = seed
         tf.random.set_seed(loc_seed) # Set seed for Python's random module (used by TensorFlow internally)
         tf.keras.utils.set_random_seed(loc_seed)  # sets seeds for base-python, numpy and tf
-
+        self.seed = loc_seed
     ## Features booleans setters
     def set_only_seq_booleans(self):
         self.if_bp = False
@@ -189,7 +249,7 @@ class run_models:
                 self.hyper_params['class_weight'] = class_weight_dict
         else :  return # no class wieghting for regression
     
-    def set_model(self, model_num_answer = None ):
+    def set_model(self, model_num_answer = None , deep_parameters = None):
         if self.model_type_initiaded:
             return # model was already set
         if not self.ml_task:
@@ -201,7 +261,7 @@ class run_models:
             self.ml_type = "ML"
         else : # Deep models
             self.ml_type = "DEEP"
-            self.init_deep_hyper_params()
+            self.init_deep_parameters(*deep_parameters if deep_parameters else None)
         self.ml_name = self.model_dict[model_num_answer]
         self.model_type_initiaded = True
             
@@ -214,7 +274,7 @@ class run_models:
             self.ml_task = "Classification"
         elif task.lower() == "regression" or task.lower() == "t_regression":
             self.ml_task = "Regression"
-        else : raise ValueError("Task must be classification or regression")
+        else : raise ValueError("Task must be classification or regression/t_regression")
 
     def set_cross_validation(self, cross_val_answer = None):
         if not self.model_type_initiaded:
@@ -228,7 +288,7 @@ class run_models:
             self.k = ""
         elif cross_val_answer == 2:
             self.cross_validation_method = "K_cross"
-            self.k = int(input("Set K (int): "))
+            # self.k = int(input("Set K (int): "))
         elif cross_val_answer == 3:
             self.cross_validation_method = "Ensemble"
         self.cross_val_init = True
@@ -263,9 +323,10 @@ class run_models:
         else : raise ValueError("Number of bigwig files must be a non negative integer")
     def get_parameters_by_names(self):
         '''This function returns the following atributes by their names:
-        Ml_name, Cross_validation_method, Features_type'''
-        return self.ml_name, self.cross_validation_method, self.feature_type
-               
+        Ml_name, Cross_validation_method, Features_type, epochs, batch_size'''
+        return self.ml_name, self.cross_validation_method, self.feature_type, [self.epochs,self.batch_size], self.early
+    def get_gpu_availability(self):
+        return self.gpu_available
     ## Over sampling setter
     def set_over_sampling(self, over_sampling):
         if self.os_valid:
@@ -370,6 +431,7 @@ class run_models:
             return SMOTE(sampling_strategy=balanced_ratio,random_state=42)
 
     
+        
     ## MODELS:
     '''1. GET MODEL - from models.py'''
     def get_model(self):
@@ -399,9 +461,13 @@ class run_models:
                 # if seperate epi/ only_seq=bp=false --> features added to seq encoding
                 # extract featuers/epi window from sequence enconding 
                 X_train = extract_features(X_train, self.encoded_length)
+            if self.early: # split to train and val
+                X_train,y_train,x_y_val = split_to_train_and_val(X_train,y_train,self.ml_task, seed=self.seed)
+            self.hyper_params["validation_data"] = x_y_val
             model.fit(X_train,y_train,**self.hyper_params)
         else :
             model.fit(X_train,y_train)
+        tf.keras.backend.clear_session()
         return model
     
     def predict_with_model(self, model, X_test):
@@ -524,7 +590,7 @@ class run_models:
             return y_scores_probs
         else: 
             evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
-        auroc,auprc = evaluate_auroc_auprc(y_test = y_test, y_pos_scores_probs = y_scores_probs)
+        auroc,auprc = evaluate_classification_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
         print(f"Ith: {i_iter}\{iterations} split is done")
         # write scores
@@ -550,22 +616,20 @@ class run_models:
         Saves: n trained models in output_path.
         Example: create_ensebmle(5,"/models",["ATT...TGG",...],seed_addition=10,positive_ratio=[0.5,0.7,0.9])'''
         
+        for j in range(n_models):
+            temp_path = os.path.join(output_path,f"model_{j+1}.keras")
+            print(f'Creating model {j+1} out of {n_models}')
+            self.create_model(output_path=temp_path,guides_train_list=guides_train_list,seed_addition=(j+1+seed_addition),x_features=x_features,y_labels=y_labels,guides=guides)
+
+    
+    def create_model(self, output_path, guides_train_list, seed_addition = 10, x_features=None, y_labels=None,guides=None):
         if x_features is None or y_labels is None or guides is None:
             raise RuntimeError("Cannot create ensemble without data : x_features, y_labels, guides")
-        else: # no data given, extract data from the file manager
-            guides_idx = self.keep_intersect_guides_indices(guides, guides_train_list) # keep only the train guides indexes
-            if (len(guides_idx) == len(guides)): # All guides are for training
-                x_train = np.concatenate(x_features, axis= 0)
-                y_train = np.concatenate(y_labels, axis= 0).ravel()
-            else:
-                x_train, y_train = self.split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
-        
-        for j in range(n_models):
-            self.set_deep_seeds(seed = (j+1+seed_addition)) # repro but random init (j+1 not 0)
-            model = self.train_model(X_train=x_train,y_train=y_train)
-            temp_path = os.path.join(output_path,f"model_{j+1}.keras")
-            model.save(temp_path)
-    
+        else: 
+            x_train,y_train,g_idx = split_by_guides(guides, guides_train_list, x_features, y_labels)
+        self.set_deep_seeds(seed = seed_addition) # repro but random init (j+1 not 0)
+        model = self.train_model(X_train=x_train,y_train=y_train)
+        model.save(output_path)
     def test_ensmbel(self, ensembel_model_list, tested_guide_list,x_features=None, y_labels=None,guides=None):
         '''This function tests the models in the given ensmble.
         By defualt it test the models on the tested_guide_list, If test_on_guides is False:
@@ -576,48 +640,27 @@ class run_models:
         3. test_on_guides - boolean to test on the given guides or on the diffrence guides'''
         # Get data
         if x_features is None or y_labels is None or guides is None:
-            x_features, y_labels, guides = self.get_features()
-        guides_idx = self.keep_intersect_guides_indices(guides, tested_guide_list) # keep only the test guides indexes
+            raise RuntimeError("Cannot test ensemble without data : x_features, y_labels, guides")
+        x_test, y_test, guides_idx = split_by_guides(guides, tested_guide_list, x_features, y_labels)
         all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
-        x_test, y_test = self.split_by_indexes(x_features, y_labels, guides_idx) # split by test indexes
-        
         # init 2d array for y_scores 
         # Row - model, Column - probalities
         y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
         for index,model_path in enumerate(ensembel_model_list): # iterate on models and predict y_scores
-            model = tf.keras.models.load_model(model_path,safe_mode=False)
+            model = tf.keras.models.load_model(model_path, custom_objects={'argmax_layer': argmax_layer})
             # self.set_random_seeds(seed = (index+1+additional_seed))
             model_predictions = self.predict_with_model(model=model,X_test=x_test).ravel() # predict and flatten to 1d
             y_scores_probs[index] = model_predictions
         return y_scores_probs, y_test, all_guides_idx
-    def keep_diffrence_guides_indices(self, guides, test_guides):
-        '''This function returns the indexes of the guides that are NOT in the given test_guides 
-        Be good to train/test on the guides not presnted in the given guides 
-        Args:
-        1. guides - list of guides
-        2. test_guides - list of guides to keep if exists in guides'''
-        return [idx for idx, guide in enumerate(guides) if guide not in test_guides]
-    def keep_intersect_guides_indices(self,guides, test_guides):
-        '''This function returns the indexes of the guides that are in the given test_guides 
-        Be good to train/test on the guides given 
-        Args:
-        1. guides - list of guides
-        2. test_guides - list of guides to keep if exists in guides'''
-        return [idx for idx, guide in enumerate(guides) if guide in test_guides]
     
-    def split_by_indexes(self, x_features, y_labels, indices):
-        x_, y_ = [], [] 
-        
-        for idx in indices:
-            x_.append(x_features[idx])
-            y_.append(y_labels[idx])
-        # Concatenate into np array and flatten the y arrays
-        x_ = np.concatenate(x_, axis= 0)
-        y_ = np.concatenate(y_, axis= 0).ravel()
-        return x_, y_
+    def test_model(self, model_path, tested_guide_list,x_features=None, y_labels=None,guides=None):
+        x_test, y_test, guides_idx = split_by_guides(guides, tested_guide_list, x_features, y_labels)
+        all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
+        #model = tf.keras.models.load_model(model_path, safe_mode=False)
 
-        
-
+        model = tf.keras.models.load_model(model_path, custom_objects={'argmax_layer': argmax_layer})
+        model_predictions = self.predict_with_model(model=model,X_test=x_test).ravel() # predict and flatten to 1d
+        return model_predictions, y_test, all_guides_idx
     ## RUN TYPES:
     # only seq
         
