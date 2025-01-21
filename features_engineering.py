@@ -8,7 +8,7 @@ import os
 from pybedtools import BedTool
 from sklearn.utils import shuffle
 import itertools
-from features_and_model_utilities import get_encoding_parameters
+from features_and_model_utilities import get_encoding_parameters, transform_labels
 ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 
 ## FUNCTIONS:
@@ -43,6 +43,7 @@ def return_df_without_guides(data_frame, guide_to_exlucde, data_frame_column):
         data_frame: A dataframe containing the data
         guide_to_exclude: (Tuple) (guides_description, path to guides to exclude from the data, target_columns)
     '''
+    
     description, path, target_columns = guide_to_exlucde
     guides_to_exclude = set()
     guides_data = pd.read_csv(path)
@@ -120,7 +121,7 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
         elif if_only_seq:
             x_data = seq_info
         else : # add features into 
-            x_data = guide_data_frame[features_columns].values
+            x_data = guide_data_frame[features_columns].values.astype(np.int8)
             x_data = np.append(seq_info, x_data, axis = 1)
         if "Index" in guide_data_frame.columns:
             ALL_INDEXES.append(guide_data_frame["Index"])
@@ -392,39 +393,18 @@ def create_nucleotides_to_position_mapping():
 
     return nucleotides_to_position_mapping
 ## Data and features manipulation
-'''Function to extract the guides indexes given which guides to keep.
-The guides to keep are given as a list of indexes.
-The function take the guides_indexes and return from ALL_INDEXES and spesific guide indexes'''
+
 def get_guides_indexes(guide_idxs):
+    '''
+    Function to extract the guides indexes given which guides to keep.
+The guides to keep are given as a list of indexes.
+The function take the guides_indexes and return from ALL_INDEXES and spesific guide indexes
+'''
     choosen_indexes = [index for idx in guide_idxs for index in ALL_INDEXES[idx]]
     choosen_indexes = np.array(choosen_indexes)
     return choosen_indexes
 
-### Transformations ###
-def transform_labels(y_vals, transform_type):
-    '''Transform the y values based on the given transformation type.
-    The y_vals can be 1d np array or list of 1d np arrays.
-    Returns the transformed y values.'''
-    transform_type = transform_type.lower()
-    if transform_type == "log":
-        return log_transformation(y_vals)
-    else:
-        raise ValueError("Invalid transformation type.")
-def log_transformation(y_vals):
-    '''Conduct log transformation on the y values.
-    The y_vals can be 1d np array or list of 1d np arrays.
-    Returns the transformed y values.'''
-    if isinstance(y_vals, list):
-        transformed = [np.log(y_val + 1) for y_val in y_vals]
-        for index,array in enumerate(transformed):
-            if array.size != y_vals[index].size:
-                raise ValueError("The size of the log transformed array does not match the original array.")
-        return transformed
-    else:
-        transformed = np.log(y_vals + 1)
-        if len(transformed) != len(y_vals):
-            raise ValueError("The size of the log transformed array does not match the original array.")
-        return transformed
+
     
 
 '''given feature list, label list split them into

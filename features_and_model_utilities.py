@@ -197,5 +197,37 @@ def set_task_column(task, args):
         raise ValueError("Invalid task")
     return args
 
+### Transformations ###
+def transform_labels(y_vals, transform_type):
+    '''Transform the y values based on the given transformation type.
+    The y_vals can be 1d np array or list of 1d np arrays.
+    Returns the transformed y values.'''
+    transform_type = transform_type.lower()
+    if transform_type == "log":
+        return log_transformation(y_vals)
+    elif transform_type == "minmax":
+        return minmax_transformation(y_vals)
+    else:
+        raise ValueError("Invalid transformation type.")
+def log_transformation(y_vals):
+    import numpy as np
+    '''Conduct log transformation on the y values.
+    The y_vals can be 1d np array or list of 1d np arrays.
+    Returns the transformed y values.'''
+    if isinstance(y_vals, list):
+        transformed = [np.log(y_val + 1) for y_val in y_vals]
+        for index,array in enumerate(transformed):
+            if array.size != y_vals[index].size:
+                raise ValueError("The size of the log transformed array does not match the original array.")
+        return transformed
+    else:
+        transformed = np.log(y_vals + 1)
+        if len(transformed) != len(y_vals):
+            raise ValueError("The size of the log transformed array does not match the original array.")
+        return transformed
+def minmax_transformation(y_vals):
+    normalized_data = (y_vals - y_vals.min()) / (y_vals.max() - y_vals.min())
+    return normalized_data
+
 ############################## DEEP LEARNING UTILITIES ##############################
 

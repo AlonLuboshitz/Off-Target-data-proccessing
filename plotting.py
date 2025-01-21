@@ -423,10 +423,13 @@ def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,o
     output_path = output_path + f"/{title}.png"
     plt.savefig(output_path)
 
-def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, title, y_label, path,partition_information= None):
+def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, 
+                                       title, y_label, path,partition_information= None ,asecnding = False):
     plt.clf()
     # Sort indices based on mean values
     sorted_indices = np.argsort(mean_values)
+    if asecnding:
+        sorted_indices = sorted_indices[::-1]
     mean_values_sorted = [mean_values[i] for i in sorted_indices]
     x_values_sorted = [x_values[i] for i in sorted_indices]
     std_sorted = [std_values[i] for i in sorted_indices]
@@ -509,10 +512,10 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
-    plt.show()
 
     path = path + f"/{title}.png"
-    plt.savefig(path)
+    plt.savefig(path,dpi=300)
+    plt.close()
 def add_pval_legend(plt):
     pval_dict = define_pval_dict()
     for key, value in pval_dict.items():

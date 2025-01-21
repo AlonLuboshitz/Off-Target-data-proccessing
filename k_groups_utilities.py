@@ -4,9 +4,10 @@ import os
 import ast
 from Data_labeling_and_processing import return_constrained_data
 from data_constraints_utilities import get_ot_constraint_name
-from file_utilities import create_folder, validate_path
+from file_utilities import create_folder
 def create_k_balanced_groups(dataset, target_column, label_column, k, output_name, seperate_grna_path, y_labels_tup = None, constrained_guides = None):
-    '''Given y_labels and k, create k groups with rougly eqaul amount of labels in each group
+    '''
+    Given y_labels and k, create k groups with rougly eqaul amount of labels in each group
     Args: 
         dataset - path for the dataset
         target_column - name of the target column
@@ -136,15 +137,14 @@ def save_complete_partition_information(k_groups, labels, guides, output_name):
     complete_info_df.to_csv(f'{output_name}.csv', index=False)
     print(f"Complete partition information saved at {output_name}")
 
-def get_k_groups_ensemble_args(partitions, models, ensembles, multi_process = False, other_feature_columns = None, method = None):
+def get_k_groups_ensemble_args(partitions, models, ensembles, multi_process = False,  method = None):
     if not method: # None
         raise ValueError("Method is not given")
     elif method == 1: # only sequence features
         return get_k_groups_ensemble_args_only_seq(partitions, models, ensembles, multi_process)
     elif method == 2: # epigenetic features
         return get_k_groups_ensemble_args_epi_features(partitions, models, ensembles, multi_process)
-    elif method == 5: # other features
-        return get_k_groups_ensebmle_args_other_features(partitions, models, ensembles, multi_process, other_feature_columns)
+    
     else:
         raise ValueError("Method is not valid")
 def get_k_groups_ensemble_args_only_seq(partitions, models, ensembles,multi_process=False):
@@ -164,15 +164,6 @@ def get_k_groups_ensemble_args_epi_features(partitions, n_models, n_ensmbels, mu
         cross_val_params = (n_models, n_ensmbels, [partition])
         model_params = (None,None,3,2) # 3 - ensemble, 2 - epigenetic features
         multi_process_args.append((model_params,cross_val_params,multi_process)) # model_params, cross_val_params, multi_process
-    return multi_process_args
-
-def get_k_groups_ensebmle_args_other_features(partitions, n_models, n_ensmbels, multi_process= False, other_feature_columns = None):
-    if other_feature_columns is None:
-        raise ValueError("Other feature columns are not given")
-    multi_process_args = []
-    for partition in partitions:
-        cross_val_params = (n_models, n_ensmbels, [partition])
-        multi_process_args.append((None,cross_val_params,False, other_feature_columns))
     return multi_process_args
 
 def get_k_groups_guides(guides_path, partition_list, train = False, test = False):

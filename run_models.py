@@ -1,19 +1,13 @@
-# python script for feature engineering - for each guideseq exp retrive:
-# x - (Guide rna (TargetSeq),Off-target(Siteseq)) --> one hot enconding
-# y - label (1 - active off target), (0 - inactive off target)
-# ENCONDING : vector of 6th dimension represnting grna and offtarget sequences and missmatches.
-# "Chromstate_atacseq_peaks_score","Chromstate_atacseq_peaks_fold_enrichemnt","Chromstate_h3k4me3_peaks_score","Chromstate_h3k4me3_peaks_fold_enrichemnt"
 
-FORCE_CPU = True
+FORCE_CPU = False
 from features_engineering import  order_data, get_tp_tn, extract_features, get_guides_indexes
-from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_classification_model, evaluate_model
+from evaluation import get_auc_by_tpr, get_tpr_by_n_expriments, evaluate_classification, evaluate_model
 from models import get_cnn, get_logreg, get_xgboost, get_xgboost_cw, get_gru_emd, argmax_layer
 from utilities import validate_dictionary_input, get_memory_usage
 from parsing import features_method_dict, cross_val_dict, model_dict, class_weights_dict
 from features_and_model_utilities import get_encoding_parameters, split_epigenetic_features_into_groups
 from train_and_test_utilities import split_to_train_and_val, split_by_guides
 from sklearn.utils.class_weight import compute_class_weight
-
 from imblearn.over_sampling import RandomOverSampler, SMOTE
 import pandas as pd
 import numpy as np
@@ -80,6 +74,12 @@ class run_models:
             gpu_available = False
             print("No GPU found. Using CPU.")
         self.gpu_available = gpu_available
+    # def set_gpu(self, gpu_number):
+    #     if not self.gpu_available:
+    #         raise RuntimeError("No GPU available")
+    #     if gpu_number < 0:
+    #         raise ValueError("GPU number must be a non negative integer")
+    #     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_number)
     def init_booleans(self):
         '''Features booleans'''
         self.if_only_seq = self.if_seperate_epi = self.if_bp = self.if_features_by_columns = False  
@@ -591,7 +591,7 @@ class run_models:
             return y_scores_probs
         else: 
             evaluate_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
-        auroc,auprc = evaluate_classification_model(y_test = y_test, y_pos_scores_probs = y_scores_probs)
+        auroc,auprc = evaluate_classification(y_test = y_test, y_pos_scores_probs = y_scores_probs)
         n_rank_score = get_auc_by_tpr(tpr_arr=get_tpr_by_n_expriments(predicted_vals = y_scores_probs, y_test = y_test, n = 1000))
         print(f"Ith: {i_iter}\{iterations} split is done")
         # write scores
@@ -623,10 +623,13 @@ class run_models:
             self.create_model(output_path=temp_path,guides_train_list=guides_train_list,seed_addition=(j+1+seed_addition),x_features=x_features,y_labels=y_labels,guides=guides)
 
     
-    def create_model(self, output_path, guides_train_list, seed_addition = 10, x_features=None, y_labels=None,guides=None):
+    def create_model(self, output_path, guides_train_list, seed_addition = 10, x_features=None, y_labels=None,guides=None,shared=False):
         if x_features is None or y_labels is None or guides is None:
             raise RuntimeError("Cannot create ensemble without data : x_features, y_labels, guides")
         else: 
+            # if shared:
+            #     x_features = convert_shared_x_to_x_feature_list(x_features)
+            #     y_labels = convert_shared_y_to_y_label_list(y_labels)
             x_train,y_train,g_idx = split_by_guides(guides, guides_train_list, x_features, y_labels)
         self.set_deep_seeds(seed = seed_addition) # repro but random init (j+1 not 0)
         model = self.train_model(X_train=x_train,y_train=y_train)

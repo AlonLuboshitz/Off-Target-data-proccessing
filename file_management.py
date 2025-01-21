@@ -22,7 +22,7 @@ import os
 #import pyBigWig
 from utilities import validate_non_negative_int
 from k_groups_utilities import create_guides_list
-from file_utilities import create_paths
+from file_utilities import create_paths, get_ending
 #import pybedtools
 
 class File_management:
@@ -30,8 +30,12 @@ class File_management:
     def __init__(self, models_path = None , ml_results_path = None, guides_path = None,
                     epigenetics_bed = None , epigenetic_bigwig = None,
                     vivo_silico_path = None, vivo_vitro_path = None,vitro_silico_path=None, partition_information_path = None,
-                    plots_path = None) -> None: 
+                    plots_path = None, job = None) -> None: 
         self.set_paths = False
+        if job:
+            self.job = job.lower()
+        else:
+            raise Exception("Job type not set")
         self.set_all_paths(models = models_path, ml_results = ml_results_path, guides_path = guides_path,
                             vivo_silico = vivo_silico_path, vivo_vitro = vivo_vitro_path,
                               vitro_silico=vitro_silico_path, epi_folder = epigenetics_bed, bigiw_folder = epigenetic_bigwig,
@@ -193,15 +197,14 @@ class File_management:
             full_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,epoch_batch,early_stop,cross_validation,features)
             plots_path = os.path.join(model_task,ots_constriants,encoding_type,class_weight,model_name,epoch_batch,early_stop,cross_validation)
         self.add_type_to_models_paths(full_path)
-        
-        self.plots_path = self.add_to_path(self.plots_path,plots_path)
+        self.add_type_to_plots_path(plots_path)        
         self.task = model_task
         
     def add_exlucde_guides(self, exclude_guides = None):
         if exclude_guides:
             exclude_guides = "Exclude_" + exclude_guides[0]
             self.add_type_to_models_paths(exclude_guides)
-            self.plots_path = self.add_to_path(self.plots_path,exclude_guides)
+            self.add_type_to_plots_path(exclude_guides)
               
 
 
@@ -232,7 +235,7 @@ class File_management:
         if (suffix_str not in self.models_path) and (suffix_str not in self.ml_results_path):
             self.add_type_to_models_paths(suffix_str)
         if (suffix_str not in self.plots_path):
-            self.plots_path = self.add_to_path(self.plots_path,suffix_str)
+            self.add_type_to_plots_path(suffix_str)
         else:
             raise Exception(f"Suffix {suffix_str} already in model or results paths:\n {self.models_path}\n{self.ml_results_path}")
     
@@ -250,18 +253,35 @@ class File_management:
         self.validate_path_exsits(path)
         self.merged_data_path = path
         self.ml_results_path = self.add_to_path(self.ml_results_path,name)
-        self.plots_path = self.add_to_path(self.plots_path,name)
+        self.add_type_to_plots_path(name)
         self.other_test_data_initiated = True
+    
     def add_type_to_models_paths(self, type):
-        '''Given a type create folders in ML_results and Models with the type
+        '''
+        Given a type create folders in ML_results and Models with the type
+        if job is train create only the models path.
         type will be anything to add:
         1. model type - cnn,rnn...
         2. cross val type -  k_fold, leave_one_out,ensmbel,
         3. features - only_seq, epigenetics, epigenetics_in_seq, spatial_epigenetics'''
         self.validate_ml_results_and_model()
        # create folders
-        self.ml_results_path = self.add_to_path(self.ml_results_path,type)
-        self.models_path = self.add_to_path(self.models_path,type)
+        if self.job == "test":
+            self.models_path = self.add_to_path(self.models_path,type)
+            self.ml_results_path = self.add_to_path(self.ml_results_path,type)
+        elif self.job == "train":      
+            self.models_path = self.add_to_path(self.models_path,type)
+        elif self.job == "evaluation" or self.job == "process":
+            self.ml_results_path = self.add_to_path(self.ml_results_path,type)
+
+    def add_type_to_plots_path(self, type):
+        '''
+        Adds a type to the plots path if the job is setted to evaluation.
+        '''
+        if self.job == "evaluation":
+            self.plots_path = self.add_to_path(self.plots_path,type)
+        
+           
   
     ## ENSMBELS and K fold partitions and paramaters ##    
     def add_partition_path(self, partition_str = None):
@@ -441,7 +461,7 @@ class File_management:
     def create_bigwig_files_objects(self):
         self.bigwig_files = []
         for path in create_paths(self.bigwig_folder_path):
-            name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
+            name = get_ending(path) # retain the name of the file (includes the marker)
             try:
                 name_object_tpl = (name,pyBigWig.open(path))
                 self.bigwig_files.append(name_object_tpl)
@@ -452,7 +472,7 @@ class File_management:
     # def create_bed_files_objects(self):
     #     self.bed_files = []
     #     for path in create_paths(self.epigenetics_folder_path):
-    #         name = path.split("/")[-1].split(".")[0] # retain the name of the file (includes the marker)
+    #         name = get_ending(path) # retain the name of the file (includes the marker)
     #         try:
     #             name_object_tpl = (name,pybedtools.BedTool(path))
     #             self.bed_files.append(name_object_tpl)

@@ -4,7 +4,7 @@ This module is for handeling train/test/validation splits of the features and la
 
 from sklearn.model_selection import train_test_split
 import numpy as np
-
+from utilities import add_row_to_np_array
 
 def split_to_train_and_val(x, y, task, seed = 42, val_size = 0.1):
     """
@@ -99,3 +99,17 @@ def split_by_guides(guides, guides_t_list, x_features, y_labels):
         x_train, y_train = split_by_indexes(x_features, y_labels, guides_idx) # split by traing indexes
     return x_train, y_train, guides_idx
 
+def add_labels_and_indexes_to_predictions(y_scores, y_test, test_indexes):
+    '''
+    This function adds the actual labels and the indexes of the data points to the scores.
+    Args:
+    1. y_scores - (np.array) - the predictions of the model.
+    2. y_test - (np.array) - the actual labels of the data points.
+    3. test_indexes - (np.array) - the indexes of the data points.
+    -----------
+    Returns: np.array with the predictions, labels and indexes.
+    '''
+    y_scores_with_test = add_row_to_np_array(y_scores, y_test)  # add accual labels to the scores
+    y_scores_with_test = add_row_to_np_array(y_scores_with_test, test_indexes) # add the indexes of each data point
+    y_scores_with_test = y_scores_with_test[:,y_scores_with_test[-1,:].argsort()] # sort by indexes
+    return y_scores_with_test

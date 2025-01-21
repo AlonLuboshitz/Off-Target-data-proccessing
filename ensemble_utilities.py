@@ -2,6 +2,25 @@
 Module for ensemble utilities.
 '''
 from file_utilities import find_target_folders
+from utilities import validate_non_negative_int
+class ensemble_parmas:
+    def __init__(self, n_models = None, n_ensembles = None, partition_num = None, job = None):
+        self.n_models = validate_non_negative_int(n_models)
+        self.n_ensembles = validate_non_negative_int(n_ensembles)
+        self.partition_num = partition_num
+        
+
+    def set_file_manager_ensemble_params(self, file_manager = None, train = None, test = None):
+        '''
+        This function sets the file manager ensemble parameters.
+        '''
+        if not file_manager:
+            raise ValueError("file_manager is None")
+        file_manager.set_partition(self.partition_num, train, test)
+        file_manager.set_n_ensembels(self.n_ensembles)
+        file_manager.set_n_models(self.n_models)
+        return file_manager, self.n_models, self.n_ensembles
+        
 
 def get_scores_combi_paths_for_ensemble(ml_results_path,n_ensembles,n_modles, all_features=False  ):
     '''
@@ -18,7 +37,9 @@ def get_scores_combi_paths_for_ensemble(ml_results_path,n_ensembles,n_modles, al
         ml_results_path = ml_results_path.split("Ensemble")[0]
     scores_combis_paths =  find_target_folders(ml_results_path, ["Scores", "Combi"])
     # remove folder that dont hold the n_ensembles and n_models
+    filtered_paths = []
     for path in scores_combis_paths:
-        if f'{n_ensembles}_ensembels' not in path or f'{n_modles}_models' not in path:
-            scores_combis_paths.remove(path)
-    return scores_combis_paths
+        if f'{n_ensembles}_ensembels' in path and f'{n_modles}_models' in path:
+            filtered_paths.append(path)
+    return filtered_paths
+

@@ -20,8 +20,11 @@ def create_paths(folder):
 '''create folder in spesefic path'''
 def create_folder(path, extend = None):
     if not os.path.exists(path):
-        os.makedirs(path)
-        print("created new folder: ", path)
+        try:
+            os.makedirs(path)
+            print("created new folder: ", path)
+        except Exception as e:
+            print(f"Error: {e}")
     if not extend is None:
         path = os.path.join(path,extend)
         if not os.path.exists(path):
@@ -85,6 +88,10 @@ def get_bed_files(bed_files_folder):
                 bed_files.append(bed_path)
     return bed_files
 
+
+def get_ending(txt):
+    ending = txt.split("/")[-1].split(".")[0]
+    return ending
 
 def copy_ensmebles():
     import os
