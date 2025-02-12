@@ -123,7 +123,7 @@ def validate_dictionary_input(answer, dictionary):
 
         
 '''Function writes 2d array to csv file'''
-def write_2d_array_to_csv(np_array, file_path, header, fmt = '%.5f'):
+def write_2d_array_to_csv(np_array, file_path, header, fmt = '%.16e'):
     if np_array.ndim != 2:
         raise Exception("np_array must be 2d")
     if file_path.split(".")[-1] != "csv":

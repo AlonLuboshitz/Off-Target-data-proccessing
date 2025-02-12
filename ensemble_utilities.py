@@ -43,3 +43,73 @@ def get_scores_combi_paths_for_ensemble(ml_results_path,n_ensembles,n_modles, al
             filtered_paths.append(path)
     return filtered_paths
 
+
+
+def copy_ml_results_from_1_to_10_ensembles(base_10, base_1):
+    import os
+    import shutil
+    """
+    Running 10_ensebmles ussualy done after running one ensmble. Creating 9 ensebmles and adding the first one is a good time saver.
+    This function copies the ensemble_1.csv files from subdirectories in base_1 to corresponding
+    subdirectories in base_10 if they exist.
+    
+    Args:
+        base_10 (str): Base directory for 10_ensembles.
+        base_1 (str): Base directory for 1_ensembles.
+    Example usage
+    base_10 = "/localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/10_ensembels/50_models/Binary_epigenetics"
+    base_1 = "/localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics"
+
+    copy_ml_results_from_1_to_10_ensembles(base_10, base_1)
+    """
+    for root, dirs, files in os.walk(base_1):
+        if "Scores" in root:
+            # Extract subdirectory name
+            subdir = os.path.basename(os.path.dirname(root))
+            
+            # Define source and destination paths
+            src = os.path.join(root, "ensemble_1.csv")
+            dest_dir = os.path.join(base_10, subdir, "Scores")
+            dest = os.path.join(dest_dir, "ensemble_1.csv")
+            
+            # Check if the source file exists
+            if os.path.isfile(src):
+                # Create target directory if it doesn't exist
+                os.makedirs(dest_dir, exist_ok=True)
+                
+                # Copy the file
+                shutil.copy2(src, dest)
+                print(f"Copied {src} to {dest}")
+            else:
+                print(f"Source file {src} does not exist. Skipping.")
+
+def copy_ensemble_model_from_1_to_10(base_10, base_1):
+    import os
+    import shutil
+    """
+    Running 10_ensebmles ussualy done after running one ensmble. Creating 9 ensebmles and adding the first one is a good time saver.
+    This function copies the ensemble_1 folder files from subdirectories in base_1 to corresponding
+    subdirectories in base_10 if they exist.
+    
+    Args:
+        base_10 (str): Base directory for 10_ensembles.
+        base_1 (str): Base directory for 1_ensembles.
+    Example usage
+    base_10 = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/10_ensembels/50_models/Binary_epigenetics"
+    base_1 = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics"
+
+    copy_ensemble_model_from_1_to_10(base_10, base_1)
+    """
+    for root, dirs, files in os.walk(base_1):
+        if "ensemble_1" in dirs:
+            # Extract subdirectory name
+            subdir = os.path.basename(root)
+            # Define source and destination paths
+            src = os.path.join(root, "ensemble_1")
+            dest_dir = os.path.join(base_10, subdir, "ensemble_1")
+            if not os.path.exists(dest_dir):
+                os.makedirs(dest_dir)
+            # Copy the 'ensemble_1' directory
+            shutil.copytree(src, dest_dir, dirs_exist_ok=True)
+            print(f"Copied {src} to {dest_dir}")
+

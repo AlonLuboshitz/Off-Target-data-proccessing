@@ -29,11 +29,6 @@ global ARGS, PHATS, COLUMNS, TRAIN, TEST, MULTI_PROCESS
 
 
 
-
-### NOTE: add return information of num_processes from the model_runner by GPU number.
-### NOTE: set the number of processes by that number globaly.
-### NOTE: split epignetic multi_process args to run in each process
-
 def set_args(argv):
     parser = main_argparser()
     args = parse_args(argv, parser)
@@ -313,7 +308,7 @@ def evaluate_ensemble_by_guides_in_other_data():
     scores_combi_paths = get_scores_combi_paths_for_ensemble(ml_results_path,ARGS.n_ensmbels,ARGS.n_models,True)
     eval_obj = evaluation(ARGS.task)
     guide_indexes = keep_indexes_per_guide(file_manager.get_merged_data_path(),COLUMNS["TARGET_COLUMN"])
-    eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,guide_indexes,file_manager.get_plots_path())
+    eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,guide_indexes,file_manager.get_plots_path(),ARGS.data_name)
 def set_evaluation_args():
     ARGS.cross_val = 3
     file_manager = init_file_management()
