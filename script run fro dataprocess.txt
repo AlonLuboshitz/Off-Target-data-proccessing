@@ -3,7 +3,15 @@ python "/home/alon/masterfiles/pythonscripts/data_processing.py" "/home/alon/mas
 
 
 cd /localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/
-cd /localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models
+cd /localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_shapiro_park/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/10_ensembels/50_models/Scores/ensemble_1.csv
+cd /localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/10_ensembels/50_models/Binary_epigenetics
+/localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_guideseqs/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics
+
+shapiro_park
+cd /localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_shapiro_park/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/
 
 
 cd /localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/T_Regression/Log/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/
+cd /localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/T_Regression/Log/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/
+
+/localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/10_ensembels/50_models/Scores/ensemble_1.csv

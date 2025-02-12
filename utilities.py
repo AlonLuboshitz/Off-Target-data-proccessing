@@ -123,7 +123,7 @@ def validate_dictionary_input(answer, dictionary):
 
         
 '''Function writes 2d array to csv file'''
-def write_2d_array_to_csv(np_array, file_path, header):
+def write_2d_array_to_csv(np_array, file_path, header, fmt = '%.16e'):
     if np_array.ndim != 2:
         raise Exception("np_array must be 2d")
     if file_path.split(".")[-1] != "csv":
@@ -132,7 +132,7 @@ def write_2d_array_to_csv(np_array, file_path, header):
         if len(header) != np_array.shape[1]:
             raise Exception("header must be the same length as the number of columns in the np_array") 
    
-    np.savetxt(file_path, np_array, delimiter=',', fmt='%.5f', header=','.join(header), comments='')
+    np.savetxt(file_path, np_array, delimiter=',', fmt=fmt, header=','.join(header), comments='')
 def add_row_to_np_array(y_scores, y_test):
     # if y_scores.dtype != y_test.dtype:
     #     raise Exception("y_scores and y_test must have the same dtype")
@@ -143,10 +143,15 @@ def add_row_to_np_array(y_scores, y_test):
     return np.vstack((y_scores, y_test))
 
 def extract_scores_labels_indexes_from_files(paths):
-    '''Given a list of paths for csv files containing models predicitions scores
+    '''
+    Given a list of paths for csv files containing models predicitions scores
 extract the scores and combine them into one np array.
 The last line the file should contain the indexes of each data point
-The second raw from the end the actual labels '''
+The second raw from the end the actual labels
+ '''
+    if isinstance(paths, list):
+        if len(paths) == 0:
+            raise Exception("Paths list is empty")
     all_scores = []
     for path in paths:
         # Read the file
@@ -248,6 +253,10 @@ def union_partitions_stats(data_path):
 
 ### Numeric Validations
 def validate_non_negative_int(number):
+    '''
+    Returns the number if it is a non-negative integer.
+    Else raise an error.
+    '''
     if not isinstance(number, int):
         raise Exception("Number must be an integer")
     if number < 1:
@@ -288,11 +297,11 @@ def concat_change_seq_df():
     merged= merged.drop(columns=["Index"])
     merged["Index"] = merged.index
     merged.to_csv("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivovitro_nobulges_withEpigenetic_indexed.csv",index=False)
-if __name__ == "__main__":
-    a =get_feature_column_suffix("Subset1-Binary_epigenetics", ["Chromstate_H3K27ac_peaks_binary","Chromstate_ATAC-seq_peaks_binary","Chromstate_H3K4me3_peaks_binary"])
-    print(a)
-    union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
-    # #list_50 = [i for i in range(2,51)]
+#if __name__ == "__main__":
+    # a =get_feature_column_suffix("Subset1-Binary_epigenetics", ["Chromstate_H3K27ac_peaks_binary","Chromstate_ATAC-seq_peaks_binary","Chromstate_H3K4me3_peaks_binary"])
+    # print(a)
+    # union_partitions_stats("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv")
+    # # #list_50 = [i for i in range(2,51)]
     # list_50 = [50]
     # dict_50_only_seq = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/Only_seq/1_partition_50/Combi",list_50)
     # dict_50_atac = extract_combinatorical_results("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/Ensembles/Epigenetic_binary/1_partition/1_partition_50/Atacseq/Combi",list_50)
@@ -316,8 +325,6 @@ if __name__ == "__main__":
     # print(len(idx_list))
    
     
-    
-    pass
     # list_dcits_only_seq = {i : None for i in range(10,81,10)} # 10,20,30,40,50,60,70,80
     # for partition in list_dcits_only_seq.keys():
     #     temp_path = f"/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/CNN/Ensemble/Only_sequence/1_partition/1_partition_{partition}/Combi"

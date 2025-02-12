@@ -27,7 +27,7 @@ def plot_n_rank(n_rank_values, n_tpr_arrays, titles, output_path, general_title)
     plt.tight_layout()  # Adjust layout to minimize whitespace
     plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
     plt.close()  # Close the figure to free memory
-def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, titles, output_path, general_title, positives, negatives):
+def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, titles, output_path, general_title, information):
     '''
     This functions plost the last true positive index and TPR for that point for each model.
     Args:
@@ -56,8 +56,9 @@ def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, titles, output_path, 
     plt.ylabel('True positive rate', fontsize=14)
     plt.yticks(fontsize=12)
     plt.title('Last true positive index')
-    info_label = f'Positives: {positives}\nTotal: {positives + negatives}'
-    plt.plot([], [], ' ', label=info_label)  # Invisible line with empty style
+    if information:
+        label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
+        plt.plot([], [], ' ', label=label_text)  # Invisible line with empty style
 
     plt.legend(loc='lower right',fontsize=11)
     plt.grid(True)
@@ -83,7 +84,7 @@ def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
 
     plt.figure(figsize=(8, 6))
     for i in range(len(fpr_list)):
-        plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.2f})')
+        plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.4f})')
     
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
     plt.xlabel('False positive rate', fontsize=14)
@@ -117,7 +118,7 @@ def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_ti
     recall_list, precision_list, auprcs, titles = argsort_by(auprcs_,  recall_list, precision_list, auprcs,titles,descending=True)
     plt.figure(figsize=(8, 6))
     for i in range(len(recall_list)):
-        plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUC = {auprcs[i][0]:.2f})')
+        plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUC = {auprcs[i][0]:.3f})')
     plt.plot([], [], ' ', label=f'Baseline = {auprcs[0][1]:.5f}')  # Empty plot for baseline legend entry
     plt.xlabel('Recall', fontsize=14)
     plt.xticks(fontsize=12)
@@ -423,10 +424,13 @@ def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,o
     output_path = output_path + f"/{title}.png"
     plt.savefig(output_path)
 
-def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, title, y_label, path,partition_information= None):
+def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, 
+                                       title, y_label, path,partition_information= None ,asecnding = False, fmt='.3f'):
     plt.clf()
     # Sort indices based on mean values
     sorted_indices = np.argsort(mean_values)
+    if asecnding:
+        sorted_indices = sorted_indices[::-1]
     mean_values_sorted = [mean_values[i] for i in sorted_indices]
     x_values_sorted = [x_values[i] for i in sorted_indices]
     std_sorted = [std_values[i] for i in sorted_indices]
@@ -456,13 +460,13 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
         for i, bar in enumerate(bars):
             model = x_values_sorted[i]
             if model == "Only-seq":
-                plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.3f}', va='center', fontsize=10, color='white')
+                plt.text((bar.get_width() - 2*std_sorted[i])  , bar.get_y() + (width/2), f'{mean_values_sorted[i]:{fmt}}', va='center', fontsize=10, color='white')
                 continue
             else :
                 p_val = p_values[model]
                 annotation = p_val_annotation(p_val)
-            plt.text(bar.get_width() + std_sorted[i] + 0.001 , bar.get_y() + (width/2), annotation, va='center', fontsize=8)
-            plt.text((bar.get_width()+min_x)/2  - 0.001 , bar.get_y() + (width/2), f'{mean_values_sorted[i]:.3f}', va='center', fontsize=10,color='white')
+            plt.text(bar.get_width() + std_sorted[i] + 0.0005 , bar.get_y() + (width/2), annotation, va='center', fontsize=8)
+            plt.text((bar.get_width() - 2*std_sorted[i]) , bar.get_y() + (width/2), f'{mean_values_sorted[i]:{fmt}}', va='center', fontsize=10,color='white')
 
             if "epigenetics" in model:
                 multi = True
@@ -509,10 +513,10 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
-    plt.show()
 
     path = path + f"/{title}.png"
-    plt.savefig(path)
+    plt.savefig(path,dpi=300)
+    plt.close()
 def add_pval_legend(plt):
     pval_dict = define_pval_dict()
     for key, value in pval_dict.items():

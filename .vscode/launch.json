@@ -98,13 +98,25 @@
             "justMyCode": true
         },
         {
-            "name": "main",
+            "name": "main_args",
             "type": "python",
             "request": "launch",
             "program": "main.py",
             "args": [
                 "--argfile",
                 "/home/dsi/lubosha/Off-Target-data-proccessing/Args.txt"
+                
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "main_args_log_transform",
+            "type": "python",
+            "request": "launch",
+            "program": "main.py",
+            "args": [
+                "--argfile",
+                "/home/dsi/lubosha/Off-Target-data-proccessing/Args_log_transform.txt"
                 
             ],
             "justMyCode": true

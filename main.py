@@ -5,17 +5,17 @@ from file_management import File_management
 from file_utilities import create_paths, keep_only_folders
 from evaluation import evaluation
 from utilities import   print_dict_values, get_memory_usage
-from utilities import write_2d_array_to_csv,  add_row_to_np_array, validate_non_negative_int
+from utilities import write_2d_array_to_csv
 from utilities import get_k_choose_n,  convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio
 from data_constraints_utilities import with_bulges
 from k_groups_utilities import get_k_groups_ensemble_args, create_guides_list,get_k_groups_guides, partition_data_for_histograms
-from train_and_test_utilities import split_by_guides
+from train_and_test_utilities import split_by_guides, add_labels_and_indexes_to_predictions
 from features_engineering import generate_features_and_labels, keep_indexes_per_guide
 from features_and_model_utilities import get_features_columns_args_ensembles, parse_feature_column_dict,split_epigenetic_features_into_groups, get_feature_column_suffix
 from parsing import features_method_dict, cross_val_dict, model_dict,encoding_dict, early_stoping_dict
 from parsing import class_weights_dict,off_target_constrians_dict, main_argparser, parse_args, validate_main_args
 from time_loging import log_time, save_log_time, set_time_log
-from ensemble_utilities import get_scores_combi_paths_for_ensemble
+from ensemble_utilities import ensemble_parmas, get_scores_combi_paths_for_ensemble 
 import os
 import json
 import random
@@ -23,25 +23,11 @@ import numpy as np
 import sys
 import time
 import atexit
+import traceback
 
 global ARGS, PHATS, COLUMNS, TRAIN, TEST, MULTI_PROCESS
 
 
-
-
-
-### I want to remove the dependece on file_manager from the run_models, and maybe feature engeriing. 
-# The main should accpect the following:
-### MOVE ALL PATHS ADDITION FROM RUN_MODELS TO MAIN
-
-
-# 1. Path to the data and external features data paths. - The main will init file manager to handle the data paths. It will use the 
-# file manager to pass the needed arguments to the feature engineering.
-# 2. Features to run the model with.
-# 2. Type of task for the model - classification, regression. 
-# 3. Type of model - CNN,XGboost etc..
-# 
-# With respect to data path, external feature paths ###
 
 def set_args(argv):
     parser = main_argparser()
@@ -66,11 +52,13 @@ def set_multi_process(gpu_availability):
         
 
 def set_cross_val_args(file_manager, train = False, test = False, cross_val_params = None, cross_val = None ):
-    '''This function sets the cross validation arguments for the file manager.
+    '''
+    This function sets the cross validation arguments for the file manager.
     If no cross vaildation method given the fucntion will use the argument given to main.py
     For leave_one_out will set the parameters for file manager needed for leave one out
     For k_groups will set the parameters for file manager needed for k_groups
-    For ensemble will set the parameters for file manager needed for ensemble amd return the t_guides, n_models, n_ensmbels'''
+    For ensemble will set the parameters for file manager needed for ensemble amd return the t_guides, n_models, n_ensmbels
+    '''
     if not cross_val:
         cross_val = ARGS.cross_val
     if not cross_val_params:
@@ -86,27 +74,11 @@ def set_cross_val_args(file_manager, train = False, test = False, cross_val_para
         t_guides = get_k_groups_guides(guide_path,ARGS.partition,train,test)
         return t_guides, None, None
     elif cross_val == 3: # Ensemble
-        n_models, n_ensmbels, partition_num = parse_ensemble_params(*cross_val_params)
-        file_manager.set_partition(partition_num, train, test)
-        file_manager.set_n_ensembels(n_ensmbels)
-        file_manager.set_n_models(n_models)
+        ens_parms = ensemble_parmas(*cross_val_params, ARGS.job)
+        file_manager,n_models,n_ensmbels = ens_parms.set_file_manager_ensemble_params(file_manager, train, test)
         t_guides = file_manager.get_guides_partition()
         return t_guides, n_models, n_ensmbels
 
-def parse_ensemble_params(n_models = None, n_ensmbels = None, partition_num = None):
-    '''This function parse given ensemble parameters. 
-    If no parameters are given the function will set the parameters given in the arguments to main.py.
-    -----------
-    Returns: n_models, n_ensmbels, partition_num'''
-    if not n_models:
-        n_models = ARGS.n_models
-    if not n_ensmbels:
-        n_ensmbels = ARGS.n_ensmbels
-    if not partition_num:
-        partition_num = ARGS.partition
-    n_models = validate_non_negative_int(n_models)
-    n_ensmbels = validate_non_negative_int(n_ensmbels)
-    return n_models, n_ensmbels, partition_num
 
 
 
@@ -136,7 +108,8 @@ def init_file_management(params=None, phats = None):
                                    guides_path=phats["Guides_path"], vivo_silico_path=phats["Vivo-silico"], 
                                    vivo_vitro_path=phats["Vivo-vitro"], epigenetics_bed=phats["Epigenetic_folder"], 
                                    epigenetic_bigwig=phats["Big_wig_folder"], 
-                                   partition_information_path=phats["Partition_information"], plots_path=phats["Plots_path"])
+                                   partition_information_path=phats["Partition_information"], plots_path=phats["Plots_path"],
+                                   job=ARGS.job)
     if not params: # None
         ml_name, cross_val, feature_type,epochs_batch,early_stop = model_dict()[ARGS.model], cross_val_dict()[ARGS.cross_val], features_method_dict()[ARGS.features_method], ARGS.deep_params, ARGS.early_stoping[0]
     else:
@@ -214,9 +187,13 @@ def get_x_y_data(file_manager, model_runner_booleans, features_columns = None):
     return x,y,guides
 
 def init_evaluation_and_process(base_path, multi_process = False):
-    '''This function init an evaluation object and process the scores of the ensemble into a combi file.
-    If multi_process is False it will not multi process the inner function used - process_single_ensemble_scores'''
+    '''
+    This function init an evaluation object and use it to process the scores folder an ensemble into a proccesed score folder.
+    The proccesed score folder will contain the averaged predictions for each sample.
+    If multi_process is False it will not multi process the inner function used - process_single_ensemble_scores
+    '''
     evaluation_obj = evaluation(ARGS.task)
+    print(f"Processing scores in {base_path}")
     evaluation_obj.process_single_ensemble_scores(base_path,multi_process)
 
 
@@ -275,7 +252,6 @@ def process_ensemble():
     return {
         1: process_ensemble_only_seq,
         2: process_ensemble_by_features,
-        5: process_ensemble_by_features,
     }
 
 def process_ensemble_only_seq(cross_val_params = None, multi_process = True):
@@ -332,7 +308,7 @@ def evaluate_ensemble_by_guides_in_other_data():
     scores_combi_paths = get_scores_combi_paths_for_ensemble(ml_results_path,ARGS.n_ensmbels,ARGS.n_models,True)
     eval_obj = evaluation(ARGS.task)
     guide_indexes = keep_indexes_per_guide(file_manager.get_merged_data_path(),COLUMNS["TARGET_COLUMN"])
-    eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,ARGS.n_models,guide_indexes,file_manager.get_plots_path())
+    eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,guide_indexes,file_manager.get_plots_path(),ARGS.data_name)
 def set_evaluation_args():
     ARGS.cross_val = 3
     file_manager = init_file_management()
@@ -525,6 +501,7 @@ def test_k_groups_only_seq(if_plot = True):
     '''
     This functions tests every model in k_cross partition and calculate it evaluation metric.
     NOTE: ADD ARGUMENTS FOR FEATURES AND MULTIPROCESSING
+    NOTE: DEAL WITH PLOT PATH FROM FILE MANAGER AS IT NOT SET FOR TESTING!
     '''
     runner, file_manager , x_features, y_features, all_guides, guides, n_models, n_ensmbels = init_run()
     models_path = file_manager.get_model_path()
@@ -605,6 +582,7 @@ def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params
                                                n_models = n_models, n_ensmbels = n_ensmbels, features_dict = features_dict, multi_process = False)
         with Pool(processes=10) as pool:
             pool.starmap(create_ensembels_for_a_given_feature, arg_list) 
+    
     else: # multi_process = True/False and n_ensmbels > 1
         arg_list = get_features_columns_args_ensembles(runner= runner, file_manager = file_manager, t_guides = train_guides, 
                                              model_base_path = model_base_path, ml_results_base_path = ml_results_base_path,
@@ -615,7 +593,8 @@ def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params
 
 
 
-def create_ensembels_for_a_given_feature(group, feature,runner, file_manager,train_guides,model_base_path,ml_results_base_path,n_models=50, n_ensmbels=10, multi_process = False):
+def create_ensembels_for_a_given_feature(group, feature,runner, file_manager,train_guides,model_base_path,ml_results_base_path,
+                                         n_models=50, n_ensmbels=10, multi_process = False,all_epigenetics = False):
     '''This function create a ensemble for a given group of features and A feature in that group by utilizing the create_n_ensembles function.
     It extracts the x_features, y_features and all_guides from the file manager given the specific feature and create the ensembles.
     ARGS:
@@ -628,10 +607,15 @@ def create_ensembels_for_a_given_feature(group, feature,runner, file_manager,tra
     7. ml_results_base_path: str - ml results path " " " " " " " " ..
     8. n_models: int - number of models in each ensemble
     9. n_ensmbels: int - number of ensembles
-    10. multi_process: bool - passed to create_n_ensembles function to multiprocess the ensembles.'''
+    10. multi_process: bool - passed to create_n_ensembles function to multiprocess the ensembles.
+    11. all_epigenetics: bool - default True, if False the function will not use all epigenetic features in the group.
+    '''
     log_time(f'Create_ensmbels_with_epigenetic_features_{group}_{feature}_start')
-    x_features,y_features,all_guides = get_x_y_data(file_manager, runner.get_model_booleans(),  feature)
     temp_suffix = get_feature_column_suffix(group,feature) # set path to epigenetic data type - binary, by score, by enrichment.
+    if not all_epigenetics: # Dont run all epigenetics
+        if "All-epigenetics" in temp_suffix:
+            return
+    x_features,y_features,all_guides = get_x_y_data(file_manager, runner.get_model_booleans(),  feature)
     file_manager.set_models_path(model_base_path) # set model path
     file_manager.set_ml_results_path(ml_results_base_path) # set ml results path
     file_manager.add_type_to_models_paths(temp_suffix) # add path to train ensmbel
@@ -640,7 +624,7 @@ def create_ensembels_for_a_given_feature(group, feature,runner, file_manager,tra
     log_time(f'Create_ensmbels_with_epigenetic_features_{group}_{feature}_end')
     # Delete data free memory
     del x_features, y_features
-def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, y_, all_guides, multi_process = False, start_from = 3): 
+def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, y_, all_guides, multi_process = False, start_from = 2): 
     '''This function creates n ensembles with n models for each ensemble.
     It will use the file manager to create train folders for each ensmbel.
     It will use the model runner to train the model in that folder.
@@ -653,14 +637,22 @@ def create_n_ensembles(n_ensembles, n_models, guides, file_manager, runner, x_, 
     6. x_: np.array - features
     7. y_: np.array - labels
     8. all_guides: list of all guides in the data
-    9. multi_process: bool - if True and the number of ensmebles is bigger than 1, the function will multiprocess the ensembles.'''
+    9. multi_process: bool - if True and the number of ensmebles is bigger than 1, the function will multiprocess the ensembles.
+    10. start_from: (int) - default 2, the function will start from the given ensemble number so totaly will create n_ensebmles - startfrom ensembles.
+    '''
     # Generate argument list for each ensemble
-    ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10),x_,y_,all_guides) for i in range(start_from, n_ensembles+1)]
+    if n_ensembles == 1:
+        ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(1), guides,(1*10),x_,y_,all_guides) ]
+    elif n_ensembles >= start_from: # more than 1 ensemble to create. validate start from is lower than number of ensembles
+        ensemble_args_list = [(n_models, file_manager.create_ensemble_train_folder(i), guides,(i*10),x_,y_,all_guides) for i in range(start_from, n_ensembles+1)]
+    else:
+        raise ValueError("Start from is bigger than number of ensembles")
     # Create_ensmbel accpets - n_models, output_path, guides, additional_seed for reproducibility
     if multi_process and n_ensembles > 1 and MULTI_PROCESS:
         # Create a pool of processes
         cpu_count = os.cpu_count()
         num_proceses = min(cpu_count, n_ensembles)
+        
         with Pool(processes=num_proceses) as pool:
             pool.starmap(runner.create_ensemble, ensemble_args_list)
     else : 
@@ -712,9 +704,7 @@ def test_enmsbel_scores(runner, ensmbel_path, test_guides, score_path, x_feature
     y_scores, y_test, test_indexes = runner.test_ensmbel(models_path_list, test_guides, x_features, y_labels, all_guides)
     # Save raw scores in score path
     temp_output_path = os.path.join(score_path,f'{ensmbel_path.split("/")[-1]}.csv')
-    y_scores_with_test = add_row_to_np_array(y_scores, y_test)  # add accual labels to the scores
-    y_scores_with_test = add_row_to_np_array(y_scores_with_test, test_indexes) # add the indexes of each data point
-    y_scores_with_test = y_scores_with_test[:,y_scores_with_test[-1,:].argsort()] # sort by indexes
+    y_scores_with_test = add_labels_and_indexes_to_predictions(y_scores, y_test, test_indexes)
     write_2d_array_to_csv(y_scores_with_test,temp_output_path,[])
 
 
@@ -729,7 +719,7 @@ def test_ensemble_by_features(model_params= None, cross_val_params= None, multi_
     else : 
         runner, file_manager  = init_model_runner_file_manager(model_params)
         t_guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = False, test = True, cross_val_params = cross_val_params)
-    if not features_dict: # None
+    if not features_dict: 
         features_dict = parse_feature_column_dict(ARGS.features_columns,only_epigenetics=True)
     else:
         features_dict = features_dict
@@ -746,8 +736,12 @@ def test_ensemble_by_features(model_params= None, cross_val_params= None, multi_
             test_ensemble_via_epi_feature_2(*arg)
     
 def test_ensemble_via_epi_feature_2(group, feature, runner, file_manager, t_guides, model_base_path, ml_results_base_path,n_models, n_ensmbels, multi_process):
-    
+    # NOTE: ALL EPIGENETIS!
+    skip_all_epigenetics = True
     group_epi_path = get_feature_column_suffix(group,feature)
+    if "All-epigenetics" in group_epi_path:
+        if skip_all_epigenetics:
+            return
     file_manager.set_models_path(model_base_path)
     file_manager.set_ml_results_path(ml_results_base_path)
     file_manager.add_type_to_models_paths(group_epi_path)
@@ -777,14 +771,6 @@ def set_reproducibility_models(file_manager, run_models, model_path):
     run_models.set_model_reproducibility(True)
     run_models.set_data_reproducibility(False)
 
-def run_model_only_seq(run_models, model_name):
-    run_models.run(True, 1, model_name)
-def run_model_only_epigenetic(run_models, model_name):
-    run_models.run(True, 2, model_name)
-def run_model_seq_nd_epigenetic(run_models, model_name):
-    run_models.run(True, 3, model_name)
-def run_model_seperate_epigenetics(run_models, model_name):
-    run_models.run(True, 4, model_name)
 def run_reproducibility_data(run_models, model_name, file_manager, k_times):
     #set_reproducibility_data(file_manager, run_models, DATA_REPRODUCIBILITY)
     for i in range(k_times):
@@ -927,6 +913,8 @@ if __name__ == "__main__":
         run()
     except Exception as e:
         print(e)
+        traceback.print_exc()  # Print the full traceback
+
     #evalaute_all_partitions()
     # partition_data_for_histograms("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv",
     #                               partition_information_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",

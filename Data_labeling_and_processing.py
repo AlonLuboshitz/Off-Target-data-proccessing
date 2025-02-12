@@ -5,7 +5,7 @@ import re
 import numpy as np
 import pybedtools
 import time
-from file_utilities import validate_path, create_folder, remove_dir_recursivly, get_bed_files
+from file_utilities import validate_path, create_folder, remove_dir_recursivly, get_bed_files, get_ending
 
 ORDERED_COLUMNS_IDENTIFIED_GS = ['chrom','chromStart','chromEnd','Position','Filename','strand','offtarget_sequence','target','realigned_target','Read_count','missmatches','insertion','deletion','bulges','Label']
 NORMAL_ORDERED_COLUMNS = ['chrom','chromStart','chromEnd','offtarget_sequence','target','strand','realigned_target','Read_count','missmatches','insertion','deletion','bulges']
@@ -372,7 +372,6 @@ def add_info_to_casofinder_file(data):
     data['chromEnd'] = data['chromStart'] + data['offtarget_sequence'].str.len() 
     print(data.head(5))
     print(data.info())
-    #data['chromEnd'] = data['chromStart'] + 23 # assuming all guide are 23 bp
     data['Read_count'] = data['insertion'] = data['deletion'] = data['bulges'] = data['Position'] = data["Label"] = 0 
     data['realigned_target'] = data['target'] # set realigned target to target
     data['Filename'] = '' # set filename to empty
@@ -481,24 +480,30 @@ def read_to_df_add_label(path , label, if_negative=False):
     return table
 
 ### Epigenetic assignment ###
-def get_bed_columns(bedtool):
+def get_bed_columns(bedtool, columns_dict = {4:"score",6:"fold_enrichemnt",7:"logp",8:"logq"}):
     '''This function accepts a bedtool and returns the columns of the bedtool as a list.
     The function add the score, fold_enrichement, logp and logq columns to the list.
     Args:
     1. bedtool - a bedtool object
+    2. columns_dict - a dictionary with the columns names {column_number: column_name} - {5:score...} (columns are 0 based)
+    defualt is 4-score,6-fold,7logp, 8logq
     ------------
     Returns: a list of columns'''
     # Get the first interval
     first_interval = next(iter(bedtool))
     # Get the number of fields (columns) for the first interval
     num_fields = len(first_interval.fields)
-    columns = []
-    for i in range(num_fields):
-            columns.append(i+1)
-    columns[4] = "score"
-    columns[6] = "fold_enrichemnt"
-    columns[7] = "logp"
-    columns[8] = "logq"
+    columns = [i for i in range(1,num_fields+1)]
+    if num_fields <= 3:
+        # only chr,start,end
+        return columns
+    elif columns_dict:
+        for num, column_name in columns_dict.items():
+            if num in range(num_fields):
+                columns[num] = column_name
+            else:
+                break
+    
     return columns
 def intersect_with_epigentics(whole_data,epigentic_data,if_strand):
     '''This function intersects off-target data with epigenetic data/data from bed file.
@@ -578,12 +583,12 @@ def assign_epigenetics(off_target_data,intersection,file_ending,score_type_dict=
     if (labeled_epig_1 + labeled_epig_0) != len(off_target_data):
         raise RuntimeError("The amount of labeled epigenetics is not equal to the amount of data")
     print(f"length of intersect: {len(intersection)}, amount of labled epigenetics: {labeled_epig_1}")
+    active_labeled = sum((off_target_data[columns_dict['binary']]==1) & (off_target_data['Label']>0))
+    total_actives = sum(off_target_data['Label'] > 0)
+    print(f'total actives data points: {total_actives}, out of them: {active_labeled} marked with {file_ending}')
     print(f'length of data: {len(off_target_data)}, 0: {labeled_epig_0}, 1+0: {labeled_epig_1 + labeled_epig_0}')
     return off_target_data
 
-def get_ending(txt):
-    ending = txt.split("/")[-1].split(".")[0]
-    return ending
 def run_intersection(merged_data_path,bed_folder,if_update):
     '''This function intersect off-target data with given folder of epigenetic data given in bed files.
     It will intersect the data with each bed file in the folder and assign the epigenetic data to the off-target data.
@@ -841,9 +846,6 @@ def add_inserertion_deletion(data, align_target_column, off_target_column, bulge
     print(f"Number of rows where bulges > 0: {bulges_count}")
     print(f"Number of rows where insertion or deletion > 0: {insertion_deletion_count}")
     return data
-
-
-
 def replace_N_for_ot(grna, ot):
     '''This function replaces the N in the grna sequence with the corresponding base from the offtarget sequence.
     Args:
@@ -852,6 +854,88 @@ def replace_N_for_ot(grna, ot):
     ------------
     Returns: guide sequence with the N replaced.'''
     return grna.replace('N',ot)
+
+
+
+def split_data_by_guides(whole_data = None, guides_list=None, guide_column=None, 
+                         output_suffix=None, output_prefix=None, output_path=""):
+    '''
+    This function splits a data frame by the given guides.
+    It create a new data frame with the data for the given guides.
+    Args:
+    1. whole_data - (data_frame/str) of the data
+    2. guides_list - (list) of guides to split the data by
+    3. target_column - (str) column for the guide sequence
+    4. output_suffix - (str) suffix for the output file
+    5. output_prefix - (str) prefix for the output file
+    6. output_path - (str) path for the output file
+    ------------
+    Returns: None
+    Saves the new data frame in the output path.
+    '''
+    if isinstance(whole_data, str):
+        if not output_prefix:
+            output_prefix = get_ending(whole_data)
+        whole_data = pd.read_csv(whole_data)
+    if whole_data.empty:
+        raise ValueError("No data frame given.")
+    
+    if not guides_list:
+        raise ValueError("No guides list given.")
+    if not output_suffix:
+        raise ValueError("No output suffix given.")
+    
+    current_guides = set(whole_data[guide_column])
+    guides_list = set(guides_list)
+    intersect = current_guides.intersection(guides_list)
+    print(f"Current guides: {len(current_guides)}, Guides to keep: {len(guides_list)}, Intersect: {len(intersect)}")
+    filtered_data = whole_data[whole_data[guide_column].isin(guides_list)]
+    filtered_guides = set(filtered_data[guide_column])
+    if filtered_guides != intersect:
+        raise ValueError("Not all guides were filtered.")
+    filtered_data.to_csv(os.path.join(output_path,f"{output_prefix}_{output_suffix}.csv"),index=False)
+    
+def split_data_by_name(data=None, name=None, name_column = None, if_by_guides = False, guide_column=None,
+                       output_suffix=None, output_prefix=None, output_path=""):
+    '''
+    This function splits the data by a given name.
+    It creates a new data frame with the data for the given name.
+    Args:
+    1. data - (data_frame/str) of the data
+    2. name - (str) name to split the data by, (list) of names.
+    3. name_column - (str) column for the name
+    4. if_by_guides - (bool) if True the function will split the data by the guides of the given name
+    5. guide_column - (str) column for the guide sequence
+    6. output_suffix - (str) suffix for the output file
+    7. output_prefix - (str) prefix for the output file
+    8. output_path - (str) path for the output file
+    ------------
+    Returns: None
+    Saves the new data frame in the output path.
+
+    example:
+    split_data_by_name("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT.csv",
+                       ["2020_Shapiro","2019_Park"], "Dataset", True, 'target', 'shapiro_park')
+    '''
+    if not data:
+        raise ValueError("No data frame given.")
+    if isinstance(data, str):
+        if not output_prefix:
+            output_prefix = get_ending(data) # get the name of the data
+        data = pd.read_csv(data)
+    if data.empty:
+        raise ValueError("Data frame is empty.")
+    if if_by_guides:
+        # Get the guide of the given name and split by guides
+        if isinstance(name, str):
+            name = [name]
+        guides = data[data[name_column].isin(name)][guide_column].tolist()
+        split_data_by_guides(whole_data=data, guides_list=guides, 
+                             guide_column=guide_column, output_suffix=output_suffix,
+                              output_prefix=output_prefix, output_path=output_path)
+    else:
+        filtered_data = data[data[name_column] == name]
+        filtered_data.to_csv(os.path.join(output_path,f"{output_suffix}.csv"),index=False)
 '''
 function gets path for identified (guideseq output data) folder and calls:
 process_folder function, which creates csv folder named: identified_labeled_sub_only
@@ -862,8 +946,9 @@ argv 3 - keep the identified label folder or erase it
 '''
 if __name__ == '__main__':
     ### assign epigenetic
-    run_intersection("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto.csv",
-                     "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Bed",False)
+    
+    run_intersection("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_shapiro_park.csv",
+                     "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/HSPC",False)
                           
     
     

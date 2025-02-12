@@ -203,7 +203,10 @@ def validate_test_on_other_data(args):
     '''
     This function validates that if job is test and partitions is all then test_on_other_data must be given.'''
     if isinstance(args.partition[0],str):
-        if ((args.job.lower() == "test" or args.job.lower() == "evaluation") and args.partition[0].lower() == 'all'): # other data should be given
+        if args.job.lower() == "train":
+            args.test_on_other_data = None
+        elif args.partition[0].lower() == 'all': # job is test/evaluation/process
+        # other data should be given
             try:
                 args.test_on_other_data = set_test_on_other_data(args.test_on_other_data)
             except ValueError as e:
@@ -257,3 +260,5 @@ def set_method(args):
         raise ValueError("Epigenetic bigwig folder and epigenetic window size must be given for spatial epigenetics")
     
     return args
+
+
