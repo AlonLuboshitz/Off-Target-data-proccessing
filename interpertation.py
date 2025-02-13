@@ -130,32 +130,42 @@ def get_shaply_values(model, x_background, explainer_type, num_of_points=None, s
     Returns:
         shap_values (list of numpy arrays): Computed SHAP values for each output class (or regression target).
     """
-    if specific_indices is not None:
-        x_selected = x_background[specific_indices]
-    elif num_of_points is not None:
-        x_selected = x_background[:num_of_points]
-    else:
-        x_selected = x_background
-    grouping = [list(range(i * 25, (i + 1) * 25)) for i in range(24)]
+    
+    additional_features = 0
     if not only_seq:
-        x_selected = extract_features(x_selected, encoded_length= 600)
-        grouping.append(list(range(600 , 600 + len(x_selected[1]))))  
-    feature_names = [f"Base_{i+1}" for i in range(24)] + ["epigenetics"]
+        x_background = extract_features(x_background, encoded_length= 600)
+        additional_features = len(x_background[1])
     if explainer_type == 'deep':
-        explainer = shap.Explainer(model, x_selected)
+        explainer = shap.Explainer(model, x_background)
 
         #explainer = shap.DeepExplainer(model, x_selected)
     elif explainer_type == 'gradient':
-        explainer = shap.GradientExplainer(model, x_selected)
+        explainer = shap.GradientExplainer(model, x_background)
     elif explainer_type == 'kernel':
-        explainer = shap.KernelExplainer(model.predict, x_selected)
+        explainer = shap.KernelExplainer(model.predict, x_background)
     else:
         print('using default explainer: shap.Explainer')
-        explainer = shap.Explainer(model, x_selected)
-    shap_values = explainer.shap_values(x_selected)
-    shap_values_grouped = np.array([shap_values.values[:, group].sum(axis=1) for group in grouping]).T
+        explainer = shap.Explainer(model, x_background)
+    shap_values = explainer.shap_values(x_background)
+    shap_values, feature_names = convert_features_names(shap_values, np.sum, 24, 25, additional_features)
+    return shap_values,feature_names, explainer
+def convert_features_names(shap_values, agg_function, seqeunce_length, bits_per_base, additional_features_length):
+    '''
+    Convert the shap values of all features into group of features
+    by aggregating the values of each group of features
+    Args:
+        shap_values (list of numpy arrays): List of SHAP value arrays.
+        agg_function (function): Aggregation function to use.
+    Returns:
+        list of numpy.ndarray: Aggregated SHAP values.
+    '''
+    grouping = [list(range(i * bits_per_base, (i + 1) * bits_per_base)) for i in range(seqeunce_length)]
+    total_sequence_length = seqeunce_length * bits_per_base
+    grouping.append(list(range(total_sequence_length , total_sequence_length + additional_features_length)))  
+    feature_names = [f"Base_{i+1}" for i in range(24)] + ["epigenetics"]
+    shap_values_grouped = np.array([shap_values[:, group].sum(axis=1) for group in grouping]).T
+    return shap_values_grouped, feature_names
 
-    return shap_values_grouped
 
 def average_shap_values(shap_values_list):
     """
@@ -255,14 +265,26 @@ def run_shap(model_path,data_path,explainer_type,output_path,
     x_background,y,guides = get_data(data_path)
     if specific_guides is not None:
         x_background,y,guides = split_by_guides(guides,specific_guides,x_background,y)
+    elif specific_indices is not None:
+        x_selected = x_background[specific_indices]
+    else:
+        x_selected = x_background
+    if num_of_points is not None:
+        x_selected = x_background[:num_of_points]
     shap_values_list = []
     for model in models:
-        shap_values = get_shaply_values(model, x_background, explainer_type, num_of_points, specific_indices)
+        shap_values = get_shaply_values(model, x_selected, explainer_type, num_of_points, specific_indices)
         shap_values_list.append(shap_values)
-    for val in shap_values_list:
-        shap.waterfall_plot(val[0])
-        shap.bar_plot(val)
-        shap.plots.beeswarn(val)
+    for val,feature_names,explainer in shap_values_list:
+        shap_values_expl = shap.Explanation(values=val[0], 
+                                    base_values=explainer.expected_value, 
+                                    data=x_selected,feature_names=feature_names)
+        shap.plots.waterfall(shap_values_expl)
+        shap_values_expl = shap.Explanation(values=val, 
+                                    base_values=explainer.expected_value, 
+                                    data=x_selected,feature_names=feature_names)
+        shap.bar_plot(shap_values_expl)
+        shap.plots.beeswarn(shap_values_expl)
     
     
 if __name__ == "__main__":
@@ -270,6 +292,6 @@ if __name__ == "__main__":
     data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
     explainer_type = "deep"
     specific_guides = ["GGACTGAGGGCCATGGACACNGG"]
-    number_of_points = 1000
+    number_of_points = 2
     run_shap(model_path=model_path,data_path=data_path,explainer_type=explainer_type,
              output_path=None,num_of_points=number_of_points,specific_guides=specific_guides)
