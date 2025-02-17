@@ -688,19 +688,19 @@ def combine_data_from_diffrenet_studies(studies_list, target_column, with_inters
 #############################################
 ## Remove unwanted examples ##
 def remove_unwanted_samples(dataframe,column,value,if_treshold =False,treshold_sign=None):
-    '''
-    This function removews unwanted samples from the data frame.
-    It removes samples with value in the given column.
-    if_treshold is True, the function will remove samples with value above or below the treshold given the threshold sign.
+    """
+    This function removews unwanted samples from the data frame
+    if_treshold is True, the function will remove samples with value above or below the treshold given the threshold sign
+    if no treshold if the value exists in the column it will be removed
     Args:
-    1. dataframe - data frame with the data
-    2. column - column to remove the samples from
-    3. value - value to remove
-    4. if_treshold - boolean, if True the function will remove samples above or below the treshold
-    5. treshold_sign - sign of the treshold - <, >, <=, >=
+    dataframe (pd.DataFrame): data frame with the data
+    column(str): column name to remove the samples from
+    value (int,str) - value to remove
+    if_treshold (bool): if True the function will remove samples above or below the treshold
+    treshold_sign (str): sign of the treshold - <, >, <=, >=, ==
     ------------
     Returns: data frame with the removed samples.
-    '''
+    """
     if if_treshold:
         if not treshold_sign:
             raise ValueError("No treshold sign given.")
@@ -717,13 +717,13 @@ def remove_unwanted_samples(dataframe,column,value,if_treshold =False,treshold_s
  
 def return_constrained_data(data_frame, off_target_constraints, bulge_column = None, mismatch_column = None):
     '''
-    This function takes an OT data frame and returns a data frame after applying given constraint.
+    This function takes an OT data frame and returns a data frame after applying given constraint
     Args:
-    1. data_frame - data frame with the data
-    2. off_target_constraints - integer, the constraint to apply
-    3. bulge_column - column with the bulges
-    4. mismatch_column - column with the mismatches
-    ------------
+    data_frame: data frame with the data
+    off_target_constraints (int): the constraint to apply. 1- no constrains, 2- only mismatches, 3- only bulges
+    bulge_column(str): column with the bulges
+    mismatch_column(str): column with the mismatches
+    
     Returns: data frame with the constrained data.
     '''
     if off_target_constraints == 1: # No constraints

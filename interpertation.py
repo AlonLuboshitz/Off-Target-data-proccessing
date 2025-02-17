@@ -5,14 +5,28 @@ import pandas as pd
 import numpy as np
 import os
 import shap
+import Levenshtein 
 from file_utilities import create_folder,create_paths
+from Data_labeling_and_processing import remove_unwanted_samples
 from features_engineering import generate_features_and_labels, extract_features
 from correlation_2 import hypergeometric_test, feature_correlation
 from features_and_model_utilities import get_feature_name
 from plotting import plot_correlation
 from k_groups_utilities import extract_guides_from_partition
 from train_and_test_utilities import split_by_guides
-from models import argmax_layer
+
+import matplotlib.pyplot as plt
+COLUMNS = {
+    "TARGET_COLUMN": "target",
+    "REALIGNED_COLUMN": "realigned_target",
+    "OFFTARGET_COLUMN": "offtarget_sequence",
+    "CHROM_COLUMN": "chrom",
+    "START_COLUMN": "chromStart",
+    "END_COLUMN": "chromEnd",
+    "BINARY_LABEL_COLUMN": "Label",
+    "REGRESSION_LABEL_COLUMN": "Read_count"
+}
+
 ##################### data #####################
 
 
@@ -113,7 +127,86 @@ def plot_feature_correlation( output_path,  feature_columns, label_column,data_p
         y_label = label.replace("Positive","") # remove positive from the label
         plot_correlation(x=x_values, y=y_values, x_axis_label=feature + " score", y_axis_label=y_label, r_coeff=r, p_value=p, title=feature + " " + label, output_path=output_path)
 
+def get_number_of_mismatches_per_position(data_frame, target_column, offtarget_column, 
+                                          bulges_column = "bulges", mismatches_column = "missmatches"):
+    #NOTE: FIX MISMATCH COUNT
+    '''
+    Extract the total number of mismatches in each position between the sgRNA and the off-target sequences
+    Args:
+        data_frame (pd.DataFrame): pandas df object
+        target_column (str): column name of the sgRNA
+        offtarget_column (str): column name of the off-target sequence
+    Returns:
+        dictionary: key - position, value - number of mismatches in this position
+        '''
+    mismatch_only_data = remove_unwanted_samples(data_frame, bulges_column,0,True , "==")
+    bulges_data = remove_unwanted_samples(data_frame,bulges_column,0 ,True,">")
+    if (len(bulges_data) + len(mismatch_only_data)) != len(data_frame):
+        raise ValueError("Data is not correctly seperated")
+    mismatch_counts = np.zeros(23, dtype=int)  # positions 1-23 will be indexed from 0-22
+    rna_bulges = np.zeros(24, dtype=int)
+    dna_bulges = np.zeros(24, dtype=int)
+    for sgrna,off_target in zip(mismatch_only_data[target_column],mismatch_only_data[offtarget_column]):
+        mismatch_counts = update_mismatch_counts(sgrna,off_target,mismatch_counts)
+    df = pd.DataFrame(columns=['sg','ot'])
+    for index,(sgrna,off_target) in enumerate(zip(bulges_data[target_column],bulges_data[offtarget_column])):
+        sgrna,off_target,rna_bulges,dna_bulges = update_bulges_and_remove(sgrna,off_target,rna_bulges,dna_bulges)
+        df.loc[index,['sg','ot']] = [sgrna,off_target]
+        mismatch_counts = update_mismatch_counts(sgrna,off_target,mismatch_counts)
+    print((df['sg'].str[-3] == "N").sum())
 
+    mismatch_counts[20] = 0  # Ignore the PAM position  
+def update_bulges_and_remove(sgrna, offtarget, rna_bulges_array, dna_bulges_array):
+    """
+    Update the insertions or deletions in the gRNA/off-target sequences and remove them from the sequences
+    """
+    if len(sgrna) != len(offtarget):
+        raise ValueError("length of sgrna and offtarget are not equal")
+    updated_sg_rna = ""
+    updated_ot = ""
+    temp_index = 0
+    for index,sg_char,ot_char in zip(range(len(sgrna)),sgrna,offtarget):
+        if sg_char != "-" and ot_char != "-":
+            continue
+        else:
+            updated_sg_rna += sgrna[temp_index:index]
+            updated_ot += offtarget[temp_index:index]
+            temp_index = index + 1
+
+                
+            if sg_char == "-" and ot_char =="-":
+                rna_bulges_array[index] += 1
+                dna_bulges_array[index] += 1
+            elif sg_char == "-": # insertion
+                rna_bulges_array[index] += 1
+                
+
+            elif ot_char == "-": # deletion
+                dna_bulges_array[index] += 1
+                updated_ot += sgrna[index:index+1]
+                updated_sg_rna += sgrna[index:index+1]
+    updated_sg_rna += sgrna[temp_index:index+1]
+    updated_ot += offtarget[temp_index:index+1]          
+
+    return updated_sg_rna, updated_ot, rna_bulges_array, dna_bulges_array
+    
+def update_mismatch_counts(sgrna, offtarget, mismatch_counts):
+    """
+    Update the mismatch counts for each position in the sgRNA and off-target sequences
+    
+    Args:
+        data_frame (pd.DataFrame): Dataframe containing the sgRNA and off-target sequences.
+        mismatch_counts (np.array): np.array containing the mismatch counts for each position.
+        target_column (str): Column name of the sgRNA.
+        offtarget_column (str): Column name of the off-target sequence.""" 
+    
+    if len(sgrna) != 23 or len(offtarget) != 23:
+        raise ValueError("length of sgrna or offtarget is not 23")
+    edits = Levenshtein.opcodes(sgrna, offtarget)
+    for tag, start1, end1, start2, end2 in edits:
+        if tag == "replace":
+            mismatch_counts[start1:end1] += 1  # Increase counts for replaced positions
+    return mismatch_counts
 ##################### model #####################
 
 def get_shaply_values(model, x_background, explainer_type, num_of_points=None, specific_indices=None,only_seq=True):
@@ -146,10 +239,10 @@ def get_shaply_values(model, x_background, explainer_type, num_of_points=None, s
     else:
         print('using default explainer: shap.Explainer')
         explainer = shap.Explainer(model, x_background)
-    shap_values = explainer.shap_values(x_background)
-    shap_values, feature_names = convert_features_names(shap_values, np.sum, 24, 25, additional_features)
-    return shap_values,feature_names, explainer
-def convert_features_names(shap_values, agg_function, seqeunce_length, bits_per_base, additional_features_length):
+    shap_values = explainer(x_background)
+    shap_values = convert_features_names(shap_values, np.sum, 24, 25, additional_features)
+    return shap_values
+def convert_features_names(shap_values, agg_function, seqeunce_length, bits_per_base, additional_features_length = 0):
     '''
     Convert the shap values of all features into group of features
     by aggregating the values of each group of features
@@ -159,12 +252,24 @@ def convert_features_names(shap_values, agg_function, seqeunce_length, bits_per_
     Returns:
         list of numpy.ndarray: Aggregated SHAP values.
     '''
-    grouping = [list(range(i * bits_per_base, (i + 1) * bits_per_base)) for i in range(seqeunce_length)]
+    original_values = shap_values.values  # Shape: (num_samples, N)
+    groups = [list(range(i * bits_per_base, (i + 1) * bits_per_base)) for i in range(seqeunce_length)]
+    feature_names = [f"Base_{i+1}" for i in range(seqeunce_length)]
     total_sequence_length = seqeunce_length * bits_per_base
-    grouping.append(list(range(total_sequence_length , total_sequence_length + additional_features_length)))  
-    feature_names = [f"Base_{i+1}" for i in range(24)] + ["epigenetics"]
-    shap_values_grouped = np.array([shap_values[:, group].sum(axis=1) for group in grouping]).T
-    return shap_values_grouped, feature_names
+    if additional_features_length > 0:
+        groups.append(list(range(total_sequence_length , total_sequence_length + additional_features_length)))  
+        feature_names.append("epigenetics")
+    # Aggregate SHAP values by summing grouped features
+    grouped_shap_values = np.zeros((original_values.shape[0], len(groups)))
+    for i, indices in enumerate(groups):
+        grouped_shap_values[:, i] = np.sum(original_values[:, indices], axis=1)
+    # Update feature names
+    shap_values.values = grouped_shap_values
+    shap_values.feature_names = feature_names
+    shap_values.data = shap_values.data[:, [g[0] for g in groups]]
+    
+    
+    return shap_values
 
 
 def average_shap_values(shap_values_list):
@@ -204,6 +309,7 @@ def get_model(model_path, model_type):
         models (list): list of models    
     '''
     import tensorflow as tf
+    from models import argmax_layer
     models = []
     models_path = create_paths(model_path)
     for model_path in models_path:
@@ -275,23 +381,19 @@ def run_shap(model_path,data_path,explainer_type,output_path,
     for model in models:
         shap_values = get_shaply_values(model, x_selected, explainer_type, num_of_points, specific_indices)
         shap_values_list.append(shap_values)
-    for val,feature_names,explainer in shap_values_list:
-        shap_values_expl = shap.Explanation(values=val[0], 
-                                    base_values=explainer.expected_value, 
-                                    data=x_selected,feature_names=feature_names)
-        shap.plots.waterfall(shap_values_expl)
-        shap_values_expl = shap.Explanation(values=val, 
-                                    base_values=explainer.expected_value, 
-                                    data=x_selected,feature_names=feature_names)
-        shap.bar_plot(shap_values_expl)
-        shap.plots.beeswarn(shap_values_expl)
+    
     
     
 if __name__ == "__main__":
-    model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1/model_1.keras"
-    data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
-    explainer_type = "deep"
+    # model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1/model_1.keras"
+    # data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    # explainer_type = "deep"
+    
     specific_guides = ["GGACTGAGGGCCATGGACACNGG"]
-    number_of_points = 2
-    run_shap(model_path=model_path,data_path=data_path,explainer_type=explainer_type,
-             output_path=None,num_of_points=number_of_points,specific_guides=specific_guides)
+    # number_of_points = 2
+    # run_shap(model_path=model_path,data_path=data_path,explainer_type=explainer_type,
+    #          output_path=None,num_of_points=number_of_points,specific_guides=specific_guides)
+    data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    data_frame = pd.read_csv(data_path)
+    data_frame = data_frame[data_frame['target'].isin(specific_guides)]
+    get_number_of_mismatches_per_position(data_frame, COLUMNS["REALIGNED_COLUMN"], COLUMNS["OFFTARGET_COLUMN"])

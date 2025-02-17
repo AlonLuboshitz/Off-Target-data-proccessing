@@ -77,18 +77,19 @@ def split_by_indexes( x_features, y_labels, indices):
 
 
 def split_by_guides(guides, guides_t_list, x_features, y_labels):
-    '''
-    This function splits the data by guides given the guides_t_list.
-    For every guide in the guides_t_list, it will keep the data for that guide.
+    """
+    Splits the data by guides given the guides_t_list
+    For every guide in the guides_t_list, it will keep the data for that guide
+        
     Args:
-    1. guides - list of all the guides in the data
-    2. guides_t_list - list of guides to keep
-    3. x_features - list of arrays- each array is all (gRNA,OTS) pairs.
-    4. y_label -  list of arrays - each array is the labels for the pairs.
-    -----------
-    Returns: x_train, y_train concataned arrays and the indexes of the guides kept.
-    x_train,y_tarin, guides_idx
-    '''
+        guides: (list) of all the guides in the data
+        guides_t_list: (list) of guides to keep
+        x_features: (list) of np.arrays- each array is all (gRNA,OTS) pairs.
+        y_label: (list) of np.arrays - each array is the labels for the pairs.
+    
+    Returns: x_train, y_train concataned arrays and the indexes of the guides kept
+    :x_train,y_tarin, guides_idx
+    """
     
 
     guides_idx = keep_intersect_guides_indices(guides, guides_t_list) # keep only the train/test guides indexes

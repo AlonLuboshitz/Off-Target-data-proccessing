@@ -11,7 +11,16 @@ def remove_dir_recursivly(dir_path):
         print(f"Error: {e}") 
 
 def create_paths(folder):
-    '''Create paths list off all the files/folders in the given folder'''
+    '''
+    Create list off all the files/folders in the given folder.
+    If the given path is not a folder return the path itself.
+    Args:
+        folder (str) - path to the folder
+    Returns:
+        list of paths
+    '''
+    if not os.path.isdir(folder):
+        return [folder]
     paths = []
     for path in os.listdir(folder):
         paths.append(os.path.join(folder,path))
