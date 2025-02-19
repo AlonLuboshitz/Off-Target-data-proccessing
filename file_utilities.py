@@ -26,8 +26,15 @@ def create_paths(folder):
         paths.append(os.path.join(folder,path))
     return paths
 
-'''create folder in spesefic path'''
+
 def create_folder(path, extend = None):
+    '''
+    Create folder in spesefic path
+    Args:
+        path (str) - path to the folder
+        extend (str) - name of the folder to create inside the path
+    Returns:
+        path to the created folder'''
     if not os.path.exists(path):
         try:
             os.makedirs(path)
@@ -37,9 +44,12 @@ def create_folder(path, extend = None):
     if not extend is None:
         path = os.path.join(path,extend)
         if not os.path.exists(path):
-            os.makedirs(path)
-            print("created new folder: ", path)
-        return path
+            try:
+                os.makedirs(path)
+                print("created new folder: ", path)
+            except Exception as e:
+                print(f"Error: {e}")
+    return path
 
 def keep_only_folders(paths_list):
     '''Given list of paths return only folders from the list'''

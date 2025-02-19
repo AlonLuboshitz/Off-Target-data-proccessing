@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import os
 from file_utilities import create_paths
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
@@ -178,6 +179,133 @@ def argsort_by(argsort_by,  *lists, descending=False):
 
 
     return sorted_lists
+
+def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, y_label=None,
+                   x_ticks=None, y_ticks=None, output_path=None, general_title=None,
+                   sgrna_otss =None,**kwargs):
+    """
+    Plots multiple subplots based on the provided data and plot types.
+
+    Parameters:
+        data (list,3D np.array): List of data arrays for each subplot. or 3D np.array.
+        plot_types (list,str): List of plot types (e.g., 'line', 'scatter') for each subplot. 
+        titles (list): List of titles for each subplot.
+        x_label (str, optional): Label for the x-axis.
+        y_label (str, optional): Label for the y-axis.
+        x_ticks (list, optional): List of x-tick values.
+        y_ticks (list, optional): List of y-tick values.
+        output_path (str, optional): If provided, saves the plot to this path.
+        generall_title (str, optional): A string representing the general title for the plot.
+        **kwargs: Additional keyword arguments for the plot function."""
+    if isinstance(data, list):
+        num_plots = len(data)
+    if isinstance(data, np.ndarray):
+        if data.ndim != 3:
+            raise ValueError("Data shape not supported for subplots")
+        num_plots = data.shape[0]
+        data = [data[i] for i in range(num_plots)]
+    fig, axes = plt.subplots(num_plots, 1, figsize=(10, 6 * num_plots))
+    if num_plots == 1:
+        axes = [axes]
+    if isinstance(plot_types, str):
+        plot_types = [plot_types for i in range(num_plots)]
+    if titles is None:
+        titles = [f"Plot {i + 1}" for i in range(num_plots)]
+    if sgrna_otss is None:
+        sgrna_otss = [(None,None) for i in range(num_plots)]
+
+    for ax, plot_type, title, data_,sgrna_ots in zip(axes, plot_types, titles, data,sgrna_otss):
+        if plot_type == "heatmap":
+            plot_heatmap(data_, ax=ax, row_labels=y_ticks, col_labels=x_ticks,
+                          x_label=x_label, y_label=y_label, title=title,sgrna_ots=sgrna_ots, **kwargs)
+    
+
+    plt.tight_layout()
+    if output_path:
+        output_path = os.path.join(output_path, general_title + ".png")
+        plt.savefig(output_path,dpi=300)
+    plt.close()
+
+def render_sg_ot_to_positions(sgrna,ot):
+    '''
+    This function renders the sgRNA and OT sequences to positions on the heatmap.
+    It will return a list of 24 positions and labels for the heatmap.
+    Args:
+    1. sgrna: (str) - the sgRNA sequence.
+    2. ot: (str) - the OT sequence.
+    -----------
+    Returns: list of positions and labels for the heatmap.'''
+    positions = []
+    labels = [""] * 24  # Initialize a list of 24 empty labels
+    seq_length = len(sgrna)  # Determine the length of the sequence
+    if seq_length not in [23, 24]:
+        raise ValueError("Each sequence must be either 23 or 24 characters long")
+    start_index = 0 if seq_length == 24 else 1  # Shift by 1 if length is 23
+    for i in range(seq_length):
+        pos = start_index + i
+        positions.append(pos)
+        labels[pos] = f"{sgrna[i]}\n{ot[i]}"  # Assign formatted labels
+    return list(range(24)), labels  # Return fixed 24 positions
+
+def plot_heatmap(data, ax=None, row_labels=None, col_labels=None, 
+                 x_label=None, y_label=None, title=None, output_path=None, 
+                 cbar = None, vmin = None, vmax = None, sgrna_ots = None,
+                 additional_vector = None):
+    """
+    Plots a heatmap on a given subplot axis or creates a new figure if no axis is provided.
+
+    Parameters:
+        data (np.ndarray): 1D or 2D array to plot as a heatmap.
+        ax (matplotlib.axes.Axes, optional): The subplot axis to plot on. If None, creates a new figure.
+        row_labels (list, optional): Labels for rows.
+        col_labels (list, optional): Labels for columns.
+        x_label (str, optional): Label for the x-axis.
+        y_label (str, optional): Label for the y-axis.
+        title (str, optional): Title of the heatmap.
+        output_path (str, optional): If provided, saves the plot to this path.
+        cbar (str, optional): If provided, adds a label to the colorbar.
+    """
+    if not isinstance(data, np.ndarray):
+        raise ValueError("Data must be a NumPy array")
+    if data.ndim == 1: # Reshape 1D data to 2D
+        data = data.reshape(1, -1)
+    if data.ndim != 2:
+        raise ValueError("Data shape not supported for heatmap")
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    if additional_vector is not None:
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 8), gridspec_kw={'height_ratios': [5, 1]})
+        ax = axes[0]  # The first axis for the heatmap
+        ax_vector = axes[1]  # The second axis for the additional vector
+    # Plot the heatmap
+    sns.heatmap(data.T, cmap='coolwarm', ax=ax, xticklabels=col_labels,
+                yticklabels=row_labels, annot=False,  vmin=vmin, vmax=vmax, linewidths=0.1, linecolor='black')
+    ymin, ymax = ax.get_ylim()
+    if additional_vector is not None:
+        # Reshape the vector to match the heatmap format (1 row, n columns)
+        additional_vector = np.reshape(additional_vector, (1, -1))
+        sns.heatmap(additional_vector, cmap='viridis', ax=ax_vector, cbar=True, annot=False, vmax=vmax, vmin=vmin)
+        ax_vector.set_xticks([])  # Remove x-ticks for the additional vector heatmap
+    if sgrna_ots is not None:
+        positions, labels = render_sg_ot_to_positions(sgrna_ots[0],sgrna_ots[1])
+        labels[0] = "sgRNA:\nOT: " + labels[0]
+        for i, label in enumerate(labels):
+            ax.text(i+0.5, ymax + 0.02, label, ha='center', va='bottom', fontsize=10)
+    ax.set_xlabel(x_label if x_label else "")
+    ax.set_ylabel(y_label if y_label else "")
+    # ax.set_title(title, fontfamily="monospace", fontsize=12)
+    if cbar:
+        if additional_vector is not None:
+            colorbar = ax_vector.collections[0].colorbar
+        colorbar = ax.collections[0].colorbar
+        colorbar.set_label(cbar)
+
+
+    # Save the figure if output_path is provided
+    if output_path and ax is None:  # Only save if no subplot (otherwise, user should save the full figure)
+        plt.savefig(output_path, dpi=300)
+        plt.close()
 
 def plot_binary_feature_heatmap(data_paths, plots_paths):
    

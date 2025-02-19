@@ -6,16 +6,17 @@ import numpy as np
 import os
 import shap
 import Levenshtein 
-from file_utilities import create_folder,create_paths
+from file_utilities import create_folder
 from Data_labeling_and_processing import remove_unwanted_samples
-from features_engineering import generate_features_and_labels, extract_features
 from correlation_2 import hypergeometric_test, feature_correlation
 from features_and_model_utilities import get_feature_name
-from plotting import plot_correlation
+from plotting import plot_correlation, plot_subplots
 from k_groups_utilities import extract_guides_from_partition
-from train_and_test_utilities import split_by_guides
+from train_and_test_utilities import keep_intersect_guides_indices
+from interpertation_utilities import *
 
-import matplotlib.pyplot as plt
+import tensorflow as tf
+
 COLUMNS = {
     "TARGET_COLUMN": "target",
     "REALIGNED_COLUMN": "realigned_target",
@@ -207,9 +208,17 @@ def update_mismatch_counts(sgrna, offtarget, mismatch_counts):
         if tag == "replace":
             mismatch_counts[start1:end1] += 1  # Increase counts for replaced positions
     return mismatch_counts
-##################### model #####################
 
-def get_shaply_values(model, x_background, explainer_type, num_of_points=None, specific_indices=None,only_seq=True):
+def main_data():
+    data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    data_frame = pd.read_csv(data_path)
+    data_frame = data_frame[data_frame['target'].isin(specific_guides)]
+    get_number_of_mismatches_per_position(data_frame, COLUMNS["REALIGNED_COLUMN"], COLUMNS["OFFTARGET_COLUMN"])
+##################### MODEL INTERPERTABILITY #####################
+
+##################### SHAP #####################
+
+def get_shaply_values(model, x_background, explainer_type, x_selected = None):
     """
     Computes SHAP values for the given model using the specified explainer type.
     
@@ -217,21 +226,21 @@ def get_shaply_values(model, x_background, explainer_type, num_of_points=None, s
         model: Trained model to explain.
         x_background (numpy.ndarray or pandas.DataFrame): Background dataset for SHAP.
         explainer_type (str): Type of SHAP explainer to use ('deep', 'gradient', 'kernel').
-        num_of_points (int, optional): Number of first indices to use from x_background.
-        specific_indices (list, optional): Specific indices to extract from x_background.
+        x_selected (numpy.ndarray or pandas.DataFrame, optional): Selected dataset to explain.
     
     Returns:
         shap_values (list of numpy arrays): Computed SHAP values for each output class (or regression target).
     """
     
-    additional_features = 0
-    if not only_seq:
-        x_background = extract_features(x_background, encoded_length= 600)
-        additional_features = len(x_background[1])
+    
     if explainer_type == 'deep':
+        # if isinstance(x_background,list):
+        #     x_background = [x[:100] for x in x_background if x.shape[0] > 100]
+        # elif x_background.shape[0] > 100:
+        #     x_background = x_background[:100]
         explainer = shap.Explainer(model, x_background)
-
-        #explainer = shap.DeepExplainer(model, x_selected)
+        #explainer = shap.explainers.Permutation(model,x_background ,max_evals = 15000)
+        #explainer = shap.DeepExplainer(model, x_background)
     elif explainer_type == 'gradient':
         explainer = shap.GradientExplainer(model, x_background)
     elif explainer_type == 'kernel':
@@ -239,121 +248,35 @@ def get_shaply_values(model, x_background, explainer_type, num_of_points=None, s
     else:
         print('using default explainer: shap.Explainer')
         explainer = shap.Explainer(model, x_background)
-    shap_values = explainer(x_background)
-    shap_values = convert_features_names(shap_values, np.sum, 24, 25, additional_features)
-    return shap_values
-def convert_features_names(shap_values, agg_function, seqeunce_length, bits_per_base, additional_features_length = 0):
-    '''
-    Convert the shap values of all features into group of features
-    by aggregating the values of each group of features
-    Args:
-        shap_values (list of numpy arrays): List of SHAP value arrays.
-        agg_function (function): Aggregation function to use.
-    Returns:
-        list of numpy.ndarray: Aggregated SHAP values.
-    '''
-    original_values = shap_values.values  # Shape: (num_samples, N)
-    groups = [list(range(i * bits_per_base, (i + 1) * bits_per_base)) for i in range(seqeunce_length)]
-    feature_names = [f"Base_{i+1}" for i in range(seqeunce_length)]
-    total_sequence_length = seqeunce_length * bits_per_base
-    if additional_features_length > 0:
-        groups.append(list(range(total_sequence_length , total_sequence_length + additional_features_length)))  
-        feature_names.append("epigenetics")
-    # Aggregate SHAP values by summing grouped features
-    grouped_shap_values = np.zeros((original_values.shape[0], len(groups)))
-    for i, indices in enumerate(groups):
-        grouped_shap_values[:, i] = np.sum(original_values[:, indices], axis=1)
-    # Update feature names
-    shap_values.values = grouped_shap_values
-    shap_values.feature_names = feature_names
-    shap_values.data = shap_values.data[:, [g[0] for g in groups]]
-    
-    
+    if x_selected is None:
+        x_selected = x_background
+    shap_values = explainer(x_selected)
     return shap_values
 
-
-def average_shap_values(shap_values_list):
+def transform_to_heatmap(shap_values, seqeunce_length, bits_per_base, additional_features_length = 0):
     """
-    Computes the average SHAP values across multiple runs/models.
-    
-    Args:
-        shap_values_list (list of numpy arrays): List of SHAP value arrays from different models/runs.
-    
-    Returns:
-        numpy.ndarray: Averaged SHAP values with the same shape as input SHAP values.
+    Transforms SHAP values into a 2D matrix for heatmap representation.
     """
-    shap_values_array = np.array(shap_values_list)
-    return np.mean(shap_values_array, axis=0)
+    if isinstance(shap_values,shap.Explanation):
+        shap_values = shap_values.values
+    min_shap = shap_values.min()
+    max_shap = shap_values.max()
+    epigenetics_values = None
+    if additional_features_length > 0: # split the shap values to sequence and epigenetics
+        sequence_values = shap_values[:,seqeunce_length * bits_per_base]
+        epigenetics_values = shap_values[:,seqeunce_length * bits_per_base:]
+    else: sequence_values = shap_values
+    if sequence_values.ndim == 1:
+        sequence_values = sequence_values.reshape(1,seqeunce_length , bits_per_base)
+    elif sequence_values.ndim == 2:
+        sequence_values = sequence_values.reshape(sequence_values.shape[0],seqeunce_length , bits_per_base)
+    else:
+        raise ValueError("SHAP values should be 1D or 2D")
+    return sequence_values, epigenetics_values, min_shap, max_shap
 
-def median_shap_values(shap_values_list):
-    """
-    Computes the median SHAP values across multiple runs/models.
-    
-    Args:
-        shap_values_list (list of numpy arrays): List of SHAP value arrays from different models/runs.
-    
-    Returns:
-        numpy.ndarray: Median SHAP values with the same shape as input SHAP values.
-    """
-    shap_values_array = np.array(shap_values_list)
-    return np.median(shap_values_array, axis=0)
-
-def get_model(model_path, model_type):
-    '''
-    Loads the model from the given path
-    
-    Args:
-        model_path (str): path to model/folder of models
-        model_type (str): type of the model - deep,ml
-    Returns:
-        models (list): list of models    
-    '''
-    import tensorflow as tf
-    from models import argmax_layer
-    models = []
-    models_path = create_paths(model_path)
-    for model_path in models_path:
-        if model_type == "deep":
-            model = tf.keras.models.load_model(model_path,custom_objects={'argmax_layer': argmax_layer})
-            models.append(model)
-
-        else:
-            pass
-    return models
-
-def get_data(data_path):
-    '''
-    Loads the data from the given path
-    Uses generate_features_and_labels function to get x,y,guides data
-    
-    Args:
-        data_path (str): path to the data
-    Returns:
-        x,y,guides
-        x: list of arrays- each array is all (gRNA,OTS) pairs.
-        y: list of arrays - each array is the labels for the pairs.
-        guides: list of guides
-    '''
-    Columns_dict = {
-    "TARGET_COLUMN": "target",
-    "REALIGNED_COLUMN": "realigned_target",
-    "OFFTARGET_COLUMN": "offtarget_sequence",
-    "CHROM_COLUMN": "chrom",
-    "START_COLUMN": "chromStart",
-    "END_COLUMN": "chromEnd",
-    "BINARY_LABEL_COLUMN": "Label",
-    "REGRESSION_LABEL_COLUMN": "Read_count"
-}
-    Columns_dict['Y_LABEL_COLUMN'] = Columns_dict['BINARY_LABEL_COLUMN']
-    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
-    x,y,guides = generate_features_and_labels(data_path=data_path,manager=None,
-                                              if_bp=False,if_only_seq=True,if_seperate_epi=False,
-                                              epigenetic_window_size=0,features_columns=None,
-                                              if_data_reproducibility=False,columns_dict=Columns_dict,
-                                              sequence_coding_type=2,if_bulges=True)
-    return x,y,guides
 def run_shap(model_path,data_path,explainer_type,output_path,
-             num_of_points=None,specific_indices=None, specific_guides=None):
+             num_of_points=None,specific_indices=None, specific_guides=None,
+             only_seq=False):
     '''
     Runs on the data and model given and extract shap values
     Plots the bars, beeswarm and waterfall plots
@@ -366,34 +289,186 @@ def run_shap(model_path,data_path,explainer_type,output_path,
         num_of_points (int, optional): Number of first indices to use from x_background.
         specific_indices (list, optional): Specific indices to extract from x_background.
         specific_guides (list, optional): Specific guides to extract from x_background.
+        only_seq (bool, optional) defualt True: If True, only the sequence features will be used otherwise split to sequence and epigenetics.
     '''
     models = get_model(model_path,"deep")
-    x_background,y,guides = get_data(data_path)
-    if specific_guides is not None:
-        x_background,y,guides = split_by_guides(guides,specific_guides,x_background,y)
-    elif specific_indices is not None:
-        x_selected = x_background[specific_indices]
-    else:
-        x_selected = x_background
-    if num_of_points is not None:
-        x_selected = x_background[:num_of_points]
-    shap_values_list = []
-    for model in models:
-        shap_values = get_shaply_values(model, x_selected, explainer_type, num_of_points, specific_indices)
-        shap_values_list.append(shap_values)
+    model = models[0]
+    x_background,y,guides,otss_dict = get_data(data_path,only_seq)
+    if specific_guides is None:
+        specific_guides = guides
+    guide_idx = keep_intersect_guides_indices(guides,specific_guides)
+    
+    for idx in guide_idx:
+        sgrna = specific_guides[idx]
+        sg_x_background = x_background[idx]
+        sg_y = y[idx]
+        sg_otss = otss_dict[sgrna]
+        sg_x_selected, sgrna_otss, additional_features = filter_data_for_interpertation(sg_x_background, sg_y, sg_otss,  only_seq, specific_indices)
+        temp_output = create_folder(output_path,sgrna)   
+        shap_values = get_shaply_values(model, sg_x_background, explainer_type, sg_x_selected)
+        plot_shap(shap_values, additional_features, sgrna_otss, temp_output)
+
+
+def plot_shap(shap_values, additional_features, sgrna_otss, output_path):
+    row_labels, x_ticks = nucleotides_for_heatmap()
+    
+    # Plot first 10 samples
+    single_shap_values = shap_values[:10] 
+    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(single_shap_values, 24,25,additional_features)
+    kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
+    plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
+                    y_ticks=row_labels, output_path=output_path, general_title="10-SHAP values",sgrna_otss=sgrna_otss,**kwargs)
+    # Summarized plot of all samples
+    summarized_shap_values = np.sum(shap_values.values, axis=0)
+    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(summarized_shap_values, 24,25,additional_features)
+    kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
+
+    plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
+                    y_ticks=row_labels, output_path=output_path, general_title="Summed-SHAP values",sgrna_otss=None,**kwargs)
+    # Abs mean
+    abs_mean_shap_values = np.mean(np.abs(shap_values.values), axis=0)
+    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(abs_mean_shap_values, 24,25,additional_features)
+    kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
+    plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
+                        y_ticks=row_labels, output_path=output_path, general_title="AbsMean-SHAP values",sgrna_otss=None,**kwargs)
+
+def main_shap():
+    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1/model_1.keras"
+    seq_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1/model_1.keras"
+    test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    
+    explainer_type = "deep"
+    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
+    specific_guides = None
+    number_of_points = 10
+    run_shap(model_path=seq_model_path,data_path=test_data_path,explainer_type=explainer_type,
+             output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=True)
+
+##################### Gradient asecnt #####################
+def main_gradient_ascent():
+    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1/model_1.keras"
+    seq_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1/model_1.keras"
+    test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
+    specific_guides = None
+    number_of_points = 10
+    run_gradient_asecnt(model_path=seq_model_path,data_path=test_data_path,output_path=output_path,
+                        num_of_points=number_of_points,specific_guides=specific_guides,only_seq=True)
+
+def run_gradient_asecnt(model_path, data_path, output_path,
+             num_of_points=None,specific_indices=None, specific_guides=None,
+             only_seq=False):
+    from models import replace_argmax_layer
+    models = get_model(model_path,"deep")
+    model = models[0]
+    model = replace_argmax_layer(model)
+    print(model.summary())
+    x = np.random.randint(2,size=(1,600),dtype=np.int8)
+    alpha = 0.1
+    
+    # Convert input to trainable variable
+    #input_var = tf.Variable(x, dtype=tf.float32)
+    for i in range(10):
+        grad = get_gradients(model, x)
+        x += grad * alpha
+    temp = x.numpy()
+    seq = temp[0, :-11]
+    seq = seq.reshape(32, 4)
+    # Gradient ascent loop
+
+
+
+
+# import logomaker
+# import tensorflow as tf
+# from matplotlib import pyplot as plt
+# from CRISPRepi import *
+
+
+def get_gradients(model, input_data):
+    input_data = tf.convert_to_tensor(input_data,dtype=tf.float32)
+    with tf.GradientTape() as tape:
+        tape.watch(input_data)
+        preds = model(input_data,training=True)
+    grads = tape.gradient(preds, input_data)
+    
+    return grads
+
+
+# def saliency_map(model, epigenetics):
+#     x1 = np.ones(shape=(32, 4)) * 0.25  # Initial input matrix
+#     x1[21:23] = [0, 0, 1, 0]  # GG
+#     x2 = np.ones(shape=(1, 11))
+#     x2[:, 10] = 100  # CRISPROn
+#     x2[:, 3] = avgEpi(epigenetics)  # methylation
+#     x1 = x1.reshape(1, -1)
+#     x = np.concatenate((x1, x2), axis=1)
+#     lr = 0.1
+#     # lr = 0.1, range(50000)
+#     for i in range(50000):
+#         grads = get_gradients(model,  x)
+#         x += grads * lr
+#     temp = x.numpy()
+#     seq = temp[0, :-11]
+#     seq = seq.reshape(32, 4)
+#     seqDF = pd.DataFrame(seq, columns=['A', 'C', 'G', 'T'])
+#     seqDF = seqDF.div(seqDF.sum(axis=0), axis=1)
+#     save_logo(seqDF)
+#     epi = x[:, -11:].numpy()
+#     epi[:, 10] /= 100
+#     #epi = np.array([[1.60, 1.14, 1.68, -1.65, 1.23, 1.31, -0.15, 1.44, -0.34, 0.93, 1.00]])
+#     visualize_integrated_gradients(seq, 1)
+
+#     visualize_integrated_gradients(epi, 0)
+
+
+# def visualize_integrated_gradients(integrated_gradients, segFlag):
+#     colors = ['white', 'white', 'white', 'black', 'white', 'white', 'black', 'white', 'black', 'white', 'white']
+#     if segFlag:
+#         integrated_gradients = np.flip(np.rot90(integrated_gradients, k=-1), axis=1)
+#     else:
+#         num_rows, num_cols = integrated_gradients.shape
+#         for i in range(num_rows):
+#             for j in range(num_cols):
+#                 color = colors[j]
+#                 plt.text(j, i, f'{integrated_gradients[i, j]:.2f}', ha='center', va='center', color=color, fontsize=10)
+#     plt.imshow(integrated_gradients, cmap='Blues', interpolation='nearest', vmin=-2, vmax=2)
+#     plt.colorbar(label='Feature importance')  # Add color bar
+#     plt.axis('off')
+#     plt.show()
+
+
+# def save_logo(df):
+#     IG_logo = logomaker.Logo(df)
+#     IG_logo.ax.set_xticks(range(32))
+#     IG_logo.ax.set_xticklabels(np.arange(1, 33), fontsize=12)
+#     IG_logo.ax.set_ylabel('Importance score', fontsize=14)
+#     plt.show()
+
+# def format_titles(sgrna_otss):
+#     """
+#     Formats the titles for each sgRNA-OT pair to ensure alignment.
+    
+#     Parameters:
+#         sgrna_otss (list of tuples): Each tuple contains (sgRNA, OT) sequences.
+    
+#     Returns:
+#         list of str: Formatted titles with aligned labels.
+#     """
+#     labels = ["sgRNA:", "OT:"]
+#     max_label_length = max(len(label) for label in labels)  # Ensures equal prefix length
+
+#     # Generate aligned titles
+#     titles = [
+#         f"{'sgRNA:'.ljust(max_label_length)} {pair[0]}\n"
+#         f"{'OT:'.ljust(max_label_length)} {pair[1]}"
+#         for pair in sgrna_otss
+#     ]
+
+#     return titles 
     
     
     
 if __name__ == "__main__":
-    # model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1/model_1.keras"
-    # data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
-    # explainer_type = "deep"
+    main_gradient_ascent()
     
-    specific_guides = ["GGACTGAGGGCCATGGACACNGG"]
-    # number_of_points = 2
-    # run_shap(model_path=model_path,data_path=data_path,explainer_type=explainer_type,
-    #          output_path=None,num_of_points=number_of_points,specific_guides=specific_guides)
-    data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
-    data_frame = pd.read_csv(data_path)
-    data_frame = data_frame[data_frame['target'].isin(specific_guides)]
-    get_number_of_mismatches_per_position(data_frame, COLUMNS["REALIGNED_COLUMN"], COLUMNS["OFFTARGET_COLUMN"])

@@ -19,7 +19,8 @@ Function: takes the data table, create a unique list of gRNAs, Split the data in
 Based on gRNA
 Outputs: 1. Dictionray - {gRNA : Data frame} 2. unique gRNA set
 '''
-def create_data_frames_for_features(data, if_data_reproducibility, target_column, exclude_guides = None, test_on_other_data = False):
+def create_data_frames_for_features(data, if_data_reproducibility, target_column, 
+                                    exclude_guides = None, test_on_other_data = False):
     data_table = pd.read_csv(data) # open data
     if exclude_guides: # exlucde not empty
         if not test_on_other_data: # 
@@ -56,7 +57,7 @@ def return_df_without_guides(data_frame, guide_to_exlucde, data_frame_column):
 def generate_features_and_labels(data_path, manager, if_bp, if_only_seq , 
                                  if_seperate_epi, epigenetic_window_size, features_columns, if_data_reproducibility,
                                  columns_dict, transform_y_type = False, sequence_coding_type = 1, if_bulges = False,
-                                 exclude_guides = None, test_on_other_data = False):
+                                 exclude_guides = None, test_on_other_data = False, return_otss = False,exclude_ontarget=False):
     '''
     This function generates x and y data for gRNAs and their corresponding off-targets.
     For each (gRNA, OTS) pair it one-hot encodes the sequences and adds epigenetic data if required.
@@ -82,10 +83,13 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
     14. if_bulges - boolean to include bulges in the sequence encoding.
     15. exclude_guides - (tuple) (guides_description, path to guides to exclude from the data, target_column)
     16. test_on_other_data - boolean - if True dont exclude guides from that data
+    17. return_otss - boolean - if True return the OTS and gRNA sequences.
+    18. exclude_ontaerget - boolean - if True exclude the ontarget from the data.
     Returns:
     1. x_data_all - list of x data for each gRNA.
     2. y_labels_all - list of y labels for each gRNA.
     3. guides - list of unique gRNAs.
+    4. grna_otss_dict - dictionary of gRNA and their corresponding OTS sequences (if return_otss is True).
     
 '''
     splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility,
@@ -95,7 +99,11 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
     ALL_INDEXES.clear() # clear indexes
     seq_len,nuc_num = get_encoding_parameters(sequence_coding_type,if_bulges) # get sequence encoding parameters
     encoded_length = seq_len * nuc_num # set encoded length
+    grna_otss_dict = {} # init dict for sgRNA and its OTSS
     for guide_data_frame in splited_guide_data.values(): # for every guide get x_features by booleans
+        if exclude_ontarget:
+            guide_data_frame = guide_data_frame[~((guide_data_frame[columns_dict["MISMATCH_COLUMN"]] == 0) & 
+                                                  (guide_data_frame[columns_dict["BULGES_COLUMN"]] == 0))]
         # get seq info - represented in all!
         if sequence_coding_type == 1: # PiCRISPR style
             seq_info = get_seq_one_hot(data=guide_data_frame, encoded_length = encoded_length, bp_presenation = nuc_num,
@@ -130,11 +138,16 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
         x_data_all.append(x_data)
         
         y_labels_all.append(guide_data_frame[[columns_dict["Y_LABEL_COLUMN"]]].values) # add label values by extracting from the df by series values.
+        if return_otss:
+            grna_otss = guide_data_frame[[columns_dict["REALIGNED_COLUMN"],columns_dict["OFFTARGET_COLUMN"]]].values
+            grna_otss_dict[guide_data_frame[columns_dict["TARGET_COLUMN"]].iloc[0]] = grna_otss
+            
     del splited_guide_data # free memory
     
     if transform_y_type:
         y_labels_all = transform_labels(y_labels_all, transform_y_type)
-    
+    if return_otss:
+        return (x_data_all,y_labels_all,guides,grna_otss_dict)
     return (x_data_all,y_labels_all,guides)
 
     
