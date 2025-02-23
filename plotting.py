@@ -212,7 +212,7 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
     if titles is None:
         titles = [f"Plot {i + 1}" for i in range(num_plots)]
     if sgrna_otss is None:
-        sgrna_otss = [(None,None) for i in range(num_plots)]
+        sgrna_otss = [None for i in range(num_plots)]
 
     for ax, plot_type, title, data_,sgrna_ots in zip(axes, plot_types, titles, data,sgrna_otss):
         if plot_type == "heatmap":

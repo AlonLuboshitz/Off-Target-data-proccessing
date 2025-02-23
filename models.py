@@ -3,7 +3,7 @@
 
 from xgboost import XGBClassifier
 from sklearn.linear_model import LogisticRegression
-
+import tensorflow as tf
 from tensorflow import keras,argmax
 from keras.layers import Reshape, Conv1D, Input, Dense, Flatten, Concatenate, MaxPooling1D, Reshape, Embedding, GRU
 
@@ -173,4 +173,44 @@ def task_model_parameters(task):
         return keras.losses.MeanSquaredError(), ['mean_absolute_error'], 'linear'
     else:
         raise ValueError("Task must be set to 'Classification' or 'Regression'")
+
+
+def argmax_with_ste(x):
+    indices = tf.argmax(x, axis=-1)
+    one_hot = tf.one_hot(indices, depth=tf.shape(x)[-1])
+    return x + tf.stop_gradient(one_hot - x)  # STE approximation    
+
+def replace_argmax_layer(old_model, replacement_function = argmax_with_ste):
+    sequence_length, vocab_size = 24,25
+    inputs = Input(shape=(24, 25))
     
+    # Replace argmax layer
+    reduced_input = keras.layers.Lambda(argmax_with_ste)(inputs)
+    
+    # Rebuild remaining layers
+    embedding_layer = Embedding(input_dim=vocab_size, output_dim=44, input_length=sequence_length)
+    embedded_output = embedding_layer(reduced_input)
+    
+    gru = GRU(64, return_sequences=True)
+    gru_output = gru(embedded_output)
+    
+    x = keras.layers.Flatten()(gru_output)
+    
+    if hasattr(old_model, 'feature_input'):
+        feature_input = Input(shape=(old_model.feature_input.shape[1],))
+        x = Concatenate()([x, feature_input])
+        inputs = [inputs, feature_input]
+    
+    for dense_layer in old_model.layers[3:]:
+        x = Dense(dense_layer.units, activation=dense_layer.activation)(x)
+    
+    output = Dense(1, activation=old_model.layers[-1].activation)(x)
+    
+    new_model = keras.Model(inputs=inputs, outputs=output)
+    
+    # Copy weights from old model, except for replaced layers
+    for old_layer, new_layer in zip(old_model.layers, new_model.layers):
+        if not isinstance(old_layer, keras.layers.Lambda):
+            new_layer.set_weights(old_layer.get_weights())
+    
+    return new_model

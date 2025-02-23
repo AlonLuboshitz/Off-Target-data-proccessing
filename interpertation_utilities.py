@@ -3,7 +3,10 @@ This module contain helper function and utilities for model and data interpertab
 '''
 import numpy as np
 from features_engineering import extract_features, generate_features_and_labels
+from features_and_model_utilities import get_feature_name
+
 from file_utilities import create_paths
+import itertools
 
 
 ######## DATA ########
@@ -13,7 +16,6 @@ def nucleotides_for_heatmap():
     Returns:
         row_labels (list): List of row labels.
         x_ticks (list): List of x-ticks.'''
-    import itertools
     nucleotides_product = list(itertools.product(*(["ACGT-"] * 2)))
     row_labels = [f"{a}:{b}" for a, b in nucleotides_product]
     x_ticks = list(range(1, 25))
@@ -164,6 +166,109 @@ def convert_features_names(shap_values, agg_function, seqeunce_length, bits_per_
     shap_values.values = grouped_shap_values
     shap_values.feature_names = feature_names
     shap_values.data = shap_values.data[:, [g[0] for g in groups]]
-    
-    
     return shap_values
+
+######## Epigenetics ########
+def epigenetic_05_importance(features, sg_ot_pair, model):
+    '''
+    Function calculate the epigentic feature importance by assigining 0.5 to the epigenetic features.
+    It substracts the prediction of the model where the wanted epigenetic feature is 1/0.
+    If the Delta is positive the feature is important.
+    Args:
+        features (list): List of epigenetic features.
+        sg_ot_pair (np.array): Pair of sgRNA and off-target.
+        model (tf.keras.Model): Model to interpret.
+    Returns:
+        dict: Dictionary of epigenetic feature importance.
+    '''
+    epi_feature_importance = {}
+    constant_sg_ot = np.repeat(sg_ot_pair, 2, axis=0) # Repeat the same sgRNA-OT pair
+    for feature_index, feature in enumerate(features): # Iterate over features
+        feature_name = get_feature_name(feature)
+        epi_vector = np.array(2*[[0.5]*len(features)]) # Create epigenetic vector with 0.5
+        epi_vector[0, feature_index] = 0 # Set the wanted feature to 0
+        epi_vector[1, feature_index] = 1 # Set the wanted feature to 1
+        x_input = [constant_sg_ot, epi_vector] # Create input for model
+        model_output = model.predict(x_input) # Get model output
+        epi_feature_importance[feature_name] = model_output[1][0] - model_output[0][0] # Calculate difference
+    return epi_feature_importance
+
+def epigenetic_pertubation_importance(features, sg_ot_pair, model):
+    '''
+    Function calculate the epigentic feature importance by perturbarting over the epigenetic features.
+    It substracts the prediction of the model where the epigenetic feature is on and off.
+    If the Delta is positive the feature is important.
+
+    Creates 2^(number_of_features - 1) epigenetic vectors pairs.
+    Each pair has the same indexes on except for the given index.
+    For example: number_of_features = 3, index = 0 -> create pairs of (0,1,1) - (1,1,1), (0,0,1) - (1,0,1) ...
+    So the wanted epigenetic feature is off/on in the pairs.
+    Args:
+        features (list): List of epigenetic features.
+        sg_ot_pair (np.array): Pair of sgRNA and off-target.
+        model (tf.keras.Model): Model to interpret.
+    Returns:
+        dict: Dictionary of epigenetic feature importance.
+    '''
+    all_combination_epi_vectors = generate_all_bit_combinations(len(features))
+    constant_x = np.repeat(sg_ot_pair, len(all_combination_epi_vectors), axis=0) # Repeat the same sgRNA-OT pair
+    x_input = [constant_x, all_combination_epi_vectors] # Create input for model
+    model_output = model.predict(x_input) # Get model output
+    bit_values = {tuple(bits): prediction[0] for bits, prediction in zip(all_combination_epi_vectors, model_output)} # Create dict of bit values
+    epi_feature_importance = {}
+    for feature_index, feature in enumerate(features): # Iterate over features
+        feature_name = get_feature_name(feature)
+        epi_feature_importance[feature_name] = subtract_pairs_by_masking(bit_values, feature_index,len(features))
+    return epi_feature_importance
+
+def generate_all_bit_combinations(N):
+    '''
+    Generate all possible bit combinations for N bits.
+    Args:
+        N (int): Number of bits.
+    Returns:
+        np.array: All possible bit combinations'''
+    return np.array(list(itertools.product([0, 1], repeat=N)))
+
+def subtract_pairs_by_masking(bit_values, i,N):
+    '''
+    Substract matching values of pairs of vectors where the i-th bit is on and off.
+    Args:
+        bit_values (dict): Dictionary of vectors and their values.
+        i (int): Index of the bit to mask.
+    Returns:
+        np.array: Differences between matching pairs.
+    '''
+    bit_combinations = np.array(list(bit_values.keys()))  # Convert dict keys to array
+    values = np.array(list(bit_values.values()))  # Convert dict values to array
+
+    # Create masks
+    mask_on = bit_combinations[:, i] == 1  # Select where bit i is 1
+    mask_off = bit_combinations[:, i] == 0  # Select where bit i is 0
+
+    bits_on = bit_combinations[mask_on]  # Entries where bit i is 1
+    bits_off = bit_combinations[mask_off]  # Entries where bit i is 0
+    
+    values_on = values[mask_on]  # Values for bit i = 1
+    values_off = values[mask_off]  # Values for bit i = 0
+    
+    bits_on_reduced = np.delete(bits_on, i, axis=1)
+    bits_off_reduced = np.delete(bits_off, i, axis=1)
+
+    # Convert to structured arrays for row-wise matching
+    dtype = [('f{}'.format(j), bits_on_reduced.dtype) for j in range(N-1)]
+    bits_on_struct = bits_on_reduced.view(dtype)
+    bits_off_struct = bits_off_reduced.view(dtype)
+
+    # Find matching pairs
+    _, idx_on, idx_off = np.intersect1d(bits_on_struct, bits_off_struct, return_indices=True)
+
+    # Compute differences for matched indices
+    differences_ = values_on[idx_on] - values_off[idx_off]
+    differences = values_on - values_off  # Calculate differences
+    print(np.equal(differences, differences_).all())  # Check if differences are equal
+    
+    return differences  
+
+
+    

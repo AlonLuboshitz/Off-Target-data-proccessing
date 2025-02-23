@@ -238,8 +238,8 @@ def get_shaply_values(model, x_background, explainer_type, x_selected = None):
         #     x_background = [x[:100] for x in x_background if x.shape[0] > 100]
         # elif x_background.shape[0] > 100:
         #     x_background = x_background[:100]
-        explainer = shap.Explainer(model, x_background)
-        #explainer = shap.explainers.Permutation(model,x_background ,max_evals = 15000)
+        #explainer = shap.Explainer(model, x_background)
+        explainer = shap.explainers.Permutation(model,x_background ,max_evals = 15000)
         #explainer = shap.DeepExplainer(model, x_background)
     elif explainer_type == 'gradient':
         explainer = shap.GradientExplainer(model, x_background)
@@ -276,7 +276,7 @@ def transform_to_heatmap(shap_values, seqeunce_length, bits_per_base, additional
 
 def run_shap(model_path,data_path,explainer_type,output_path,
              num_of_points=None,specific_indices=None, specific_guides=None,
-             only_seq=False):
+             only_seq=False, plot_all_guides = True, plot_single_guides = True):
     '''
     Runs on the data and model given and extract shap values
     Plots the bars, beeswarm and waterfall plots
@@ -291,22 +291,36 @@ def run_shap(model_path,data_path,explainer_type,output_path,
         specific_guides (list, optional): Specific guides to extract from x_background.
         only_seq (bool, optional) defualt True: If True, only the sequence features will be used otherwise split to sequence and epigenetics.
     '''
+    if not (plot_all_guides or plot_single_guides):
+        raise ValueError("At least one of the plot options should be True")
     models = get_model(model_path,"deep")
     model = models[0]
     x_background,y,guides,otss_dict = get_data(data_path,only_seq)
     if specific_guides is None:
         specific_guides = guides
     guide_idx = keep_intersect_guides_indices(guides,specific_guides)
-    
+    whole_background = np.concatenate(x_background)
+    whole_selected = []
     for idx in guide_idx:
         sgrna = specific_guides[idx]
         sg_x_background = x_background[idx]
         sg_y = y[idx]
         sg_otss = otss_dict[sgrna]
         sg_x_selected, sgrna_otss, additional_features = filter_data_for_interpertation(sg_x_background, sg_y, sg_otss,  only_seq, specific_indices)
-        temp_output = create_folder(output_path,sgrna)   
-        shap_values = get_shaply_values(model, sg_x_background, explainer_type, sg_x_selected)
-        plot_shap(shap_values, additional_features, sgrna_otss, temp_output)
+        whole_selected.append(sg_x_selected)
+        # NOTE: Background set is spesific to each gRNA, maybe check for equal background for all guides.
+        if plot_single_guides:
+            temp_output = create_folder(output_path,sgrna)
+            shap_values = get_shaply_values(model, whole_background, explainer_type, sg_x_selected)
+            plot_shap(shap_values, additional_features, sgrna_otss, temp_output)
+    # plot all guides
+    if plot_all_guides:
+        whole_selected = [x[:100] for x in whole_selected] # get first 100 samples
+        whole_selected = np.concatenate(whole_selected)
+        shap_values = get_shaply_values(model, whole_background, explainer_type, whole_selected)
+        temp_output = create_folder(output_path,"All_guides")
+        plot_shap(shap_values, additional_features, None, temp_output)
+
 
 
 def plot_shap(shap_values, additional_features, sgrna_otss, output_path):
@@ -317,20 +331,20 @@ def plot_shap(shap_values, additional_features, sgrna_otss, output_path):
     sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(single_shap_values, 24,25,additional_features)
     kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
     plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
-                    y_ticks=row_labels, output_path=output_path, general_title="10-SHAP values",sgrna_otss=sgrna_otss,**kwargs)
+                    y_ticks=row_labels, output_path=output_path, general_title="10-SHAP values all_bg",sgrna_otss=sgrna_otss,**kwargs)
     # Summarized plot of all samples
     summarized_shap_values = np.sum(shap_values.values, axis=0)
     sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(summarized_shap_values, 24,25,additional_features)
     kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
 
     plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
-                    y_ticks=row_labels, output_path=output_path, general_title="Summed-SHAP values",sgrna_otss=None,**kwargs)
+                    y_ticks=row_labels, output_path=output_path, general_title="Summed-SHAP values all_bg",sgrna_otss=None,**kwargs)
     # Abs mean
     abs_mean_shap_values = np.mean(np.abs(shap_values.values), axis=0)
     sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(abs_mean_shap_values, 24,25,additional_features)
     kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
     plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
-                        y_ticks=row_labels, output_path=output_path, general_title="AbsMean-SHAP values",sgrna_otss=None,**kwargs)
+                        y_ticks=row_labels, output_path=output_path, general_title="AbsMean-SHAP values all_bg",sgrna_otss=None,**kwargs)
 
 def main_shap():
     epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1/model_1.keras"
@@ -342,7 +356,7 @@ def main_shap():
     specific_guides = None
     number_of_points = 10
     run_shap(model_path=seq_model_path,data_path=test_data_path,explainer_type=explainer_type,
-             output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=True)
+             output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=True,plot_all_guides=False)
 
 ##################### Gradient asecnt #####################
 def main_gradient_ascent():
@@ -467,8 +481,50 @@ def get_gradients(model, input_data):
 
 #     return titles 
     
-    
-    
+##################### Epigenetics #####################   
+def main_epigenetics():
+    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1/model_1.keras"
+    test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
+    specific_guides = None
+    number_of_points = 10
+    run_epigenetics(model_path=epi_model_path,data_path=test_data_path,output_path=output_path,
+                    num_of_points=number_of_points,specific_guides=specific_guides)
+def run_epigenetics(model_path ,data_path , output_path = None, num_of_points = 200,
+                     specific_guides = None, by = None, features = None):
+    '''
+    This function will run epigenetic interpertation on the given model and data.
+    It will interpert eather by petrubating the epigenetic features or by constant values (0.5) for each feature not evaluated.
+    Args:
+        model_path (str): path to the model/folder of models
+        data_path (str): path to the data
+        output_path (str): path to save the plots
+        num_of_points (int, optional): Number of points to interpert - default 200
+            None: Balanced amount of positive and negatives will be returned.
+            0: all positives will be returned.
+            >0: total number of points to sample.
+        specific_guides (list, optional): Specific guides to extract from the data.
+        by (str, optional): If 'pertubation' the epigenetic features will be pertubated, otherwise constant values will be used.
+    '''
+    models = get_model(model_path,"deep")
+    model = models[0]
+    # x_background,y,guides,otss_dict = get_data(data_path,only_seq=True)
+    # if specific_guides is None:
+    #     specific_guides = guides
+    # guide_idx = keep_intersect_guides_indices(guides,specific_guides)
+    # # get one sample
+    # sg_x, y_x, sg_ots = x_background[guide_idx[0]], y[guide_idx[0]], guides[guide_idx[0]]
+    # ots_1_vector, ots_1_seq = sg_x[0], otss_dict[sg_ots][0]
+    # get epigenetic features
+    sg_x = np.random.randint(2, size=(1, 600), dtype=np.int8)
+    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    pert_import = epigenetic_pertubation_importance(features,sg_x, model)
+    importance_05 = epigenetic_05_importance(features,sg_x, model)
+    pert_import = {key: np.mean(value) for key, value in pert_import.items()}
+    print(pert_import)
+    print(importance_05)
+
+     
 if __name__ == "__main__":
-    main_gradient_ascent()
+    main_epigenetics()
     
