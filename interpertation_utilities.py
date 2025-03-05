@@ -7,6 +7,7 @@ from features_and_model_utilities import get_feature_name
 
 from file_utilities import create_paths
 import itertools
+from scipy.stats import zscore
 
 
 ######## DATA ########
@@ -84,14 +85,23 @@ def get_data(data_path, only_seq):
 def filter_data_for_interpertation(x_background, y,  sgrna_otss, only_seq = False,
                         specific_indices = None, number_of_points = 200):
     '''
-    Splits the data by guide in the guides list.
-    each split will be interperated.
+    Sample a subset of the data for interpertation.
     Args:
-        x_background (list of arrays): list of all ENCODED gRNA-OT pairs, each list is for a different sgRNA.
-        y (list of arrays): list of all labels
-        otss_dict (np.array 2D): 1d- all samples, 2d - all (gRNA,OT) pairs. 
-        spesific_indices (list, optional): Specific indices to extract from x_background. If given these indices will be returned.
-    Returns:'''
+        x_background (array): all ENCODED gRNA-OT pairs of a sgRNA.
+        y (array): labels of the pairs.
+        sgrna_otss (array): all (gRNA,OT) seqeuences.
+        only_seq (bool): If True, only the sequence features will be used otherwise split to sequence and epigenetics.
+        specific_indices (list, optional): List of specific indices to sample.
+        number_of_points (int, optional): Total number of samples.
+            None: Balanced amount of positive and negatives will be returned.
+            0: all positives will be returned.
+            >0: number of points to sample.
+        
+    Returns:
+        (tuple): x_selected, sgrna_otss, additional_features
+        x_selected (array): selected encoded gRNA-OT pairs for a given sgRNA.
+        sgrna_otss (array): selected sequences (gRNA,OT) pairs for a given sgRNA.
+        additional_features (int): number of additional features.'''
     
     if specific_indices is not None:
         pass #NOTE: ADD SPESIFIC INDICES WITH FEATURE ENGINGERRING FUNCTION
@@ -181,16 +191,19 @@ def epigenetic_05_importance(features, sg_ot_pair, model):
     Returns:
         dict: Dictionary of epigenetic feature importance.
     '''
-    epi_feature_importance = {}
-    constant_sg_ot = np.repeat(sg_ot_pair, 2, axis=0) # Repeat the same sgRNA-OT pair
-    for feature_index, feature in enumerate(features): # Iterate over features
-        feature_name = get_feature_name(feature)
-        epi_vector = np.array(2*[[0.5]*len(features)]) # Create epigenetic vector with 0.5
-        epi_vector[0, feature_index] = 0 # Set the wanted feature to 0
-        epi_vector[1, feature_index] = 1 # Set the wanted feature to 1
-        x_input = [constant_sg_ot, epi_vector] # Create input for model
-        model_output = model.predict(x_input) # Get model output
-        epi_feature_importance[feature_name] = model_output[1][0] - model_output[0][0] # Calculate difference
+    number_of_features = len(features)
+    if sg_ot_pair.ndim == 1:
+        sg_ot_pair = sg_ot_pair.reshape(1, len(sg_ot_pair))
+    constant_sg_ot = np.repeat(sg_ot_pair, 2*number_of_features, axis=0) # Repeat the same sgRNA-OT pair
+    epi_vector = np.full((2*number_of_features, number_of_features), 0.5) # Create 2 vectors for each feature with 0.5 values
+    rows = np.arange(number_of_features) * 2 # Feature rows jumps of 2
+    epi_vector[rows, rows // 2] = 0 # even rows - 0
+    epi_vector[rows + 1, rows // 2] = 1 # odd rows - 1
+    x_input = [constant_sg_ot, epi_vector] # Create input for model
+    model_output = model.predict(x_input) # Get model output
+    epi_feature_importance = {feature: model_output[2*i+1][0] - model_output[2*i][0] for i, feature in enumerate(features)} # Calculate difference
+
+   
     return epi_feature_importance
 
 def epigenetic_pertubation_importance(features, sg_ot_pair, model):
@@ -211,14 +224,16 @@ def epigenetic_pertubation_importance(features, sg_ot_pair, model):
         dict: Dictionary of epigenetic feature importance.
     '''
     all_combination_epi_vectors = generate_all_bit_combinations(len(features))
+    if sg_ot_pair.ndim == 1:
+        sg_ot_pair = sg_ot_pair.reshape(1, len(sg_ot_pair))
     constant_x = np.repeat(sg_ot_pair, len(all_combination_epi_vectors), axis=0) # Repeat the same sgRNA-OT pair
     x_input = [constant_x, all_combination_epi_vectors] # Create input for model
     model_output = model.predict(x_input) # Get model output
     bit_values = {tuple(bits): prediction[0] for bits, prediction in zip(all_combination_epi_vectors, model_output)} # Create dict of bit values
     epi_feature_importance = {}
     for feature_index, feature in enumerate(features): # Iterate over features
-        feature_name = get_feature_name(feature)
-        epi_feature_importance[feature_name] = subtract_pairs_by_masking(bit_values, feature_index,len(features))
+        
+        epi_feature_importance[feature] = subtract_pairs_by_masking(bit_values, feature_index,len(features))
     return epi_feature_importance
 
 def generate_all_bit_combinations(N):
@@ -246,29 +261,52 @@ def subtract_pairs_by_masking(bit_values, i,N):
     mask_on = bit_combinations[:, i] == 1  # Select where bit i is 1
     mask_off = bit_combinations[:, i] == 0  # Select where bit i is 0
 
-    bits_on = bit_combinations[mask_on]  # Entries where bit i is 1
-    bits_off = bit_combinations[mask_off]  # Entries where bit i is 0
+    # bits_on = bit_combinations[mask_on]  # Entries where bit i is 1
+    # bits_off = bit_combinations[mask_off]  # Entries where bit i is 0
     
     values_on = values[mask_on]  # Values for bit i = 1
     values_off = values[mask_off]  # Values for bit i = 0
     
-    bits_on_reduced = np.delete(bits_on, i, axis=1)
-    bits_off_reduced = np.delete(bits_off, i, axis=1)
+    # bits_on_reduced = np.delete(bits_on, i, axis=1)
+    # bits_off_reduced = np.delete(bits_off, i, axis=1)
 
-    # Convert to structured arrays for row-wise matching
-    dtype = [('f{}'.format(j), bits_on_reduced.dtype) for j in range(N-1)]
-    bits_on_struct = bits_on_reduced.view(dtype)
-    bits_off_struct = bits_off_reduced.view(dtype)
+    # # Convert to structured arrays for row-wise matching
+    # dtype = [('f{}'.format(j), bits_on_reduced.dtype) for j in range(N-1)]
+    # bits_on_struct = bits_on_reduced.view(dtype)
+    # bits_off_struct = bits_off_reduced.view(dtype)
 
     # Find matching pairs
-    _, idx_on, idx_off = np.intersect1d(bits_on_struct, bits_off_struct, return_indices=True)
+    # _, idx_on, idx_off = np.intersect1d(bits_on_struct, bits_off_struct, return_indices=True)
 
-    # Compute differences for matched indices
-    differences_ = values_on[idx_on] - values_off[idx_off]
+    # # Compute differences for matched indices
+    # differences_ = values_on[idx_on] - values_off[idx_off]
     differences = values_on - values_off  # Calculate differences
-    print(np.equal(differences, differences_).all())  # Check if differences are equal
+    # print(np.equal(differences, differences_).all())  # Check if differences are equal
     
     return differences  
 
+def convert_importance_dicts_to_2d_arrays(epigenetic_importance_arrays, mean_pertubation_importance_list, importance_05_list):
+    '''
+    Converts the mean pertubation importance and 0.5 importance values into 2D arrays for each feature.
+    i.e. the output will be a dictionary with features as keys and 2D arrays as values.
+    the 2D arrays will have 2 rows: mean pertubation importance and 0.5 importance values.
+    Args:
+        epigenetic_importance_arrays (dict): Dictionary of features and their 2D arrays.
+        mean_pertubation_importance_list (list): List of dictionaries of mean pertubation importance values.
+        importance_05_list (list): List of dictionaries of 0.5 importance values.
+    Returns:
+        dict: Dictionary of features and their 2D arrays.
+    '''
+    # Convert the list of dictionaries into a 2D array for each feature
+    for feature in epigenetic_importance_arrays.keys():
+        # Stack the mean and 05 importance values along axis 0 for each feature
+        mean_values = [mean_pertubation_importance[feature] for mean_pertubation_importance in mean_pertubation_importance_list]
+        importance_values = [importance_05[feature] for importance_05 in importance_05_list]
+        
+        # Update the epigenetic correlation arrays
+        epigenetic_importance_arrays[feature][0, :] = mean_values
+        epigenetic_importance_arrays[feature][1, :] = importance_values
+    return epigenetic_importance_arrays
 
-    
+def remove_outliers():
+    pass

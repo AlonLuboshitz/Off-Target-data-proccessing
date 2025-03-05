@@ -4,6 +4,7 @@ import pandas as pd
 import seaborn as sns
 import os
 from file_utilities import create_paths
+from plotting_utilities import *
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 
@@ -134,7 +135,7 @@ def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_ti
     plt.tight_layout()  # Adjust layout to minimize whitespace
     plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
     plt.close()  # Close the figure to free memory
-def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path):
+def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path,ax = None):
     '''This function plots a scatter plot with a linear regression line, and adds the correlation coefficient and p-value to the plot.
     Args:
     1. x: A numpy array representing the x values.
@@ -148,38 +149,51 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
     
     ----------
     Show the figure and saves it.'''
-    plt.figure(figsize=(8, 6))
-
-    plt.scatter(x, y, color='blue')
-    plt.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
-    plt.title(title)
-    plt.grid(True)
-    plt.xlabel(x_axis_label,fontsize=12)
-    plt.xticks(fontsize=12)
-    plt.ylabel(y_axis_label,fontsize=12)
-    plt.yticks(fontsize=12)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(x, y, color='blue')
+    ax.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
+    ax.set_title(title)
+    ax.grid(True)
+    ax.set_xlabel(x_axis_label, fontsize=12)
+    ax.set_ylabel(y_axis_label, fontsize=12)
+    ax.tick_params(axis='both', labelsize=12)
+    
     num_of_points = len(x)
-    plt.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}\nn = {num_of_points}', fontsize=12, ha='center', va='center', transform=plt.gca().transAxes)
-    plt.show()
-    plt.savefig(output_path + f"/{title}.png")
+    # Adding text with correlation coefficient, p-value, and number of points
+    ax.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}\nn = {num_of_points}', 
+            fontsize=12, ha='center', va='center', transform=ax.transAxes)
+    
+    
+
+  
 
 
 
-def argsort_by(argsort_by,  *lists, descending=False):
-    argsort_by = np.array(argsort_by)
-    indices = np.argsort(argsort_by)
-    if descending:
-        indices = indices[::-1]
-    sorted_lists = []
-    for lst in lists:
-        sort_lst_ = [lst[i] for i in indices]
-        sorted_lists.append(sort_lst_)
-    sorted_lists = tuple(sorted_lists)  # Collect sorted lists into a tuple
 
+def box_plot(data, ax, x_label, y_label, title, output_path,  showmeans=True,
+             x_in_data=None, y_in_data=None, colormap=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    meanprops = mean_order = None
+    if showmeans:
+        meanprops = {"marker": "o", "markerfacecolor": "red", "markeredgecolor": "black"}
+        mean_order = data.mean().sort_values(ascending=False).index
 
+    # No need to create a new figure when using ax
+    ax.set_title(title)
+    sns.boxplot(data=data, x=x_in_data, y=y_in_data, order=mean_order,
+                showmeans=showmeans, meanprops=meanprops, boxprops={"facecolor": "lightblue"}, ax=ax,palette=colormap)
+    
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')
 
-    return sorted_lists
-
+    if x_label:
+        ax.set_xlabel(x_label)
+    if y_label:
+        ax.set_ylabel(y_label)
+    if output_path and ax is None:  # Only save if no subplot (otherwise, user should save the full figure)
+        plt.savefig(output_path, dpi=300)
+        plt.close()
 def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, y_label=None,
                    x_ticks=None, y_ticks=None, output_path=None, general_title=None,
                    sgrna_otss =None,**kwargs):
@@ -199,11 +213,15 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
         **kwargs: Additional keyword arguments for the plot function."""
     if isinstance(data, list):
         num_plots = len(data)
-    if isinstance(data, np.ndarray):
+    elif isinstance(data, np.ndarray):
         if data.ndim != 3:
             raise ValueError("Data shape not supported for subplots")
         num_plots = data.shape[0]
         data = [data[i] for i in range(num_plots)]
+    elif isinstance(data, dict):
+        titles = list(data.keys())
+        num_plots = len(titles)
+        data = [data[key] for key in data.keys()]
     fig, axes = plt.subplots(num_plots, 1, figsize=(10, 6 * num_plots))
     if num_plots == 1:
         axes = [axes]
@@ -218,7 +236,13 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
         if plot_type == "heatmap":
             plot_heatmap(data_, ax=ax, row_labels=y_ticks, col_labels=x_ticks,
                           x_label=x_label, y_label=y_label, title=title,sgrna_ots=sgrna_ots, **kwargs)
-    
+        elif plot_type == "boxplot":
+            box_plot(data_, x_label=x_label, y_label=y_label, title=title, ax=ax,output_path=output_path, **kwargs)
+        elif plot_type == 'correlation':
+            if type(data_).__name__ == 'PearsonRResult':
+                plot_correlation(data_._x, data_._y, x_label, y_label, data_.statistic, data_.pvalue, title, output_path, ax=ax)
+            else:
+                plot_correlation(data_[0], data_[1], x_label, y_label, data_[2], data_[3], title, output_path, ax=ax)
 
     plt.tight_layout()
     if output_path:
@@ -226,26 +250,6 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
         plt.savefig(output_path,dpi=300)
     plt.close()
 
-def render_sg_ot_to_positions(sgrna,ot):
-    '''
-    This function renders the sgRNA and OT sequences to positions on the heatmap.
-    It will return a list of 24 positions and labels for the heatmap.
-    Args:
-    1. sgrna: (str) - the sgRNA sequence.
-    2. ot: (str) - the OT sequence.
-    -----------
-    Returns: list of positions and labels for the heatmap.'''
-    positions = []
-    labels = [""] * 24  # Initialize a list of 24 empty labels
-    seq_length = len(sgrna)  # Determine the length of the sequence
-    if seq_length not in [23, 24]:
-        raise ValueError("Each sequence must be either 23 or 24 characters long")
-    start_index = 0 if seq_length == 24 else 1  # Shift by 1 if length is 23
-    for i in range(seq_length):
-        pos = start_index + i
-        positions.append(pos)
-        labels[pos] = f"{sgrna[i]}\n{ot[i]}"  # Assign formatted labels
-    return list(range(24)), labels  # Return fixed 24 positions
 
 def plot_heatmap(data, ax=None, row_labels=None, col_labels=None, 
                  x_label=None, y_label=None, title=None, output_path=None, 
@@ -645,29 +649,7 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     path = path + f"/{title}.png"
     plt.savefig(path,dpi=300)
     plt.close()
-def add_pval_legend(plt):
-    pval_dict = define_pval_dict()
-    for key, value in pval_dict.items():
-        plt.plot([], label=f'{key}: {value}', color='none')  # Create an empty plot just for the legend entry
-    return plt
-def define_pval_dict():
-    pval_dict = {}
-    pval_dict['***'] = '<0.001'
-    pval_dict['**'] = '<0.01'
-    pval_dict['*'] = '<0.05'
-    pval_dict['ns'] = 'ns'
-    return pval_dict
-def p_val_annotation(p_val):
-    '''Function returns annotation for a given p-value.'''
-    if p_val < 0.001:
-        annotation = "***"
-    elif p_val < 0.01:
-        annotation = "**"
-    elif p_val < 0.05:
-        annotation = "*"
-    else:
-        annotation = ""
-    return annotation
+
 if __name__ == "__main__":
 #     #file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
 #     #run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
