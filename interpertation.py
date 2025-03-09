@@ -211,6 +211,24 @@ def update_mismatch_counts(sgrna, offtarget, mismatch_counts):
         if tag == "replace":
             mismatch_counts[start1:end1] += 1  # Increase counts for replaced positions
     return mismatch_counts
+def plot_mismatch_and_bulges_disterbution(data, mismatch_column, bulges_column):
+    '''
+    Plot the distribution of mismatches and bulges in the data
+    Args:
+        data (pd.DataFrame): Dataframe containing the data.
+        mismatch_column (str): Column name of the mismatches.
+        bulges_column (str): Column name of the bulges.'''
+    if isinstance(data,str):
+        data = pd.read_csv(data)
+    # only mismatches
+    mismatch_data = data[data[bulges_column] == 0]
+    bulges_data = data[data[bulges_column] > 0]
+    if len(mismatch_data) + len(bulges_data) != len(data):
+        raise ValueError("Data is not correctly seperated")
+    only_mm_counts = mismatch_data[mismatch_column].value_counts()
+    bulges_counts = bulges_data[bulges_column].value_counts()
+    bulges_and_mismatches_counts = bulges_data[[mismatch_column,bulges_column]].value_counts()
+    print(f'Only mismatches counts: {only_mm_counts}\nBulges counts: {bulges_counts}\nBulges and mismatches counts: {bulges_and_mismatches_counts}')
 
 def main_data():
     data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
@@ -485,9 +503,9 @@ def get_gradients(model, input_data):
 #     return titles 
     
 ##################### Epigenetics #####################   
-def epigenetic_importance_for_offtargets(sg_x, features, model):
+def epigenetic_importance_for_offtargets_pert_05(sg_x, features, model):
     '''
-    Calculate the epigenetic importance for all off-targets given.
+    Calculate the epigenetic importance for all off-targets both pertubation and 05 analysis.
     Args:
         sg_x (np.array): All sgRNA-OT pairs.
         features (list): List of epigenetic features.
@@ -497,32 +515,41 @@ def epigenetic_importance_for_offtargets(sg_x, features, model):
         mean_pertubation_importance_list (list): List of dictionaries of mean pertubation importance for each feature.
         importance_05_list (list): List of dictionaries of 0.5 importance for each feature.
     '''
-    #NOTE: the mean pertubation importance is not used in the current implementation because 0.5 is highley corelated with it
-    #mean_pertubation_importance_list = []
+    mean_pertubation_importance_list = []
     importance_05_list = []
- 
     # Loop over off-target vectors
     for off_target_vector in sg_x:
         # Get perturbation importance and mean values for each feature
-        # pertubation_importance = epigenetic_pertubation_importance(features, off_target_vector, model)
-        # mean_pertubation_importance = {key: np.mean(value) for key, value in pertubation_importance.items()}
+        pertubation_importance = epigenetic_pertubation_importance(features, off_target_vector, model)
+        mean_pertubation_importance = {key: np.mean(value) for key, value in pertubation_importance.items()}
         
         # Get the 05 importance values for each feature
         importance_05 = epigenetic_05_importance(features, off_target_vector, model)
         
         # Append the dictionaries to their respective lists
-        #mean_pertubation_importance_list.append(mean_pertubation_importance)
+        mean_pertubation_importance_list.append(mean_pertubation_importance)
         importance_05_list.append(importance_05)
-    return importance_05_list
-def main_epigenetics():
-    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1/model_1.keras"
-    test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
-    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
-    specific_guides = None
-    number_of_points = 200
-    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
-    run_epigenetics(model_path=epi_model_path,data_path=test_data_path,output_path=output_path,
-                    num_of_points=number_of_points,specific_guides=specific_guides,features=features)
+    return mean_pertubation_importance_list,importance_05_list
+
+def pertubation_and_05_importance(sg_x_selected, features, model, num_of_points):
+    '''
+    Calculate the epigenetic importance for all off-targets both pertubation and 05 analysis.
+    Args:
+        sg_x_selected (np.array): Selected sgRNA-OT pairs.
+        features (list): List of epigenetic features.
+        model (tf.keras.Model): Model to interpret.
+        num_of_points (int): Number of points that sampled.
+    Returns:
+        epigenetic_importance_arrays (dict): Dictionary of 2D arrays for each feature.
+        1 row: pretubation.
+        2 row: 0.5 importance.
+    '''
+    epigenetic_importance_arrays = {feature: np.zeros((2, num_of_points)) for feature in features}
+
+    mean_pertubation_importance_list, importance_05_list = epigenetic_importance_for_offtargets_pert_05(sg_x_selected, features, model)
+    epigenetic_importance_arrays = convert_importance_dicts_to_2d_arrays(epigenetic_importance_arrays,
+                                                                            mean_pertubation_importance_list, importance_05_list)
+    return epigenetic_importance_arrays
 def run_epigenetics(model_path, data_path, features, output_path = None,
                      num_of_points = 200, specific_guides = None ,
                      plot_single_guides = True, plot_all_guides = True):
@@ -541,65 +568,103 @@ def run_epigenetics(model_path, data_path, features, output_path = None,
         specific_guides (list, optional): Specific guides to extract from the data.
         
     '''
-    models = get_model(model_path,"deep")
-    model = models[0]
+    models,models_path = get_model(model_path,"deep", sample=5)
+    
     x_background,y,guides,otss_dict = get_data(data_path,only_seq=True)
     if specific_guides is None:
         specific_guides = guides
     guide_idx = keep_intersect_guides_indices(guides,specific_guides)
     features = [get_feature_name(feature) for feature in features]
-    whole_guides_interpertation = []
     color_map = return_colormap(features)
-    for idx in guide_idx:
-        # create a 2d nd array for each feature
-        epigenetic_importance_arrays = {feature: np.zeros((2, num_of_points)) for feature in features}
-        sgrna = specific_guides[idx]
-        sg_x_background = x_background[idx]
-        sg_y = y[idx]
-        sg_otss = otss_dict[sgrna]
-        sg_x_selected, sgrna_otss, additional_features = filter_data_for_interpertation(sg_x_background, sg_y, sg_otss,
-                                                                                          only_seq=True, number_of_points=num_of_points )
-        mean_pertubation_importance_list, importance_05_list = epigenetic_importance_for_offtargets(sg_x_selected, features, model)
-        epigenetic_importance_arrays = convert_importance_dicts_to_2d_arrays(epigenetic_importance_arrays,
-                                                                             mean_pertubation_importance_list, importance_05_list)
-        whole_guides_interpertation.append(epigenetic_importance_arrays)
-        if plot_single_guides:
-            temp_output = create_folder(output_path,sgrna)
-            plot_epigenetic_pertubation(epigenetic_importance_arrays, temp_output, color_map)
-    
-    if plot_all_guides:
+    titles = [f'{os.path.basename(i).split(".")[0]}' for i in models_path]
+    models_results = []
+    for model in models:
+        whole_guides_interpertation = []
+        for idx in guide_idx:
+            sgrna = specific_guides[idx]
+            sg_x_background = x_background[idx]
+            sg_y = y[idx]
+            sg_otss = otss_dict[sgrna]
+            sg_x_selected, sgrna_otss, additional_features = filter_data_for_interpertation(sg_x_background, sg_y, sg_otss,
+                                                                                            only_seq=True, number_of_points=num_of_points )
+            #NOTE: pertubation is correlated with 0.5 therefor running only 0.5
+            #epigenetic_importance_arrays = pertubation_and_05_importance(sg_x_selected, features, model, num_of_points) 
+            epigenetic_importance_arrays = epigenetic_05_importance(features, sg_x_selected, model)
+            whole_guides_interpertation.append(epigenetic_importance_arrays)
+            if plot_single_guides:
+                temp_output = create_folder(output_path,sgrna)
+                plot_epigenetic_importance_by_pertubation(epigenetic_importance_arrays, temp_output, color_map)
         whole_dict = {}
         for key in whole_guides_interpertation[0]:
             arrays = [d[key] for d in whole_guides_interpertation]
             whole_dict[key] = np.hstack(arrays)
+        models_results.append(whole_dict)
+    if plot_all_guides:
+        # whole_dict = {}
+        # for key in whole_guides_interpertation[0]:
+        #     arrays = [d[key] for d in whole_guides_interpertation]
+        #     whole_dict[key] = np.hstack(arrays)
         temp_output = create_folder(output_path,"All_guides")
-        plot_epigenetic_pertubation(whole_dict, temp_output, color_map)
+        plot_epigenetic_importance_by_pertubation(models_results, temp_output, color_map,title_prefix='Combined models', titles=titles)
+        # plot_epigenetic_importance_by_pertubation(whole_guides_interpertation, temp_output, color_map,title_prefix='Separated')
+
         
 
     
 
     
-def plot_epigenetic_pertubation(epigenetic_importance_arrays, output_path, colormap=None):
+def plot_epigenetic_importance_by_pertubation(epigenetic_importance_arrays, output_path, colormap=None, title_prefix = "",
+                                              titles = None):
     '''
-    Plots pertubation of epigenetic features in 2 ways,
-    Plot 2 box plots of mean pertubation values and 0.5 values
-    Plot correlation between the 2 set of values.'''
-    
-    epigenetic_importance_cor = {key: pearsonr(val[0],val[1]) for key, val in epigenetic_importance_arrays.items()}
-    plot_subplots(data=epigenetic_importance_cor,plot_types='correlation', titles=None,
-                x_label='Mean pertubation importance',y_label='05 importance',
-        output_path=output_path,general_title='Mean vs 0.5 importance correlation')
-    pert_dict = {key: val[0] for key, val in epigenetic_importance_arrays.items()}
-    dict_05 = {key: val[1] for key, val in epigenetic_importance_arrays.items()}
-    data = [pd.DataFrame(pert_dict), pd.DataFrame(dict_05)]
-    titles = ['Mean pertubation importance', '0.5 importance']
-    kwargs = {'colormap': colormap}
-    plot_subplots(data=data,plot_types='boxplot',titles=titles, x_label='Epigenetic marks',y_label=f'{chr(916)} Prediction',
-            output_path= output_path,general_title='Mean vs 0.5 importance boxplot',**kwargs)   
-  
+    Plots the epigenetic importance pertubation calculation.
+    If the epigenetic_importance_arrays is a dictionary of 2D arrays - there are 2 calculations for each feature.
+        1. pretutabion. 2. 0.5 importance. 
+        it will plot 2 box plots of mean pertubation values and 0.5 values and correlation between the 2 set of values.
+    If the epigenetic_importance_arrays is a dictionary of 1D arrays - there is only 1 calculation for each feature.
+        It will plot a box plot of the values.
+    Args:
+        epigenetic_importance_arrays (dict): Dictionary of 1/2D arrays for each feature.
+        output_path (str): path to save the plots
+        colormap (dict): Colormap for the features.
+    '''
+    if isinstance(epigenetic_importance_arrays,list):
+        first_guide_dict = epigenetic_importance_arrays[0]
+        first_key, first_value = next(iter(first_guide_dict.items()))
+    else:
+        first_key, first_value = next(iter(epigenetic_importance_arrays.items()))
+    kwargs = {'colormap': colormap, 'showfliers': False,'showmeans':False,"order_by":"median"}
+
+    if first_value.ndim == 2:
+        epigenetic_importance_cor = {key: pearsonr(val[0],val[1]) for key, val in epigenetic_importance_arrays.items()}
+        plot_subplots(data=epigenetic_importance_cor,plot_types='correlation', titles=None,
+                    x_label='Mean pertubation importance',y_label='05 importance',
+            output_path=output_path,general_title='Mean vs 0.5 importance correlation')
+        pert_dict = {key: val[0] for key, val in epigenetic_importance_arrays.items()}
+        dict_05 = {key: val[1] for key, val in epigenetic_importance_arrays.items()}
+        data = [pd.DataFrame(pert_dict), pd.DataFrame(dict_05)]
+        titles = ['Mean pertubation importance', '0.5 importance']
+        plot_subplots(data=data,plot_types='boxplot',titles=titles, x_label='Epigenetic marks',y_label=f'{chr(916)} Prediction',
+                output_path= output_path,general_title=f'{title_prefix} Mean vs 0.5 importance boxplot',**kwargs)   
+    else: # 1D arrays
+        if isinstance(epigenetic_importance_arrays,list):
+            data = [pd.DataFrame(guide_dict) for guide_dict in epigenetic_importance_arrays]
+        else:
+            data = [pd.DataFrame(epigenetic_importance_arrays)]
+
+        plot_subplots(data=data,plot_types='boxplot',titles=titles, x_label='Epigenetic marks',y_label=f'{chr(916)} Prediction',
+                output_path= output_path,general_title=f'{title_prefix} 0.5 importance boxplot',**kwargs)
     
    
-
+def main_epigenetics():
+    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1"
+    test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
+    specific_guides = None
+    number_of_points = 200
+    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    run_epigenetics(model_path=epi_model_path,data_path=test_data_path,output_path=output_path,
+                    num_of_points=number_of_points,specific_guides=specific_guides,features=features,
+                    plot_single_guides=False, plot_all_guides=True)
 if __name__ == "__main__":
     main_epigenetics()
     

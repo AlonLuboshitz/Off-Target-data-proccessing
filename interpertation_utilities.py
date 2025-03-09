@@ -8,6 +8,7 @@ from features_and_model_utilities import get_feature_name
 from file_utilities import create_paths
 import itertools
 from scipy.stats import zscore
+import pandas as pd
 
 
 ######## DATA ########
@@ -21,13 +22,14 @@ def nucleotides_for_heatmap():
     row_labels = [f"{a}:{b}" for a, b in nucleotides_product]
     x_ticks = list(range(1, 25))
     return row_labels, x_ticks
-def get_model(model_path, model_type):
+def get_model(model_path, model_type, sample = 0):
     '''
     Loads the model from the given path
     
     Args:
         model_path (str): path to model/folder of models
         model_type (str): type of the model - deep,ml
+        sample (int, optional): number of models to sample.
     Returns:
         models (list): list of models    
     '''
@@ -35,6 +37,8 @@ def get_model(model_path, model_type):
     from models import argmax_layer
     models = []
     models_path = create_paths(model_path)
+    if sample > 0 and len(models_path) > sample:
+        models_path = np.random.choice(models_path, sample, replace=False)
     for model_path in models_path:
         if model_type == "deep":
             model = tf.keras.models.load_model(model_path,custom_objects={'argmax_layer': argmax_layer})
@@ -42,7 +46,7 @@ def get_model(model_path, model_type):
 
         else:
             pass
-    return models
+    return models, models_path
 
 def get_data(data_path, only_seq):
     '''
@@ -192,18 +196,24 @@ def epigenetic_05_importance(features, sg_ot_pair, model):
         dict: Dictionary of epigenetic feature importance.
     '''
     number_of_features = len(features)
-    if sg_ot_pair.ndim == 1:
+    one_pair = True if sg_ot_pair.ndim == 1 else False # If only one sgRNA-OT pair
+    if one_pair: # If only one sgRNA-OT pair
         sg_ot_pair = sg_ot_pair.reshape(1, len(sg_ot_pair))
-    constant_sg_ot = np.repeat(sg_ot_pair, 2*number_of_features, axis=0) # Repeat the same sgRNA-OT pair
+    constant_sg_ot = np.repeat(sg_ot_pair, 2*number_of_features, axis=0) # Repeat the same sgRNA-OT pair/pairs
     epi_vector = np.full((2*number_of_features, number_of_features), 0.5) # Create 2 vectors for each feature with 0.5 values
     rows = np.arange(number_of_features) * 2 # Feature rows jumps of 2
     epi_vector[rows, rows // 2] = 0 # even rows - 0
     epi_vector[rows + 1, rows // 2] = 1 # odd rows - 1
+    if not one_pair: # reapeat the epignetic vector for All sgRNA-OT pairs
+        epi_vector = np.tile(epi_vector, (sg_ot_pair.shape[0], 1)) 
     x_input = [constant_sg_ot, epi_vector] # Create input for model
     model_output = model.predict(x_input) # Get model output
-    epi_feature_importance = {feature: model_output[2*i+1][0] - model_output[2*i][0] for i, feature in enumerate(features)} # Calculate difference
-
-   
+    if one_pair:
+        epi_feature_importance = {feature: model_output[2*i+1][0] - model_output[2*i][0] for i, feature in enumerate(features)} # Calculate difference
+    else: # model outputs has predictions for all sgRNA-OT pairs
+        model_output = model_output.reshape(-1) # Reshape to 1D array
+        model_output = model_output.reshape(sg_ot_pair.shape[0],number_of_features*2) # Every row is all features pairs for one sgRNA-OT
+        epi_feature_importance = {feature: model_output[:, 2*i+1] - model_output[:, 2*i] for i, feature in enumerate(features)} # Calculate difference
     return epi_feature_importance
 
 def epigenetic_pertubation_importance(features, sg_ot_pair, model):
@@ -308,5 +318,69 @@ def convert_importance_dicts_to_2d_arrays(epigenetic_importance_arrays, mean_per
         epigenetic_importance_arrays[feature][1, :] = importance_values
     return epigenetic_importance_arrays
 
-def remove_outliers():
-    pass
+def remove_outliers_z(data, z_threshold=3):
+    '''
+    Remove outliers from the data using z score threshold.
+    Args:
+        data (np.array/pd.DataFrame): Data to remove outliers from.
+        z_threshold (float, optional): Z score threshold.
+    Returns:
+        np.array/pd.DataFrame: Data without outliers.
+    '''
+    amount = len(data)
+    filtered =  data[(np.abs(zscore(data)) < z_threshold).all(axis=1)]
+    print(f"Removed {amount - len(filtered)} outliers")
+    return filtered
+    
+
+def remove_outliers_iqr(data, iqr_threshold=1.5):
+    '''
+    Remove outliers from the data using IQR threshold.
+    Args:
+        data (np.array/pd.DataFrame): Data to remove outliers from.
+        iqr_threshold (float, optional): IQR threshold.
+    Returns:
+        np.array/pd.DataFrame: Data without outliers.
+    '''
+    amount = len(data)
+    if isinstance(data, np.ndarray):
+        q1 = np.quantile(data, 25)
+        q3 = np.quantile(data, 75)
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        filtered = data[(data >= lower_bound) & (data <= upper_bound)]
+
+    elif isinstance(data, pd.DataFrame):
+        q1 = data.quantile(0.25)
+        q3 = data.quantile(0.75)
+        iqr = q3 - q1
+        filtered = data[~((data < (q1 - iqr_threshold * iqr)) | (data > (q3 + iqr_threshold * iqr))).any(axis=1)]
+    else:
+        raise ValueError("Data should be a numpy array or a pandas dataframe")
+    print(f"Removed {amount - len(filtered)} outliers")
+    return filtered
+
+def keep_data_percentile(data, lower_bound = 0.05, upper_bound = 0.95):
+    '''
+    Keep data within the given percentile.
+    Args:
+        data (np.array/pd.DataFrame): Data to keep.
+        lower_bound (float, optional): Lower percentile.
+        upper_bound (float, optional): Upper percentile.
+    Returns:
+        np.array/pd.DataFrame: Data within the given percentile.
+    '''
+    amount = len(data)
+    if isinstance(data, np.ndarray):
+        lower = np.quantile(data, lower_bound)
+        upper = np.quantile(data, upper_bound)
+        filtered = data[(data >= lower) & (data <= upper)]
+    elif isinstance(data, pd.DataFrame):
+        lower = data.quantile(lower_bound)
+        upper = data.quantile(upper_bound)
+        filtered = data[(data >= lower) & (data <= upper)]
+    else:
+        raise ValueError("Data should be a numpy array or a pandas dataframe")
+    print(f"Removed {amount - len(filtered)} outliers")
+    return filtered

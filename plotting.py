@@ -172,18 +172,22 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
 
 
 def box_plot(data, ax, x_label, y_label, title, output_path,  showmeans=True,
-             x_in_data=None, y_in_data=None, colormap=None):
+             x_in_data=None, y_in_data=None, colormap=None, showfliers=True, order_by=None):
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6))
     meanprops = mean_order = None
     if showmeans:
         meanprops = {"marker": "o", "markerfacecolor": "red", "markeredgecolor": "black"}
         mean_order = data.mean().sort_values(ascending=False).index
-
+    if order_by =="median":
+        mean_order = data.median().sort_values(ascending=False).index
+    elif order_by == "mean":
+        mean_order = data.mean().sort_values(ascending=False).index
     # No need to create a new figure when using ax
     ax.set_title(title)
     sns.boxplot(data=data, x=x_in_data, y=y_in_data, order=mean_order,
-                showmeans=showmeans, meanprops=meanprops, boxprops={"facecolor": "lightblue"}, ax=ax,palette=colormap)
+                showmeans=showmeans, meanprops=meanprops, boxprops={"facecolor": "lightblue"},
+                  ax=ax,palette=colormap, showfliers=showfliers)
     
     ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')
 
