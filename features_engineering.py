@@ -9,6 +9,7 @@ from pybedtools import BedTool
 from sklearn.utils import shuffle
 import itertools
 from features_and_model_utilities import get_encoding_parameters, transform_labels
+from utilities import get_k_choose_n,get_X_random_indices
 ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 
 ## FUNCTIONS:
@@ -418,8 +419,54 @@ The function take the guides_indexes and return from ALL_INDEXES and spesific gu
     return choosen_indexes
 
 
-    
+def synthesize_off_targets(sgRNA_seqeunce, num_missmatches, num_bulges = 0):
+    '''
+    Generates all potential off-targets for a given sgRNA sequence with a given number of mismatches/bulges.
+    Args:
+    sgRNA_seqeunce (str): The sgRNA sequence.
+    num_missmatches (int): The number of mismatches.
+    num_bulges (int): The number of bulges.
+    Returns:
+    nd.array (n_samples, encoded off target): The one-hot encoded off-target sequences.
+    '''    
+    # First choose optional positions by chossing k positions from n long sequence.
+    n = len(sgRNA_seqeunce)
+    mismatches_indexes = np.array(get_k_choose_n(n, num_missmatches)) - 1 # -1 for 0-based indexing
+    mismatches_tuples_dict = get_mismatches_tuples()
+    matching_tuples_dict = {'A': (0,0), 'C': (1,1), 'G': (2,2), 'T': (3,3)}
+    nucleotide_num =  4
+    all_off_targets = []
+    indexes_set = set(i for i in range(0,n))
+    for index in mismatches_indexes: 
+        matching_indexes = np.array(list(indexes_set - set(index))) 
+        matching_tuples = np.array([matching_tuples_dict[sgRNA_seqeunce[pos]] for pos in matching_indexes])
+        mismatch_tuples = np.array(list(itertools.product(*[mismatches_tuples_dict[sgRNA_seqeunce[pos]] for pos in index])))
+        m = len(mismatch_tuples)
+        mismatch_array = np.zeros((m,n,nucleotide_num,nucleotide_num),dtype=np.int8)
+        mismatch_array[:,matching_indexes,matching_tuples[:,0],matching_tuples[:,1]] = 1 # assign matching positions
+        mismatch_array[np.arange(m)[:, None], index, mismatch_tuples[:, :, 0], mismatch_tuples[:, :, 1]] = 1 # assign mismatching positions
 
+        all_off_targets.append(mismatch_array)
+    return np.concatenate(all_off_targets, axis=0)
+            
+            
+
+    # Return the one-hot-encoded off-targets
+
+def get_mismatches_tuples():
+    '''
+    Generates a dicionary of all possible mismatches for each nucleotide.
+    For example {A: (0,1), (0,2), (0,3)..}
+    Returns:
+    dict: A dictionary of all possible mismatches for each nucleotide.
+    '''
+    nucleotide_to_index = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+    # Generate the mismatch dictionary
+    mismatch_dict = {
+        letter: [(nucleotide_to_index[letter], index) for other, index in nucleotide_to_index.items() if letter != other]
+        for letter in nucleotide_to_index
+    }
+    return mismatch_dict
 '''given feature list, label list split them into
 test and train data.
 transform into ndarray and shuffle the train data'''

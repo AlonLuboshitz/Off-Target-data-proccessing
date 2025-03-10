@@ -590,16 +590,30 @@ def assign_epigenetics(off_target_data,intersection,file_ending,score_type_dict=
     return off_target_data
 
 def run_intersection(merged_data_path,bed_folder,if_update):
-    '''This function intersect off-target data with given folder of epigenetic data given in bed files.
+    """
+    Intersect off-target data with epigenetic data given in bed files.
+
     It will intersect the data with each bed file in the folder and assign the epigenetic data to the off-target data.
-    If if_update is True, the function will update the existing data with the new epigenetic data.
+    If `if_update` is True, the function will update the existing data with the new epigenetic data.
+
     Args:
-    1. merged_data_path - path to the merged off-target data
-    2. bed_folder - path to the folder with the epigenetic data
-    3. if_update - boolean, if True the function will update the existing data with the new epigenetic data.
-    ----------
-    Returns: None
-    Saves the new data frame with the epigenetic data in the same path as the merged data with the ending _withEpigenetic.csv'''
+        merged_data_path (str): Path to the merged off-target data.
+        bed_folder (str): Path to the folder containing the epigenetic data in BED format.
+        if_update (bool): If True, the function will update the existing data with the new epigenetic data.
+
+    Returns:
+        None
+
+    Description:
+        This function saves the new data frame with the epigenetic data in the same path as the merged data, 
+        with the file ending "_withEpigenetic.csv".
+
+    """
+    '''
+    example:
+    run_intersection("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_shapiro_park.csv",
+                     "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/HSPC",False)
+                     '''
     data = pd.read_csv(merged_data_path)
     data = order_data_column_for_intersection(data,["chrom","chromStart","chromEnd"])
     if not "Index" in data.columns:
@@ -936,6 +950,34 @@ def split_data_by_name(data=None, name=None, name_column = None, if_by_guides = 
     else:
         filtered_data = data[data[name_column] == name]
         filtered_data.to_csv(os.path.join(output_path,f"{output_suffix}.csv"),index=False)
+
+def calculate_epigenetic_disterbution(folder_path, output_path, epigenetic_file_lists=None):
+    '''
+    Calculate the epigenetic disterbution (abundance) over the genome.
+    Saves the output results in a file in the output path.
+    Args:
+        folder_path (str): path to the folder with the epigenetic data
+        output_path (str): path to save the output
+        epigenetic_file_lists (list, optional): a list of the epigenetic files, if given this list will be used instead of the files in the folder
+    '''
+    if epigenetic_file_lists:
+        bed_files = epigenetic_file_lists
+    else:
+        bed_files = get_bed_files(folder_path)
+    if len(bed_files) == 0:
+        raise ValueError("No bed files found.")
+    epigenetic_dict_values = {} # dictionary to keep the values {mark : value}
+    genome_base_num = 3e9
+    for bed_file in bed_files:
+        bed = pybedtools.BedTool(bed_file)
+        total_bases = sum(interval.length for interval in bed) # Total number of coverage bases
+        mark = get_ending(bed_file)
+        mark_disterbution = total_bases/genome_base_num
+        print(f'Mark: {mark}, Total bases: {total_bases}, Disterbution: {mark_disterbution}')
+        epigenetic_dict_values[mark] = mark_disterbution
+    output_file = os.path.join(output_path,"Epigenetic_disterbution.csv")
+    pd.DataFrame([epigenetic_dict_values]).to_csv(output_file,index=False)
+    print(f"Output file saved in: {output_file}")
 '''
 function gets path for identified (guideseq output data) folder and calls:
 process_folder function, which creates csv folder named: identified_labeled_sub_only
@@ -947,10 +989,8 @@ argv 3 - keep the identified label folder or erase it
 if __name__ == '__main__':
     ### assign epigenetic
     
-    run_intersection("/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_shapiro_park.csv",
-                     "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/HSPC",False)
-                          
-    
+    calculate_epigenetic_disterbution('/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Bed',
+                                      'Epigenetics/Change-seq',epigenetic_file_lists=None)    
     
     
 

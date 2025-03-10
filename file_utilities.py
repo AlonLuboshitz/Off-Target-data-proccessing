@@ -94,10 +94,12 @@ def get_bed_folder(bed_parent_folder):
     return result_list
 
 def get_bed_files(bed_files_folder):
-        
-    '''function retrives bed files
-    args- bed foler
-    return list paths.'''
+    '''
+    Return a list of the bed files in the folder.
+    Args:
+        bed_files_folder (str): path to the folder
+    Returns:
+        list of bed files paths'''
     bed_files = []
     for foldername, subfolders, filenames in os.walk(bed_files_folder):
         for name in filenames:
