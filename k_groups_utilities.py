@@ -167,14 +167,23 @@ def get_k_groups_ensemble_args_epi_features(partitions, n_models, n_ensmbels, mu
     return multi_process_args
 
 def get_k_groups_guides(guides_path, partition_list, train = False, test = False):
-    '''
-    This function returns a dictionary of partition_num : guides for each partition in the partition path.
-    ARGS:
-    guides_path - path to folder with train/test partitions guides
-    partition_list - list of ints of partition numbers
-    train - flag to get train guides
-    test - flag to get test guides
-    '''
+    
+    """
+    Creates a dictionary of {partition_num : guides} 
+    for each partition in the partition path.
+
+    Args:
+
+        guides_path (str): path to folder with train/test partitions guides
+        partition_list (list): list of ints of partition numbers
+        train (bool): flag to get train guides
+        test (bool): flag to get test guides
+    
+    Return:
+
+        k_partitions (dict): dictionary of {partition_num : guides}
+    """
+   
     if train:
         prefix = "Train_guides"
     elif test:
@@ -192,7 +201,7 @@ def get_k_groups_guides(guides_path, partition_list, train = False, test = False
 Partition utilities
 '''
 
-#### Move get_partition_information to k_groups_utilities.py
+
 #### Create data_utilities where the functino to obtain only mismtaches\bulges\all OTSs will be located
 
 def partition_data_for_histograms(data_frame, partition_information_path, data_name,

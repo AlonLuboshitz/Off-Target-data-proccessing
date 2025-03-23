@@ -70,8 +70,14 @@ def set_cross_val_args(file_manager, train = False, test = False, cross_val_para
             return None, None, None
         guide_path = file_manager.get_guides_partition_path(train,test)
         if len(ARGS.partition) == 1:
-            ARGS.partition = np.arange(1,ARGS.partition[0]+1)
-        t_guides = get_k_groups_guides(guide_path,ARGS.partition,train,test)
+            partition_numbers = ARGS.partition[0]
+            if isinstance(partition_numbers,str) and partition_numbers.lower() == 'all': # Cross val all partitions in the folder
+                partitions_numbers = np.arange(1,len(os.listdir(guide_path))+1)
+            elif isinstance(partition_numbers,int):
+                partitions_numbers = np.arange(1,partition_numbers+1)
+        elif isinstance(ARGS.partition,list): # Cross val specific partitions
+            partitions_numbers = ARGS.partition
+        t_guides = get_k_groups_guides(guide_path,partitions_numbers,train,test)
         return t_guides, None, None
     elif cross_val == 3: # Ensemble
         ens_parms = ensemble_parmas(*cross_val_params, ARGS.job)
@@ -306,8 +312,12 @@ def evaluate_ensemble_by_guides_in_other_data():
     file_manager = init_file_management()
     ml_results_path = file_manager.get_ml_results_path()
     scores_combi_paths = get_scores_combi_paths_for_ensemble(ml_results_path,ARGS.n_ensmbels,ARGS.n_models,True)
+    if not scores_combi_paths:
+        raise RuntimeError("No scores found in the ml_results_path")
     eval_obj = evaluation(ARGS.task)
-    guide_indexes = keep_indexes_per_guide(file_manager.get_merged_data_path(),COLUMNS["TARGET_COLUMN"])
+    guide_indexes = keep_indexes_per_guide(data_frame=file_manager.get_merged_data_path(), target_column=COLUMNS["TARGET_COLUMN"],
+                                           ot_constrain=ARGS.off_target_constriants, mismatch_column=COLUMNS["MISMATCH_COLUMN"],
+                                           bulges_column=COLUMNS["BULGES_COLUMN"])
     eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,guide_indexes,file_manager.get_plots_path(),ARGS.data_name)
 def set_evaluation_args():
     ARGS.cross_val = 3
@@ -476,26 +486,54 @@ def test_k_groups_by_features():
     pass
 def run_leave_one_out(train = False, test = False):
     pass
-def train_k_groups_by_features():
+def train_k_groups_by_features(feature_dict = None, all_epigenetics = True):
     runner,file_manager = init_model_runner_file_manager()
     train_guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = True, test = False)
     model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
-
-def train_k_groups_only_seq():
+    if not feature_dict: # None
+        ### NOTE: ONLY EPIGENETICS IS SET TO TRUE!!!
+        features_dict = parse_feature_column_dict(ARGS.features_columns, only_epigenetics=True)
+    else:
+        features_dict = feature_dict
+    args = get_features_columns_args_ensembles(runner=runner,file_manager=file_manager,t_guides=train_guides,
+                                               model_base_path=model_base_path,ml_results_base_path=ml_results_base_path,
+                                               n_models=None,n_ensmbels=None,features_dict=features_dict,multi_process=False)
+    for arg in args:
+        group, feature,runner, file_manager,t_guides,model_base_path,ml_results_base_path, n_models, n_ensmbels,multi_process = arg
+        log_time(f'Create_ensmbels_with_epigenetic_features_{group}_{feature}_start')
+        print(f"Training K cross for group: {group} with feature: {feature}")
+        temp_suffix = get_feature_column_suffix(group,feature) # set path to epigenetic data type - binary, by score, by enrichment.
+        if not all_epigenetics: # Dont run all epigenetics
+            if "All-epigenetics" in temp_suffix:
+                return
+        x_features,y_features,all_guides = get_x_y_data(file_manager, runner.get_model_booleans(),  feature)
+        file_manager.set_models_path(model_base_path) # set model path
+        file_manager.set_ml_results_path(ml_results_base_path) # set ml results path
+        file_manager.add_type_to_models_paths(temp_suffix) # add path to train ensmbel
+        runner.set_features_columns(feature) # set feature   
+        train_k_groups_only_seq(runner,file_manager,x_features,y_features,all_guides,t_guides)
+def train_k_groups_only_seq(runner = None, file_manager = None, x_features= None, y_features = None, all_guides=None, guides = None):
     '''
     This function trains a model for each partition.
     In total k models will be created with the suffix partition_number.keras
     '''
-    runner, file_manager , x_features, y_features, all_guides, guides, n_models, n_ensmbels = init_run()
+    if runner is None or file_manager is None:
+        runner,file_manager = init_model_runner_file_manager()
+    if guides is None:
+        guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = True, test = False)
+    if x_features is None or y_features is None:
+        x_features, y_features, all_guides = get_x_y_data(file_manager, runner.get_model_booleans())
     models_path = file_manager.get_model_path()
     seed=10
-    args = [(os.path.join(models_path, f"{partition}.keras"),guides[partition],seed,x_features,y_features,all_guides )for partition in ARGS.partition]
+    args = [(os.path.join(models_path, f"{partition}.keras"),guides_partition,seed,x_features,y_features,all_guides )for partition,guides_partition in guides.items()]
     if MULTI_PROCESS:
         processes = min(os.cpu_count(), len(ARGS.partition))
         with Pool(processes=processes) as pool:
             pool.starmap(runner.create_model, args)
     else:
-        for arg in args:
+        models = len(args)
+        for m_,arg in enumerate(args):
+            print(f'train model number: {m_+1}/{models}')
             runner.create_model(*arg)       
 def test_k_groups_only_seq(if_plot = True):
     '''

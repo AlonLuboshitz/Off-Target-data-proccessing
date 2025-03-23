@@ -524,7 +524,7 @@ def epigenetic_importance_for_offtargets_pert_05(sg_x, features, model):
         mean_pertubation_importance = {key: np.mean(value) for key, value in pertubation_importance.items()}
         
         # Get the 05 importance values for each feature
-        importance_05 = epigenetic_05_importance(features, off_target_vector, model)
+        importance_05 = epigenetic_05_vector(features, off_target_vector, model)
         
         # Append the dictionaries to their respective lists
         mean_pertubation_importance_list.append(mean_pertubation_importance)
@@ -568,13 +568,55 @@ def run_epigenetics(model_path, data_path, features, output_path = None,
         specific_guides (list, optional): Specific guides to extract from the data.
         
     '''
+    models = create_paths(model_path)
+    guide_list = ['GGTGACAAGTGTGATCACTTCGG','CCTGACAAGTGTGATCACCTCGG']
+    features = [get_feature_name(feature) for feature in features]
+    epi_dis_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Epigenetic_disterbution.csv'
+    
+    mismatch_limit = 2
+    guides_dict = create_off_targets_for_guides(guide_list=guide_list,mismatch_limit=mismatch_limit)
+    epigenetic_disterbution_file = pd.read_csv(epi_dis_path)
+    # for clarity creating a new dictionary
+    guide_dict_with_epi_genetics = {}
+    for guide, mismatch_dict in guides_dict.items():
+        mismatch_dict_with_epigenetics = {mismatch_number: epigenetic_genome_disterbution_vector(features,synthesized_off_targets,epigenetic_disterbution_file) 
+                                          for mismatch_number,synthesized_off_targets in mismatch_dict.items()}
+        guide_dict_with_epi_genetics[guide] =  mismatch_dict_with_epigenetics
+    del guides_dict # free unused mem
+    from run_models import run_models
+    runner = run_models()
+    runner.setup_runner(ml_task='classification',model_num=6,features_method=2,cw=2,encoding_type=2,if_bulges=True)
+    model_outputs = {}
+    for guide, mismatch_dict in guide_dict_with_epi_genetics.items():
+        guide_outputs = {}
+        for mismatch_num, off_targets in mismatch_dict.items():
+            y_scores,test,indexes = runner.test_ensmbel(models,x_features=off_targets,tested_guide_list=None)
+            guide_outputs[mismatch_num] = np.mean(y_scores,axis=0)
+        model_outputs[guide] = guide_outputs 
+    # model outputs {guide: {mismatch_num: ensemble_score}}
+    for guide, mismatch_dict in model_outputs.items():
+        for mismatch_num, ensemble_score in mismatch_dict.items():
+            model_outputs[guide][mismatch_num] = epi_feature_importance_from_model_output(features,ensemble_score)
+    # Sub plot all guides togther by mismatch number.
+    # Create {guide : {feature : [importance]}} by the same mismatch number
+    color_map = return_colormap(features)
+
+    for mismatch_num in range(1,mismatch_limit+1):
+        temp_output = create_folder(output_path,f'Mismatch_{mismatch_num}')
+        model_outputs_by_mismatch = {guide: model_outputs[guide][mismatch_num] for guide in model_outputs}
+        plot_epigenetic_importance_by_pertubation(model_outputs_by_mismatch,temp_output,colormap=color_map,title_prefix='trial')
+    # Sub plot all mismatch number by the same guide.
+    for guide,mismatch_dict in model_outputs.keys():
+        temp_output = create_folder(output_path,guide)
+        plot_epigenetic_importance_by_pertubation(mismatch_dict,temp_output,colormap=color_map,title_prefix='mismatch_trial')
+
     models,models_path = get_model(model_path,"deep", sample=5)
     
     x_background,y,guides,otss_dict = get_data(data_path,only_seq=True)
     if specific_guides is None:
         specific_guides = guides
     guide_idx = keep_intersect_guides_indices(guides,specific_guides)
-    features = [get_feature_name(feature) for feature in features]
+    
     color_map = return_colormap(features)
     titles = [f'{os.path.basename(i).split(".")[0]}' for i in models_path]
     models_results = []
@@ -589,7 +631,7 @@ def run_epigenetics(model_path, data_path, features, output_path = None,
                                                                                             only_seq=True, number_of_points=num_of_points )
             #NOTE: pertubation is correlated with 0.5 therefor running only 0.5
             #epigenetic_importance_arrays = pertubation_and_05_importance(sg_x_selected, features, model, num_of_points) 
-            epigenetic_importance_arrays = epigenetic_05_importance(features, sg_x_selected, model)
+            epigenetic_importance_arrays = epigenetic_05_vector(features, sg_x_selected, model)
             whole_guides_interpertation.append(epigenetic_importance_arrays)
             if plot_single_guides:
                 temp_output = create_folder(output_path,sgrna)

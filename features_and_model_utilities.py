@@ -71,22 +71,31 @@ def parse_feature_column_dict(feature_column_dict, only_epigenetics = False):
     return filtered_dict
 
 
+
+
 def get_features_columns_args_ensembles(runner = None,file_manager = None, t_guides = None, 
                               model_base_path = None, ml_results_base_path = None,
                                 n_models = None, n_ensmbels = None, features_dict = None, multi_process= False):
-    '''
-    This creates a list of arguments for training/testing the models with features.
+    """
+    Creates a list of arguments for training/testing the models with features.
+
     ARGS:
-    runner: Runner object
-    file_manager: FileManager object
-    t_guides: list of guides for training/testing
-    model_base_path: Path to save/get the models
-    ml_results_base_path: Path to save the results
-    n_models: Number of models to train
-    n_ensmbels: Number of ensembles to train
-    features_dict: Dictionary of features - {group: [features]}
-    multi_process: If to run the models in parallel
-    '''
+        runner (Runner object): Runner object
+        file_manager (FileManager object): FileManager object
+        t_guides (list): List of guides for training/testing
+        model_base_path (str): Path to save/get the models
+        ml_results_base_path (str): Path to save the results
+        n_models (int): Number of models to train
+        n_ensmbels (int): Number of ensembles to train
+        features_dict (dict): Dictionary of features - {group: [features]}
+        multi_process (bool): If to run the models in parallel
+    
+    Returns:
+        list (list) of tuples: [(group, [feature],runner, file_manager,t_guides,model_base_path,ml_results_base_path, n_models, n_ensmbels,multi_process)] 
+        List of arguments for training/testing the models with features.
+        
+  
+    """
     arg_list = []
     for group, features in features_dict.items():
         if len(features) > 1: # More then 1 feature in the group run all togther.

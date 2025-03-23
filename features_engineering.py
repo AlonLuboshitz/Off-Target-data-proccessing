@@ -9,6 +9,7 @@ from pybedtools import BedTool
 from sklearn.utils import shuffle
 import itertools
 from features_and_model_utilities import get_encoding_parameters, transform_labels
+from data_constraints_utilities import return_constrained_data
 from utilities import get_k_choose_n,get_X_random_indices
 ALL_INDEXES = [] # Global variable to store indexes of data points when generating features
 
@@ -21,8 +22,21 @@ Based on gRNA
 Outputs: 1. Dictionray - {gRNA : Data frame} 2. unique gRNA set
 '''
 def create_data_frames_for_features(data, if_data_reproducibility, target_column, 
-                                    exclude_guides = None, test_on_other_data = False):
+                                    exclude_guides = None, test_on_other_data = False, 
+                                    if_bulges = False, bulges_column = None):
+    """
+    Creates a dictionary of DataFrames, where keys are gRNA names and values are corresponding DataFrames.
+    
+    Args:
+        data (str): Path to the data file.
+        if_data_reproducibility (bool): If True, the data will be sorted for reproducibility.
+        target_column (str): The name of the column containing the gRNA names.
+        exclude_guides (tuple): (guides_description, path to guides to exclude from the data, target_column)
+        test_on_other_data (bool): If True, the guides will not be excluded from the data.
+        if_bulges (bool): If True, bulges will be included in the data."""
     data_table = pd.read_csv(data) # open data
+    if not if_bulges: # if bulges are not included
+        data_table = data_table[data_table[bulges_column] == 0] # remove bulges
     if exclude_guides: # exlucde not empty
         if not test_on_other_data: # 
             data_table = return_df_without_guides(data_table, exclude_guides, target_column)
@@ -94,7 +108,8 @@ def generate_features_and_labels(data_path, manager, if_bp, if_only_seq ,
     
 '''
     splited_guide_data,guides = create_data_frames_for_features(data_path, if_data_reproducibility,
-                                                                columns_dict["TARGET_COLUMN"],exclude_guides,test_on_other_data)
+                                                                columns_dict["TARGET_COLUMN"],exclude_guides,test_on_other_data,
+                                                                if_bulges,columns_dict["BULGES_COLUMN"])
     x_data_all = []  # List to store all x_data
     y_labels_all = []  # List to store all y_labels
     ALL_INDEXES.clear() # clear indexes
@@ -419,7 +434,8 @@ The function take the guides_indexes and return from ALL_INDEXES and spesific gu
     return choosen_indexes
 
 
-def synthesize_off_targets(sgRNA_seqeunce, num_missmatches, num_bulges = 0):
+def synthesize_mismatch_off_targets(sgRNA_seqeunce, num_missmatches= 0, if_flatten = False,
+                                    if_bulge_encoding = True):
     '''
     Generates all potential off-targets for a given sgRNA sequence with a given number of mismatches/bulges.
     Args:
@@ -430,11 +446,17 @@ def synthesize_off_targets(sgRNA_seqeunce, num_missmatches, num_bulges = 0):
     nd.array (n_samples, encoded off target): The one-hot encoded off-target sequences.
     '''    
     # First choose optional positions by chossing k positions from n long sequence.
+    if num_missmatches <=0 or num_missmatches > 7:
+        raise RuntimeError("mismatch number should between 1-7")
     n = len(sgRNA_seqeunce)
+    if num_missmatches > n:
+        raise RuntimeError(f"mismatch number ({num_missmatches}) is bigger than length of sequence ({n})")
+    if n > 24:
+        raise RuntimeError(f"sequence length ({n}) is bigger than 24")
     mismatches_indexes = np.array(get_k_choose_n(n, num_missmatches)) - 1 # -1 for 0-based indexing
     mismatches_tuples_dict = get_mismatches_tuples()
     matching_tuples_dict = {'A': (0,0), 'C': (1,1), 'G': (2,2), 'T': (3,3)}
-    nucleotide_num =  4
+    nucleotide_num =  4 if not if_bulge_encoding else 5
     all_off_targets = []
     indexes_set = set(i for i in range(0,n))
     for index in mismatches_indexes: 
@@ -447,9 +469,35 @@ def synthesize_off_targets(sgRNA_seqeunce, num_missmatches, num_bulges = 0):
         mismatch_array[np.arange(m)[:, None], index, mismatch_tuples[:, :, 0], mismatch_tuples[:, :, 1]] = 1 # assign mismatching positions
 
         all_off_targets.append(mismatch_array)
-    return np.concatenate(all_off_targets, axis=0)
+    
+    all_off_targets = np.concatenate(all_off_targets, axis=0)
+    if if_bulge_encoding: # append zeros in the first location 24 length instead of 23
+        zeros = np.zeros((all_off_targets.shape[0], 1, nucleotide_num, nucleotide_num),dtype=np.int8)
+        all_off_targets = np.concatenate([zeros, all_off_targets], axis=1)
+        n = 24
+    if if_flatten:
+        all_off_targets = all_off_targets.reshape((all_off_targets.shape[0],n,nucleotide_num**2))
+        all_off_targets = all_off_targets.reshape(all_off_targets.shape[0],-1)
+    return all_off_targets
             
-            
+def synthesize_all_mismatch_off_targets(sgrna_sequence, mismatch_limit = 6, if_range = True, if_flatten = False):
+    """
+    Creates a dictionary with {mismatch number: synthesized off targets}
+
+    Args:
+        sgrna_sequence (str): the guide seqeunce
+        mismatch_limit (int): the higher limit of the mismatches number to synthesize. defualt -6.
+        if_range (bool): True - syntesize off target with 1 - mismatch_limit.
+            False - syntesize off target with mismatch_limit only.
+    
+    Returns:
+        dictionary of np.arrays: {mismatch_number: off targets}
+    """
+    if mismatch_limit < 0:
+        raise RuntimeError('Mismatches should be positive')
+    missmatches = [i for i in range(1,mismatch_limit+1)] if if_range else [mismatch_limit]
+    return {mismatch_num: synthesize_mismatch_off_targets(sgrna_sequence,mismatch_num,if_flatten) for mismatch_num in missmatches}
+                
 
     # Return the one-hot-encoded off-targets
 
@@ -575,19 +623,31 @@ def get_duplicates(file_manager):
             file.write(f"OTS: {ots[0]}, gRNA: {ots[1]}\n")
 
     
-def keep_indexes_per_guide(data_frame = None, target_column = None):
-    '''
-    This function returns a list of indexes for each guide in the data frame.
+def keep_indexes_per_guide(data_frame = None, target_column = None, 
+                           ot_constrain = 1, mismatch_column = None, bulges_column = None):
+    """
+    Returns a dictionary of indexes for each guide in the data frame.
+    
     Args:
-    1. data_frame: (str -path/ panda df) - The data frame containing the data.
-    2. target_column: (str) - The name of the target column.
+        data_frame (str -path/ panda df): The data frame containing the data.
+        target_column (str): The name of the target column.
+        ot_constrain (int): The constrain for the data - 
+            (1) all off target
+            (2) only mismatch
+            (3) bulges
+        mismatch_column (str): The name of the mismatch column.
+        bulges_column (str): The name of the bulges column.
+        
+    
     Returns:
-    A dictionary where keys are the guide names and values are the indexes of the data points.
-    '''
+        (dict): {guide: indexes}
+    """
     if isinstance(data_frame, str):
         data_frame = pd.read_csv(data_frame)
     elif not isinstance(data_frame, pd.DataFrame):
         raise ValueError("The data_frame must be a string or a pandas DataFrame.")
+    data_frame = return_constrained_data(data_frame,ot_constrain,bulges_column,mismatch_column)
+
     guides = data_frame[target_column].unique() # create a unique list of guides
     if "Index" in data_frame.columns:
         guides_indexes = {guide: data_frame[data_frame[target_column] == guide]["Index"].values for guide in guides}

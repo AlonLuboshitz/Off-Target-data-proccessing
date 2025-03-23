@@ -136,29 +136,34 @@ class run_models:
         
 
     def setup_runner(self, ml_task = None, model_num = None, cross_val = None, features_method = None, 
-                     over_sampling = None, cw = None, encoding_type = None, if_bulges = None , early_stopping = None , deep_parameteres = None):
-        '''
+                     over_sampling = None, cw = None, encoding_type = None, if_bulges = None , early_stopping = None , deep_parameteres = None,
+                     train = False, test =False):
+        """
         This function sets the parameters for the model.
+
         Args:
-        1. ml_task - classification or regression (str)
-        2. model_num - number of the model to use (int)
-        3. cross_val - cross validation method # Maybe can remove (int)
-        4. features_method - what feature included in the model (int)
-        5. over_sampling - if to use over sampling/downsampling (str)
-        6. cw - class wieghting - 1- true, 2 -false (int)
-        7. encoding_type - encoding type for the model and features (int)
-        8. if_bulges - if to include bulges in the encoding (Bool)
-        9. early_stopping - if to use early stopping - Tuple (Bool, number of epochs)
-        10. deep_parameteres - Tuple of epochs, batch size, verbose
-        '''
+            ml_task (str): classification or regression
+            model_num (int): number of the model to use
+            cross_val (int): cross validation method
+            features_method (int): what feature included in the model
+            over_sampling (str): if to use over sampling/downsampling
+            cw (int): class weighting - 1- true, 2 - false
+            encoding_type (int): encoding type for the model and features
+            if_bulges (bool): if to include bulges in the encoding
+            early_stopping (Tuple[bool, int]): if to use early stopping - Tuple (Bool, number of epochs)
+            deep_parameteres (Tuple[int, int, int]): Tuple of epochs, batch size, verbose
+
+        """
         self.set_model_task(ml_task)
         self.set_model(model_num, deep_parameteres)
         self.set_cross_validation(cross_val)
         self.set_features_method(features_method)
+        self.set_encoding_parameters(encoding_type, if_bulges)
+
         self.set_over_sampling('n') # set over sampling
         self.set_class_wieghting(cw)
-        self.set_early_stopping(early_stopping[0],early_stopping[1])
-        self.set_encoding_parameters(encoding_type, if_bulges)
+        self.set_early_stopping(early_stopping[0],early_stopping[1]) if early_stopping else self.set_early_stopping()
+        
         self.set_data_reproducibility(False) # set data, model reproducibility
         self.set_model_reproducibility(False)
         self.set_functions_dict()
@@ -189,7 +194,7 @@ class run_models:
         self.paitence = 0
         if if_early == 1:
             self.early = True
-            if paitence > 0:
+            if paitence and paitence > 0:
                 self.paitence = int(paitence)
             self.init_early_stoping()
     
@@ -261,7 +266,8 @@ class run_models:
             self.ml_type = "ML"
         else : # Deep models
             self.ml_type = "DEEP"
-            self.init_deep_parameters(*deep_parameters if deep_parameters else None)
+            self.init_deep_parameters(*deep_parameters) if deep_parameters else self.init_deep_parameters()
+            
         self.ml_name = self.model_dict[model_num_answer]
         self.model_type_initiaded = True
             
@@ -627,10 +633,7 @@ class run_models:
         if x_features is None or y_labels is None or guides is None:
             raise RuntimeError("Cannot create ensemble without data : x_features, y_labels, guides")
         else: 
-            # if shared:
-            #     x_features = convert_shared_x_to_x_feature_list(x_features)
-            #     y_labels = convert_shared_y_to_y_label_list(y_labels)
-            x_train,y_train,g_idx = split_by_guides(guides, guides_train_list, x_features, y_labels)
+           x_train,y_train,g_idx = split_by_guides(guides, guides_train_list, x_features, y_labels)
         self.set_deep_seeds(seed = seed_addition) # repro but random init (j+1 not 0)
         model = self.train_model(X_train=x_train,y_train=y_train)
         model.save(output_path)
@@ -643,13 +646,23 @@ class run_models:
         2. tested_guide_list - list of guides to test on
         3. test_on_guides - boolean to test on the given guides or on the diffrence guides'''
         # Get data
-        if x_features is None or y_labels is None or guides is None:
-            raise RuntimeError("Cannot test ensemble without data : x_features, y_labels, guides")
-        x_test, y_test, guides_idx = split_by_guides(guides, tested_guide_list, x_features, y_labels)
-        all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
-        # init 2d array for y_scores 
-        # Row - model, Column - probalities
-        y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
+        if x_features is None:
+            raise RuntimeError("Cannot test ensemble without x_features!")
+        if y_labels is None or guides is None:
+            y_test, all_guides_idx = None,None
+            print('testing ensemble only with features!')
+            x_test = x_features
+            if isinstance(x_features,list):
+                points = x_features[0].shape[0]
+            else:
+                points = x_features.shape[0]
+            y_scores_probs = np.zeros(shape=(len(ensembel_model_list), points))
+        else:
+            x_test, y_test, guides_idx = split_by_guides(guides, tested_guide_list, x_features, y_labels)
+            all_guides_idx = get_guides_indexes(guide_idxs=guides_idx) # get indexes of all grna,ots
+            # init 2d array for y_scores 
+            # Row - model, Column - probalities
+            y_scores_probs = np.zeros(shape=(len(ensembel_model_list), len(y_test))) 
         for index,model_path in enumerate(ensembel_model_list): # iterate on models and predict y_scores
             model = tf.keras.models.load_model(model_path, custom_objects={'argmax_layer': argmax_layer})
             # self.set_random_seeds(seed = (index+1+additional_seed))

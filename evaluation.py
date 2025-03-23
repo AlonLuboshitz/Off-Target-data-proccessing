@@ -7,7 +7,7 @@ from utilities import get_X_random_indices, extract_scores_labels_indexes_from_f
 from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv
 from train_and_test_utilities import add_labels_and_indexes_to_predictions
 from k_groups_utilities import get_partition_information
-from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp
+from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp, plot_subplots
 from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder
 from features_and_model_utilities import get_feature_name,get_features_string, transform_labels
 from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
@@ -222,29 +222,31 @@ class evaluation():
             self.plot_multiple_ensemble_per_guide(guides_dict,feature_dict,n_ensembles,plots_path, data_name)
         ###### guides_dict = {guide: {feature : (y_scores, y_test)}} #########
         else:
-                
+            guides_results = {}
+            guide_informations = {}
             for guide, features in guides_dict.items(): # for each guide plots and evaluate all metrics
-                guide_path = os.path.join(plots_path,f'{guide}')
-                create_folder(guide_path)
+                
                 try:
-                    guide_info = self.get_guide_information(data_name, guide)
+                    #guide_info =self.get_guide_information('Change_seq', guide)
+                    guide_info = self.get_guide_information('Change_seq', guide)
                 except:
                     guide_info = None
                 print("Checking guide: ",guide)
-
-                plot_evalutions_for_multiple_models(task= self.task, output_path=guide_path,plot_title=guide,
-                                                    results=None,scores_dictionary=features, information=guide_info)
+                guides_results[guide] = plot_evalutions_for_multiple_models(task= self.task, scores_dictionary=features,return_metrics=True)
+                guide_informations[guide] = guide_info
             # All guides
             all_guides_path = os.path.join(plots_path,"All_guides")
             create_folder(all_guides_path)
-            try:
-                guide_info = self.get_guide_information(data_name, guide)
-            except:
-                guide_info = None
+            guides_sub_plots_classification(guides_results,guide_informations,output_path=all_guides_path,
+                                            generall_title='seperated')
+            # try:
+            #     guide_info = self.get_guide_information(data_name, guide)
+            # except:
+            #     guide_info = None
             
-            print("Checking all guides")
-            plot_evalutions_for_multiple_models(task= self.task, output_path=all_guides_path,plot_title="All_guides",
-                                                    results=None,scores_dictionary=feature_dict, information=guide_info)
+            # print("Checking all guides")
+            # plot_evalutions_for_multiple_models(task= self.task, output_path=all_guides_path,plot_title="All_guides",
+            #                                         results=None,scores_dictionary=feature_dict, information=guide_info)
 
     def evaluate_all_partitions_multiple_metrics(self,args):
         self.evaluate_all_partitions(*args, metric="difference")
@@ -876,7 +878,8 @@ def saving_regression_results(pearson, spearman, mse, file_left_out, table, ml_t
     return table
 
 
-def plot_evalutions_for_multiple_models(  task, output_path, plot_title, results = None, scores_dictionary = None, information=None):
+def plot_evalutions_for_multiple_models(  task, output_path = None, plot_title = None, results = None,
+                                         scores_dictionary = None, information=None, return_metrics = False):
     '''
     This function iterates the scores dictionary and extract the evlaution for each model in the dict.
     Than plots the results of each model togther.
@@ -898,18 +901,37 @@ def plot_evalutions_for_multiple_models(  task, output_path, plot_title, results
         predictions, test, indexes = scores
         metrics_dict = append_values_metrics_by_task(test,predictions,metrics_dict,task)
         model_names.append(model_name)
-    
-    plot_multiple_models_by_task(metrics_dict, model_names, task, output_path, plot_title, information)
+    if return_metrics:
+        return metrics_dict, model_names
+    else:
+        plot_multiple_models_by_task(metrics_dict, model_names, task, output_path, plot_title, information)
 def plot_classifications_metrics_multiple_models(metrics_dict, titles, output_path, plot_title, information):
     plot_roc(fpr_list=metrics_dict["fprs"],tpr_list=metrics_dict["tprs"],aurocs=metrics_dict["aucs"],
-             titles=titles,output_path=output_path,general_title=plot_title)
+             model_names=titles,output_path=output_path,general_title=plot_title)
     plot_pr(recall_list=metrics_dict['recalls'],precision_list=metrics_dict['percs'],
-            auprcs=metrics_dict['auprcs'],titles=titles,output_path=output_path,general_title=plot_title)
+            auprcs=metrics_dict['auprcs'],model_names=titles,output_path=output_path,general_title=plot_title)
     # n_rank_vals, n_rank_tprs = zip(*metrics_dict["n_ranks"])
     # plot_n_rank(n_rank_values=n_rank_vals,n_tpr_arrays=n_rank_tprs,titles=titles,output_path=output_path,general_title=plot_title)
     last_fn_indexes, last_fn_ratios, tpr_values = zip(*metrics_dict["last_fn_values"])
     plot_last_tp(last_fn_indexes,last_fn_ratios,tpr_values,titles,output_path,plot_title,information)
 
+def guides_sub_plots_classification(guides_results_dict, information, output_path, generall_title):
+    titles = [guide for guide in guides_results_dict.keys()]
+    roc_data,pr_data,last_tp_data,guide_info = [],[],[],[]
+    for guide,(metrics_dict_model_names) in guides_results_dict.items():
+        guide_info.append(information[guide])
+        metrics_dict, model_names = metrics_dict_model_names
+        roc_data.append((metrics_dict["fprs"],metrics_dict["tprs"],metrics_dict["aucs"]))
+        pr_data.append((metrics_dict["recalls"],metrics_dict["percs"],metrics_dict["auprcs"]))
+        last_tp_data.append(list(map(list,zip(*metrics_dict["last_fn_values"]))))
+    kwargs = {'model_names': model_names}
+    
+    plot_subplots(last_tp_data,plot_types="last_tp",titles=titles,output_path=output_path,
+                  general_title=generall_title,sgrna_otss=guide_info,**kwargs)
+    plot_subplots(roc_data,plot_types="roc",titles=titles,output_path=output_path,
+                  general_title=generall_title,sgrna_otss=guide_info,**kwargs)
+    plot_subplots(pr_data,plot_types="pr",titles=titles,output_path=output_path,
+                  general_title=generall_title,sgrna_otss=guide_info,**kwargs)
 def plot_regression_metrics_multiple_models(scores_dict, titles, output_path, plot_title):
     pass
 def plot_multiple_models_by_task(scores_dict, titles,  task, output_path, plot_title, information):
@@ -1025,7 +1047,7 @@ def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_titl
         recalls.append(recall)
         auprcs.append((average_precision_score(y_test, y_scores),np.sum(y_test[y_test > 0]) / len(y_test)))
     plot_roc(fprs,tprs,aucs,titles,output_path,f'{plot_title}_roc')
-    plot_pr(recall_list=recalls,precision_list=percs,auprcs=auprcs,titles=titles,output_path=output_path,general_title=f'{plot_title}_pr')
+    plot_pr(recall_list=recalls,precision_list=percs,auprcs=auprcs,model_names=titles,output_path=output_path,general_title=f'{plot_title}_pr')
 
 
 def plot_ensembles_by_features_and_task(args,task,partition_information = None):
@@ -1383,8 +1405,8 @@ def evaluate_guides_replicates(guide_data_1, guide_data_2, features_columns_1, f
         percs = [perc_1,perc_2]
         # Create title list
         title = [f"{title[0]} vs {title[1]}", f"{title[1]} vs {title[0]}" ]
-        plot_roc(fpr_list=fprs,tpr_list=tprs,aurocs=aucs,titles=title,output_path=plot_output_path,general_title="intersect_6_roc")
-        plot_pr(recall_list=tprs,precision_list=percs,auprcs=auprcs,titles=title,output_path=plot_output_path,general_title="intersect_6_pr")
+        plot_roc(fpr_list=fprs,tpr_list=tprs,aurocs=aucs,model_names=title,output_path=plot_output_path,general_title="intersect_6_roc")
+        plot_pr(recall_list=tprs,precision_list=percs,auprcs=auprcs,model_names=title,output_path=plot_output_path,general_title="intersect_6_pr")
     else : # Job is regression
         plot_correlation_given_df(merged_df,'label_df1','label_df2',f'{title[0]} - read count',
                                   f'{title[1]} - read count',title= f"{title[0]} vs {title[1]}",

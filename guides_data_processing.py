@@ -115,3 +115,20 @@ def potenital_ots(data,target,guide_=None):
 
 
 #HEADER = ['Data_set', 'Year', 'Gene_name', 'guide_sequence', 'amplified_otss', 'amplified_method', 'vivo_otss', 'vivo_method', 'vitro_otss','vitro_method','potential_otss', 'potential_method', 'genome_amplified_intersect_otss', 'notes']
+if __name__ == "__main__":
+    data = pd.read_csv('/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores_withEpigenetic.csv')
+    guides_1,active_otss = sum_target_otss(data,target='target',label='Label')
+    # guides_2,potential_otss = potenital_ots(data,target='target')
+    # input_to_data_by_column(data_name='Hendel', guides_list=guides_1,values=active_otss,column_to_fill='vivo_otss')
+    # input_to_data_by_column(data_name='Hendel', guides_list=guides_2,values=potential_otss,column_to_fill='potential_otss')
+    
+    # input_to_data_by_column(data_name='Hendel', guides_list=guides_1,values=['Guide-seq'] * len(guides_1),column_to_fill='vivo_method')
+    # input_to_data_by_column(data_name='Hendel', guides_list=guides_1,values=['Cas-OFFinder']*len(guides_1),column_to_fill='potential_method')
+    
+    datas_ = data.groupby('target')
+    guides,genes = [],[]
+    for guide,data_ in datas_:
+        guides.append(guide)
+        genes.append(data_['Filename'].iloc[0].replace('.sam',""))
+    input_to_data_by_column(data_name='Hendel', guides_list=guides,values=genes,column_to_fill='Gene_name')
+        

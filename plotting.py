@@ -29,81 +29,162 @@ def plot_n_rank(n_rank_values, n_tpr_arrays, titles, output_path, general_title)
     plt.tight_layout()  # Adjust layout to minimize whitespace
     plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
     plt.close()  # Close the figure to free memory
-def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, titles, output_path, general_title, information):
-    '''
-    This functions plost the last true positive index and TPR for that point for each model.
-    Args:
-    1. last_tp_values: (list) of last true positive index values for each model.
-    2. tpr_arrays: (list) of true positive rates for each model.
-    3. titles: (list) of titles for each model.
-    4. output_path: (str) output path for saving the plot.
-    5. general_title: (str) general title for the plot.
-    6. information_dict: (dict) of information to add to the plot.
-    '''
-    if len(last_tp_index) != len(last_tp_ratio) != len(tpr_arrays) != len(titles):
-        raise ValueError('All input lists must have the same length.')
-    # argsort in asecnding order by the last tp values
-    last_tp_indices_sorted,tpr_arrays_sorted,titles_sorted = argsort_by(last_tp_index,last_tp_index, tpr_arrays,titles )
 
-    
-    # Create a figure
-    plt.figure(figsize=(8, 6))
+def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, model_names,  information, general_title = None, 
+                    ax=None, ax_title=None, output_path = None):
+    one_pic = False
+    if len(last_tp_index) != len(last_tp_ratio) != len(tpr_arrays) != len(model_names):
+        raise ValueError('All input lists must have the same length.')
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        one_pic = True
+        if ax_title is None:
+            ax_title = "Last true positive index"
+    # argsort in asecnding order by the last tp values
+    last_tp_indices_sorted,tpr_arrays_sorted,titles_sorted = argsort_by(last_tp_index,last_tp_index, tpr_arrays,model_names )
     for i in range(len(last_tp_indices_sorted)):
         x_values = np.arange(1, len(tpr_arrays_sorted[i]) + 1)
         color = plt.rcParams['axes.prop_cycle'].by_key()['color'][i % len(plt.rcParams['axes.prop_cycle'].by_key()['color'])]
-        plt.plot(x_values, tpr_arrays_sorted[i], lw=2,color=color, label=f'{titles_sorted[i]} (Last TP = {last_tp_indices_sorted[i]})')
-        plt.axvline(x=last_tp_indices_sorted[i], color=color,lw=1, linestyle='--')
-
-    plt.xlabel('Number of experiments', fontsize=14)
-    plt.ylabel('True positive rate', fontsize=14)
-    plt.yticks(fontsize=12)
-    plt.title('Last true positive index')
+        ax.plot(x_values, tpr_arrays_sorted[i], lw=2, color=color, label=f'{titles_sorted[i]} (Last TP = {last_tp_indices_sorted[i]})')
+        ax.axvline(x=last_tp_indices_sorted[i], color=color, lw=1, linestyle='--')
+    
+    ax.set_xlabel('Number of experiments', fontsize=14)
+    ax.set_ylabel('True positive rate', fontsize=14)
+    ax.set_ylim(0, 1)  # Set y-axis limits from 0 to 1
+    ax.set_yticks(np.linspace(0, 1, num=6))  # Ensure tick customization if needed
+    ax.set_title(ax_title)
+    
     if information:
         label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
-        plt.plot([], [], ' ', label=label_text)  # Invisible line with empty style
+        ax.plot([], [], ' ', label=label_text)  # Invisible line with empty style
+    
+    ax.legend(loc='lower right', fontsize=11)
+    ax.grid(True)
+    if one_pic:
+        if not "Last_TP" in general_title:
+            general_title = general_title + "_Last_TP"
+        plt.tight_layout()  # Adjust layout to minimize whitespace
+        plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+        plt.close()  # Close the figure to free memory
+    
+    
 
-    plt.legend(loc='lower right',fontsize=11)
-    plt.grid(True)
-    if not "Last_TP" in general_title:
-        general_title = general_title + "_Last_TP"
-    plt.tight_layout()  # Adjust layout to minimize whitespace
-    plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
-    plt.close()  # Close the figure to free memory
-def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
+# def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, titles, output_path, general_title, information):
+#     '''
+#     This functions plost the last true positive index and TPR for that point for each model.
+#     Args:
+#     1. last_tp_values: (list) of last true positive index values for each model.
+#     2. tpr_arrays: (list) of true positive rates for each model.
+#     3. titles: (list) of titles for each model.
+#     4. output_path: (str) output path for saving the plot.
+#     5. general_title: (str) general title for the plot.
+#     6. information_dict: (dict) of information to add to the plot.
+#     '''
+#     if len(last_tp_index) != len(last_tp_ratio) != len(tpr_arrays) != len(titles):
+#         raise ValueError('All input lists must have the same length.')
+#     # argsort in asecnding order by the last tp values
+#     last_tp_indices_sorted,tpr_arrays_sorted,titles_sorted = argsort_by(last_tp_index,last_tp_index, tpr_arrays,titles )
+
+    
+#     # Create a figure
+#     plt.figure(figsize=(8, 6))
+#     for i in range(len(last_tp_indices_sorted)):
+#         x_values = np.arange(1, len(tpr_arrays_sorted[i]) + 1)
+#         color = plt.rcParams['axes.prop_cycle'].by_key()['color'][i % len(plt.rcParams['axes.prop_cycle'].by_key()['color'])]
+#         plt.plot(x_values, tpr_arrays_sorted[i], lw=2,color=color, label=f'{titles_sorted[i]} (Last TP = {last_tp_indices_sorted[i]})')
+#         plt.axvline(x=last_tp_indices_sorted[i], color=color,lw=1, linestyle='--')
+
+#     plt.xlabel('Number of experiments', fontsize=14)
+#     plt.ylabel('True positive rate', fontsize=14)
+#     plt.yticks(fontsize=12)
+#     plt.title('Last true positive index')
+#     if information:
+#         label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
+#         plt.plot([], [], ' ', label=label_text)  # Invisible line with empty style
+
+#     plt.legend(loc='lower right',fontsize=11)
+#     plt.grid(True)
+#     if not "Last_TP" in general_title:
+#         general_title = general_title + "_Last_TP"
+#     plt.tight_layout()  # Adjust layout to minimize whitespace
+#     plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+#     plt.close()  # Close the figure to free memory
+# def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
+#     '''This function plots the ROC curve for 1 or more models.
+#     Args:
+#     1. fpr_list: A list of false positive rates for each model.
+#     2. tpr_list: A list of true positive rates for each model.
+#     3. aurocs: A list of AUROC values for each model.
+#     4. titles: A list of titles for each model.
+#     5. output_path: A string representing the output path for saving the plot.
+#     6. general_title: A string representing the general title for the plot.
+#     ----------
+#     Show the figure and saves it.'''
+#     if len(fpr_list) != len(tpr_list) != len(aurocs) != len(titles):
+#         raise ValueError('All input lists must have the same length.')
+#     fpr_list,tpr_list,titles,aurocs = argsort_by(aurocs,  fpr_list, tpr_list, titles,aurocs, descending=True)
+    
+#     plt.figure(figsize=(8, 6))
+#     for i in range(len(fpr_list)):
+#         plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.4f})')
+    
+#     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
+#     plt.xlabel('False positive rate', fontsize=14)
+#     plt.xticks(fontsize=12)
+#     plt.ylabel('True positive rate', fontsize=14)
+#     plt.yticks(fontsize=12)
+#     plt.title('Receiver Operating Characteristic (ROC) Curve')
+#     plt.legend(loc='lower right',fontsize=11)
+#     plt.grid(True)
+    
+#     if not "AUROC" in general_title:
+#         general_title = general_title + "_AUROC"
+#     plt.tight_layout()  # Adjust layout to minimize whitespace
+#     plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+#     plt.close()  # Close the figure to free memory
+
+def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title, ax=None, ax_title=None):
     '''This function plots the ROC curve for 1 or more models.
     Args:
-    1. fpr_list: A list of false positive rates for each model.
-    2. tpr_list: A list of true positive rates for each model.
-    3. aurocs: A list of AUROC values for each model.
-    4. titles: A list of titles for each model.
-    5. output_path: A string representing the output path for saving the plot.
-    6. general_title: A string representing the general title for the plot.
+    1. ax: Matplotlib axis object to plot on.
+    2. fpr_list: A list of false positive rates for each model.
+    3. tpr_list: A list of true positive rates for each model.
+    4. aurocs: A list of AUROC values for each model.
+    5. titles: A list of titles for each model.
     ----------
-    Show the figure and saves it.'''
-    if len(fpr_list) != len(tpr_list) != len(aurocs) != len(titles):
+    Displays the ROC curve.'''
+    if len(fpr_list) != len(tpr_list) != len(aurocs) != len(model_names):
         raise ValueError('All input lists must have the same length.')
-    fpr_list,tpr_list,titles,aurocs = argsort_by(aurocs,  fpr_list, tpr_list, titles,aurocs, descending=True)
+    
+    fpr_list, tpr_list, model_names, aurocs = argsort_by(aurocs, fpr_list, tpr_list, model_names, aurocs, descending=True)
+    one_pic = False
 
-    plt.figure(figsize=(8, 6))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        one_pic = True
+        if ax_title is None:
+            ax_title = "Receiver Operating Characteristic (ROC) Curve"
+    
     for i in range(len(fpr_list)):
-        plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.4f})')
+        ax.plot(fpr_list[i], tpr_list[i], lw=2, label=f'{model_names[i]} (AUC = {aurocs[i]:.4f})')
     
-    plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
-    plt.xlabel('False positive rate', fontsize=14)
-    plt.xticks(fontsize=12)
-    plt.ylabel('True positive rate', fontsize=14)
-    plt.yticks(fontsize=12)
-    plt.title('Receiver Operating Characteristic (ROC) Curve')
-    plt.legend(loc='lower right',fontsize=11)
-    plt.grid(True)
+    ax.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
+    ax.set_xlabel('False positive rate', fontsize=14)
+    ax.set_ylabel('True positive rate', fontsize=14)
+    ax.set_title(ax_title)
+    ax.legend(loc='lower right', fontsize=11)
+    ax.grid(True)
+    if one_pic:
+        if not "AUROC" in general_title:
+            general_title = general_title + "_AUROC"
+        plt.tight_layout()
+        plt.savefig(output_path + f"/{general_title}.png", dpi=300)
+        plt.close()
     
-    if not "AUROC" in general_title:
-        general_title = general_title + "_AUROC"
-    plt.tight_layout()  # Adjust layout to minimize whitespace
-    plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
-    plt.close()  # Close the figure to free memory
-   
-def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_title):
+
+
+def plot_pr(recall_list, precision_list, auprcs, model_names, output_path, general_title,
+            ax=None, ax_title=None):
     '''This function plots the Precision-Recall curve for 1 or more models.
     Args:
     1. recall_list: A list of recall values for each model.
@@ -114,27 +195,33 @@ def plot_pr(recall_list, precision_list, auprcs, titles, output_path, general_ti
     6. general_title: A string representing the general title for the plot.
     ----------
     Show the figure and saves it.'''
-    if len(recall_list) != len(precision_list) != len(auprcs) != len(titles):
+    if len(recall_list) != len(precision_list) != len(auprcs) != len(model_names):
         raise ValueError('All input lists must have the same length.')
     auprcs_ = [auprc[0] for auprc in auprcs]
-    recall_list, precision_list, auprcs, titles = argsort_by(auprcs_,  recall_list, precision_list, auprcs,titles,descending=True)
-    plt.figure(figsize=(8, 6))
-    for i in range(len(recall_list)):
-        plt.plot(recall_list[i], precision_list[i], lw=2,label=f'{titles[i]} (AUC = {auprcs[i][0]:.3f})')
-    plt.plot([], [], ' ', label=f'Baseline = {auprcs[0][1]:.5f}')  # Empty plot for baseline legend entry
-    plt.xlabel('Recall', fontsize=14)
-    plt.xticks(fontsize=12)
-    plt.ylabel('Precision', fontsize=14)
-    plt.yticks(fontsize=12)
-    plt.title('Precision-Recall Curve')
+    recall_list, precision_list, auprcs, model_names = argsort_by(auprcs_,  recall_list, precision_list, auprcs,model_names,descending=True)
+    one_pic = False
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        one_pic = True
+        if ax_title is None:
+            ax_title = "Precision-Recall Curve"
     
-    plt.legend(loc='upper right',fontsize=11)
-    plt.grid(True)
-    if not "AUPRC" in general_title:
-        general_title = general_title + "_AUPRC"
-    plt.tight_layout()  # Adjust layout to minimize whitespace
-    plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
-    plt.close()  # Close the figure to free memory
+    for i in range(len(recall_list)):
+        ax.plot(recall_list[i], precision_list[i], lw=2,label=f'{model_names[i]} (AUC = {auprcs[i][0]:.3f})')
+    ax.plot([], [], ' ', label=f'Baseline = {auprcs[0][1]:.5f}')  # Empty plot for baseline legend entry
+    ax.set_xlabel('Recall', fontsize=14)
+    ax.set_ylabel('Precision', fontsize=14)
+    
+    ax.set_title(ax_title)
+    ax.legend(loc='upper right', fontsize=11)
+    ax.grid(True)
+    if one_pic:
+        if not "AUPRC" in general_title:
+            general_title = general_title + "_AUPRC"
+        plt.tight_layout()  # Adjust layout to minimize whitespace
+        plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
+        plt.close()  # Close the figure to free memory
 def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path,ax = None):
     '''This function plots a scatter plot with a linear regression line, and adds the correlation coefficient and p-value to the plot.
     Args:
@@ -198,6 +285,15 @@ def box_plot(data, ax, x_label, y_label, title, output_path,  showmeans=True,
     if output_path and ax is None:  # Only save if no subplot (otherwise, user should save the full figure)
         plt.savefig(output_path, dpi=300)
         plt.close()
+
+
+def get_rows_cols(num_plots):
+        """
+        Returns a rows and cols number by trying to fill sqroot of num_plots.
+        """
+        rows = int(np.sqrt(num_plots))
+        cols = int(np.ceil(num_plots / rows))
+        return (rows, cols)
 def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, y_label=None,
                    x_ticks=None, y_ticks=None, output_path=None, general_title=None,
                    sgrna_otss =None,**kwargs):
@@ -205,8 +301,12 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
     Plots multiple subplots based on the provided data and plot types.
 
     Parameters:
-        data (list,3D np.array): List of data arrays for each subplot. or 3D np.array.
+        data (list,3D np.array, dict): 
+            1. (list): of data arrays for each subplot.
+            2. (3D np.array): 1d- amount of plots, 2-3d data for each plot.
+            3. (Dict): keys -> plots and titles, values -> data for each plot.
         plot_types (list,str): List of plot types (e.g., 'line', 'scatter') for each subplot. 
+            If 1 str is given all the subplots are from that type.
         titles (list): List of titles for each subplot.
         x_label (str, optional): Label for the x-axis.
         y_label (str, optional): Label for the y-axis.
@@ -214,7 +314,7 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
         y_ticks (list, optional): List of y-tick values.
         output_path (str, optional): If provided, saves the plot to this path.
         generall_title (str, optional): A string representing the general title for the plot.
-        **kwargs: Additional keyword arguments for the plot function."""
+        **kwargs: Additional keyword arguments for the sub plotting function."""
     if isinstance(data, list):
         num_plots = len(data)
     elif isinstance(data, np.ndarray):
@@ -226,17 +326,23 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
         titles = list(data.keys())
         num_plots = len(titles)
         data = [data[key] for key in data.keys()]
-    fig, axes = plt.subplots(num_plots, 1, figsize=(10, 6 * num_plots))
+    
+    rows,cols = get_rows_cols(num_plots)
+    fig, axes = plt.subplots(nrows=rows,ncols=cols,  figsize=(cols * 5, rows * 4))
+    if axes.ndim > 1:
+        axes = axes.flatten()
     if num_plots == 1:
         axes = [axes]
     if isinstance(plot_types, str):
         plot_types = [plot_types for i in range(num_plots)]
+        general_title = general_title + " " + plot_types[0]
     if titles is None:
         titles = [f"Plot {i + 1}" for i in range(num_plots)]
     if sgrna_otss is None:
         sgrna_otss = [None for i in range(num_plots)]
 
-    for ax, plot_type, title, data_,sgrna_ots in zip(axes, plot_types, titles, data,sgrna_otss):
+    for ax_index,(plots_tuple) in enumerate(zip(axes, plot_types, titles, data,sgrna_otss)):
+        ax, plot_type, title, data_,sgrna_ots = plots_tuple
         if plot_type == "heatmap":
             plot_heatmap(data_, ax=ax, row_labels=y_ticks, col_labels=x_ticks,
                           x_label=x_label, y_label=y_label, title=title,sgrna_ots=sgrna_ots, **kwargs)
@@ -247,12 +353,21 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
                 plot_correlation(data_._x, data_._y, x_label, y_label, data_.statistic, data_.pvalue, title, output_path, ax=ax)
             else:
                 plot_correlation(data_[0], data_[1], x_label, y_label, data_[2], data_[3], title, output_path, ax=ax)
+        elif plot_type == 'last_tp':
+            plot_last_tp(data_[0],data_[1],data_[2],information=sgrna_ots,ax=ax,ax_title=title,**kwargs)
+        elif plot_type == 'roc':
+            plot_roc(data_[0],data_[1],data_[2],ax=ax,ax_title=title,output_path=None,general_title=None,**kwargs)
+        elif plot_type == 'pr':
+            plot_pr(data_[0],data_[1],data_[2],ax=ax,ax_title=title,output_path=None,general_title=None,**kwargs)
 
+    for j in range(ax_index + 1, len(axes)): # Shut down unused axes
+        axes[j].axis('off')
     plt.tight_layout()
     if output_path:
         output_path = os.path.join(output_path, general_title + ".png")
         plt.savefig(output_path,dpi=300)
     plt.close()
+    
 
 
 def plot_heatmap(data, ax=None, row_labels=None, col_labels=None, 

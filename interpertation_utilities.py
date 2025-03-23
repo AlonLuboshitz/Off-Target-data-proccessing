@@ -2,7 +2,7 @@
 This module contain helper function and utilities for model and data interpertability.
 '''
 import numpy as np
-from features_engineering import extract_features, generate_features_and_labels
+from features_engineering import extract_features, generate_features_and_labels, synthesize_all_mismatch_off_targets
 from features_and_model_utilities import get_feature_name
 
 from file_utilities import create_paths
@@ -47,7 +47,7 @@ def get_model(model_path, model_type, sample = 0):
         else:
             pass
     return models, models_path
-
+ 
 def get_data(data_path, only_seq):
     '''
     Loads the data from the given path
@@ -183,18 +183,27 @@ def convert_features_names(shap_values, agg_function, seqeunce_length, bits_per_
     return shap_values
 
 ######## Epigenetics ########
-def epigenetic_05_importance(features, sg_ot_pair, model):
-    '''
-    Function calculate the epigentic feature importance by assigining 0.5 to the epigenetic features.
-    It substracts the prediction of the model where the wanted epigenetic feature is 1/0.
-    If the Delta is positive the feature is important.
+def epigenetic_05_vector(features, sg_ot_pair):
+    """
+    Adds to the sg_ot_pair/s epigenetic vector with 0.5 values and 1/0 values for each feature.
+    Given N is the number of features, each feature will get 2 vectors
+    where the feature will be set to 1/0 and rest of the features to 0.5.
+    In total 2*N vectors will be created for each sg_ot_pair.
+    The sg_ot_pair/s will be repeated for each 2*N vectors.
+
+    For Example: 
+        sg_ot_pair = [1,0,0,1], features = ['H3K4me3','H3K27ac']
+        (H3K4me3) -> [1,0,0,1] + [1,0.5], [0,0.5]. 
+        (H3K27ac) -> [1,0,0,1] + [0.5,1], [0.5,0].
+    ...
+    
     Args:
         features (list): List of epigenetic features.
         sg_ot_pair (np.array): Pair of sgRNA and off-target.
-        model (tf.keras.Model): Model to interpret.
     Returns:
-        dict: Dictionary of epigenetic feature importance.
-    '''
+        (nd.array): Input for the model.
+        
+    """
     number_of_features = len(features)
     one_pair = True if sg_ot_pair.ndim == 1 else False # If only one sgRNA-OT pair
     if one_pair: # If only one sgRNA-OT pair
@@ -207,13 +216,85 @@ def epigenetic_05_importance(features, sg_ot_pair, model):
     if not one_pair: # reapeat the epignetic vector for All sgRNA-OT pairs
         epi_vector = np.tile(epi_vector, (sg_ot_pair.shape[0], 1)) 
     x_input = [constant_sg_ot, epi_vector] # Create input for model
+    return x_input
     model_output = model.predict(x_input) # Get model output
-    if one_pair:
-        epi_feature_importance = {feature: model_output[2*i+1][0] - model_output[2*i][0] for i, feature in enumerate(features)} # Calculate difference
-    else: # model outputs has predictions for all sgRNA-OT pairs
-        model_output = model_output.reshape(-1) # Reshape to 1D array
-        model_output = model_output.reshape(sg_ot_pair.shape[0],number_of_features*2) # Every row is all features pairs for one sgRNA-OT
-        epi_feature_importance = {feature: model_output[:, 2*i+1] - model_output[:, 2*i] for i, feature in enumerate(features)} # Calculate difference
+def epigenetic_genome_disterbution_vector(features, sg_ot_pair, epigenetic_disterbution_file):
+    """
+    Adds to the sg_ot_pair/s epigenetic vector with disterbution values and 1/0 values for each feature.
+    Given N is the number of features, each feature will get 2 vectors
+    where the feature will be set to 1/0 and rest of the features to the disterbution values.
+    In total 2*N vectors will be created for each sg_ot_pair.
+    The sg_ot_pair/s will be repeated for each 2*N vectors.
+    
+    For example: 
+        sg_ot_pair = [1,0,0,1], features = ['H3K4me3','H3K27ac'], disterbution: {H3K4me3: 0.12, H3K27ac: 0.3}
+        (H3K4me3) -> [1,0,0,1] + [1,0.3], [0,0.3].
+        (H3K27ac) -> [1,0,0,1] + [0.12,1], [0.12,0].
+    
+    Args:
+        features (list): List of epigenetic features.
+        sg_ot_pair (np.array): Pair of sgRNA and off-target.
+        epigenetic_disterbution_file (pd.DataFrame): data frame where columns are 
+        epigenetic features and each column has disterbution value
+        COLUMNS MUST MATCH THE FEATURES.
+    
+    Returns:
+        (nd.array): Input for the model.
+    """
+    column_features = epigenetic_disterbution_file.columns.tolist()
+    if all([feature in column_features for feature in features]):
+        raise ValueError("All features must be in the disterbution file")
+    column_features = {col: get_feature_name(col) for col in column_features}
+    epigenetic_disterbution_file = epigenetic_disterbution_file.rename(columns=column_features)
+    number_of_features = len(features)
+    one_pair = True if sg_ot_pair.ndim == 1 else False # If only one sgRNA-OT pair
+    if one_pair: # If only one sgRNA-OT pair
+        sg_ot_pair = sg_ot_pair.reshape(1, len(sg_ot_pair))
+    constant_sg_ot = np.repeat(sg_ot_pair, 2*number_of_features, axis=0) # Repeat the same sgRNA-OT pair/pairs
+    epi_vector = np.zeros((2*number_of_features, number_of_features)) # Create 2 vectors for each feature 
+    for feature_index, feature in enumerate(features):
+        disterbution_value = epigenetic_disterbution_file[feature].values[0] # Get disterbution value
+        epi_vector[:, feature_index] = disterbution_value # Fill the feature with the disterbution value
+    rows = np.arange(number_of_features) * 2 # Feature rows jumps of 2
+    epi_vector[rows, rows // 2] = 0 # even rows - 0
+    epi_vector[rows + 1, rows // 2] = 1 # odd rows - 1
+    if not one_pair: # reapeat the epignetic vector for All sgRNA-OT pairs
+        epi_vector = np.tile(epi_vector, (sg_ot_pair.shape[0], 1)) 
+    x_input = np.concatenate([constant_sg_ot, epi_vector],axis=1) # Create input for model
+    return x_input
+def create_off_targets_for_guides(guide_list,if_flatten = True, mismatch_limit = 6):
+    """
+    Create synthetic off-target for sgRNAs in the guide_list.
+    
+    Args:
+        guide_list (list): List of sgRNAs.
+        if_flatten (bool): If True, flatten the off-targets.
+        mismatch_limit (int): Maximum number of mismatches.
+    Returns:
+        dict: Dictionary of sgRNA and their synthetic off-targets.
+        {guide: {mismatch_number: np.array[off-targets]}}
+    """
+    guides_dict = {}
+    for guide in guide_list:
+        guides_dict[guide] = synthesize_all_mismatch_off_targets(sgrna_sequence=guide,mismatch_limit=mismatch_limit,if_range=True,if_flatten=if_flatten)
+    return guides_dict
+def epi_feature_importance_from_model_output(features, model_output):
+    """
+    Calculate the epigenetic feature importance from the model outputs.
+    The importance is calculated by substracting the prediction of the model where the epigenetic feature is on and off.
+    If the Delta is positive the feature is important.
+    Args:
+        features (list): list of features ['H3K4me3','H3K27ac'...].
+        model_output (np.array): model output - should match in number the sgRNA-OT pairs.
+    Returns:
+        dict: Dictionary of epigenetic feature importance {'feature name': [importance values]}."""
+    number_of_features = 2*len(features)
+
+    model_output = model_output.reshape(-1) # Reshape to 1D array
+    if len(model_output) % (number_of_features) != 0:
+        raise ValueError("Model output length should be a multiple of 2*number of features")
+    model_output = model_output.reshape(int(len(model_output)/(number_of_features)),number_of_features) # Every row is all features pairs for one sgRNA-OT
+    epi_feature_importance = {feature: model_output[:, 2*i+1] - model_output[:, 2*i] for i, feature in enumerate(features)} # Calculate difference
     return epi_feature_importance
 
 def epigenetic_pertubation_importance(features, sg_ot_pair, model):

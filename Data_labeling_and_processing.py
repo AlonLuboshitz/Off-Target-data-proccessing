@@ -506,16 +506,19 @@ def get_bed_columns(bedtool, columns_dict = {4:"score",6:"fold_enrichemnt",7:"lo
     
     return columns
 def intersect_with_epigentics(whole_data,epigentic_data,if_strand):
-    '''This function intersects off-target data with epigenetic data/data from bed file.
-    The functions accepts two data frames - whole_data and epigentic_data.
-    It intersects the point by -wb param for bed intersection function.
+    """
+    Intersects off-target data with epigenetic from bed file.
+    Utilize pybedtools to intersect the data with -wb param to keep both datas information.
     Args:
-    1. whole_data - data frame with off-target data
-    2. epigentic_data - bed file with epigenetic data
-    3. if_strand - boolean, if True, the function will intersect by strand
-    ------------
-    Returns: whole_data, intersection_df_wa - data frame with off-target data and data frame with intersection data.'''
-    # get data
+        whole_data (pd.DataFrame): data frame with off-target data
+        epigentic_data (str): bed file with epigenetic data
+        if_strand (bool): if True, the function will intersect by strand
+    Returns:
+        whole_data (pd.DataFrame): data frame with off-target data
+        intersection_df_wa (pd.DataFrame): data frame with intersection data
+    """
+    whole_data['chromStart'] = whole_data['chromStart'].astype(int)
+    whole_data['chromEnd'] = whole_data['chromEnd'].astype(int)
     whole_data_bed = pybedtools.BedTool.from_dataframe(whole_data)
     epigentic_data = pybedtools.BedTool(epigentic_data)
     # set columns to data columns + bed columns (5th of bed is score)
@@ -960,6 +963,10 @@ def calculate_epigenetic_disterbution(folder_path, output_path, epigenetic_file_
         output_path (str): path to save the output
         epigenetic_file_lists (list, optional): a list of the epigenetic files, if given this list will be used instead of the files in the folder
     '''
+    '''
+    example:
+      calculate_epigenetic_disterbution('/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Bed',
+                                      'Epigenetics/Change-seq',epigenetic_file_lists=None)  '''
     if epigenetic_file_lists:
         bed_files = epigenetic_file_lists
     else:
@@ -988,9 +995,9 @@ argv 3 - keep the identified label folder or erase it
 '''
 if __name__ == '__main__':
     ### assign epigenetic
+    run_intersection(merged_data_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
+                     bed_folder="Epigenetics/HEK293T/Bed",if_update=False)
     
-    calculate_epigenetic_disterbution('/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Bed',
-                                      'Epigenetics/Change-seq',epigenetic_file_lists=None)    
     
     
 
