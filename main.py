@@ -314,11 +314,22 @@ def evaluate_ensemble_by_guides_in_other_data():
     scores_combi_paths = get_scores_combi_paths_for_ensemble(ml_results_path,ARGS.n_ensmbels,ARGS.n_models,True)
     if not scores_combi_paths:
         raise RuntimeError("No scores found in the ml_results_path")
+    #features_to_keep = ['Only_sequence','Dnase']
+    # feature_to_remove = ["Atac-seq_Dnase_Chia-pet"]
+    #scores_combi_paths = [path for path in scores_combi_paths if any(feature in path for feature in features_to_keep)]
+    # scores_combi_paths = [item for item in scores_combi_paths if any(feature not in item for feature in feature_to_remove)]
     eval_obj = evaluation(ARGS.task)
+    by_mismatch = True
     guide_indexes = keep_indexes_per_guide(data_frame=file_manager.get_merged_data_path(), target_column=COLUMNS["TARGET_COLUMN"],
                                            ot_constrain=ARGS.off_target_constriants, mismatch_column=COLUMNS["MISMATCH_COLUMN"],
-                                           bulges_column=COLUMNS["BULGES_COLUMN"])
-    eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,guide_indexes,file_manager.get_plots_path(),ARGS.data_name)
+                                           bulges_column=COLUMNS["BULGES_COLUMN"], by_mismatch=by_mismatch)
+    additional_data = None
+    
+    # additional_model = '/localdata/alon/ML_results/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Hendel/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models'
+    # additional_data = (additional_model,'Lazzarotto_only-seq')
+    eval_obj.evaluate_test_per_guide(scores_combi_paths,ARGS.n_ensmbels,guide_indexes,
+                                     file_manager.get_plots_path(),ARGS.data_name,
+                                     additional_data,by_mismatch=by_mismatch)
 def set_evaluation_args():
     ARGS.cross_val = 3
     file_manager = init_file_management()

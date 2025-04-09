@@ -98,7 +98,18 @@
             "justMyCode": true
         },
         {
-            "name": "main_args",
+            "name": "main_hendel",
+            "type": "python",
+            "request": "launch",
+            "program": "main.py",
+            "args": [
+                "--argfile",
+                "/home/dsi/lubosha/Off-Target-data-proccessing/Args_hendel.txt"
+                
+            ],
+            "justMyCode": true
+        },{
+            "name": "main_changeseq",
             "type": "python",
             "request": "launch",
             "program": "main.py",

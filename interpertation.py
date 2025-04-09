@@ -6,11 +6,12 @@ import numpy as np
 import os
 import shap
 import Levenshtein 
+import logomaker
 from file_utilities import create_folder
 from Data_labeling_and_processing import remove_unwanted_samples
 from correlation_2 import hypergeometric_test, feature_correlation
 from features_and_model_utilities import get_feature_name
-from plotting import plot_correlation, plot_subplots
+from plotting import plot_correlation, plot_subplots, plot_logo
 from k_groups_utilities import extract_guides_from_partition
 from train_and_test_utilities import keep_intersect_guides_indices
 from interpertation_utilities import *
@@ -229,6 +230,104 @@ def plot_mismatch_and_bulges_disterbution(data, mismatch_column, bulges_column):
     bulges_counts = bulges_data[bulges_column].value_counts()
     bulges_and_mismatches_counts = bulges_data[[mismatch_column,bulges_column]].value_counts()
     print(f'Only mismatches counts: {only_mm_counts}\nBulges counts: {bulges_counts}\nBulges and mismatches counts: {bulges_and_mismatches_counts}')
+
+
+def create_guides_logo(output_path, counts_data = None,data_path=None, target_column=None ):
+    """
+    Create a logo from all the guides in the data frame.
+    
+    Args:
+        data_path (str): Path to the data file.
+        target_column (str): Column name of the target sequence.
+        output_path (str): Path to save the logo.
+    
+    Returns:
+        None
+    """
+    if counts_data:
+        pass
+    elif data_path:
+        guides = pd.read_csv(data_path)[target_column].unique()
+    counts_df = logomaker.alignment_to_matrix(sequences=guides, to_type='counts')
+    counts_df = counts_df.drop([20,21,22])  # Remove PAM sequence
+    counts_df = counts_df/len(guides)  # Normalize the counts
+    plot_logo(counts_df, output_path=output_path, ax_title="Guides logo", x_label="Position", y_label="Nucleotides")
+
+def main_logo():
+    data = 'Data/Change-seq/Processed_data/78_guide_seqs.csv'
+    target = 'target'
+    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/features'
+    create_guides_logo(output_path=output_path,data_path=data,target_column=target)
+
+
+def bla(bigwig_path = None, bed_path = None, amplified_data=None, vivo_data = None, vitro_data = None, silico_data = None,
+        mismatch_range = 6, window_size=20000, output_path = None, mismatch_dict_sample_constraint = None):
+    from file_management import File_management
+    
+    d = {"rHamp-seq": amplified_data,"Guide-seq": vivo_data,
+                   "Change-seq": vitro_data,"Cas-offinder": silico_data}
+    datas_dict = {}
+    for data_name, data in d.items():
+        if data is not None:
+            datas_dict[data_name] = get_sampled_coords(data, mismatch_lim=mismatch_range,
+                                                       mismatch_column='missmatches', chrom_column='chrom', center_position_column='chromStart')
+        
+    if len(datas_dict) == 0:
+        raise ValueError("No data to plot")
+    # for mismatch_num in range(1,mismatch_range+1): # sample data points by 
+    #     sample_size = min(number_points[mismatch_num], 1000)
+    #     changeseq_coords[mismatch_num] = (changeseq_coords[mismatch_num][0][:sample_size], changeseq_coords[mismatch_num][1][:sample_size])
+    #     casofinder_coords[mismatch_num] = (casofinder_coords[mismatch_num][0][:sample_size], casofinder_coords[mismatch_num][1][:sample_size])
+    file_manager = File_management(job='interpertation')
+    
+    if bigwig_path:
+        file_manager.set_bigwig_folder_path(bigwig_path)
+        file_manager.create_bigwig_files_objects()
+        epigenetic_files = file_manager.get_bigwig_files()
+        prefix = 'Bigwig'
+        plot_type = 'bigwig'
+        temp_path = create_folder(output_path, 'bigwig')
+    elif bed_path:
+        epigenetic_files = file_manager.get_bed_files()
+        prefix = 'Bed'
+        plot_type = 'bed'
+        pass
+        temp_path = create_folder(output_path, 'bed')
+    else:
+        raise ValueError("No bigwig or bed path given")
+    
+    # turn dict into mismatch num: chroms, coords
+    datas_dict_by_mismatch = {mismatch_num: [data[mismatch_num] for data in datas_dict.values()] for 
+                  mismatch_num in datas_dict[next(iter(datas_dict))]}
+    temp_path = create_folder(temp_path,f'{window_size}_window')
+    for epi_mark,epi_file in epigenetic_files:
+        mark_dict = {}
+    
+        for mismatch_num, all_data in datas_dict_by_mismatch.items():
+            chroms = [data_[0] for data_ in all_data]
+            coords = [data_[1] for data_ in all_data]
+            epi_peaks = [get_basepair_epigenetics_around_center(chrom, all_centers, epi_file, window_size,True) 
+                         for chrom, all_centers in zip(chroms, coords)]
+            
+            mark_dict[mismatch_num] = {data_name: epi_peaks[i] for i, data_name in enumerate(datas_dict.keys())}
+        titles = [f'{mismatch_num}_mismatch' for mismatch_num in mark_dict.keys()]
+        data = [val for val in mark_dict.values()]
+        kargs = {'window_size': window_size}
+        general_tit = f'{prefix} {epi_mark}'
+        plot_subplots(data=data,plot_types=plot_type,titles=titles,
+                       general_title=general_tit,output_path=temp_path,**kargs)
+def main_features_window():
+    bigwig_path = 'Epigenetics/Change-seq/bigwig'
+    change_seq_guide_seqs = '/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/78_guide_seqs.csv'
+    change_seq_vitro_silico = '/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vitro-silico-110_withEpigenetic.csv'
+    change_seq_guide_seqs = pd.read_csv(change_seq_guide_seqs)
+    change_seq_vitro_silico = pd.read_csv(change_seq_vitro_silico)
+    change_seqs = change_seq_vitro_silico[change_seq_vitro_silico['Label'] >0]
+    casofinders = change_seq_vitro_silico[change_seq_vitro_silico['Label'] ==0]
+    window_size = 100
+    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/features'
+    bla(bigwig_path=bigwig_path,bed_path=None,amplified_data=None,vivo_data=change_seq_guide_seqs,
+        vitro_data=change_seqs,silico_data=casofinders,window_size=window_size,output_path=output_path)
 
 def main_data():
     data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
@@ -550,66 +649,123 @@ def pertubation_and_05_importance(sg_x_selected, features, model, num_of_points)
     epigenetic_importance_arrays = convert_importance_dicts_to_2d_arrays(epigenetic_importance_arrays,
                                                                             mean_pertubation_importance_list, importance_05_list)
     return epigenetic_importance_arrays
-def run_epigenetics(model_path, data_path, features, output_path = None,
-                     num_of_points = 200, specific_guides = None ,
-                     plot_single_guides = True, plot_all_guides = True):
+
+
+def run_epigenetics(model_path, features, output_path = None, guide_list = None, mismatch_limit = 3,
+                    save_model_scores = True, use_model_scores = False,
+                    epigenetic_disterbution_path = None):
     '''
-    This function will run epigenetic interpertation on the given model and data.
-    It will interpert eather by petrubating the epigenetic features or by constant values (0.5) for each feature not evaluated.
+    This function will run epigenetic interpertation on the given model and guides.
+    For each guide it will create syntethic off-targets with all optional mismatches.
+    Than for each off-target it will add an epigenetic vector where all the epigenetic features are 1 and 0.
+    The diffrenences in model prediction for all off targets i.e. the prediction with 1 in the epigenetic feature - the prediction with 0
+    in the epigenetic feature will be box plotted.
+    The model predictions can be saved for further extraction and avoiding running the model again.
+    The delta in predictions can be saved aswell.
+    
+    The function will create 2 folders:
+        by_mismatch: subplot each guide with the same number of mismatches
+        by_guide: subplot each mismatch number with the same guide.
+    
     Args:
         model_path (str): path to the model/folder of models
-        data_path (str): path to the data
         features (list): List of epigenetic features.
-        output_path (str): path to save the plots
-        num_of_points (int, optional): Number of points to interpert - default 200
-            None: Balanced amount of positive and negatives will be returned.
-            0: all positives will be returned.
-            >0: total number of points to sample.
-        specific_guides (list, optional): Specific guides to extract from the data.
+            The feature list should match the feature assignmnet in the model!
+        output_path (str): path to save the plots, model predictions, and delta in predictions.
+        guide_list (list): List of guides to use.
+        mismatch_limit (int): Maximum number of mismatches to create.
+        save_model_scores (bool): If True, save the model scores for each guide and mismatch.
+        use_model_scores (bool): If True, use the model scores from the model_scores_path.
+        epigenetic_disterbution_path (str): Path to the epigenetic distribution file.
+        
+    Returns:
+        None
         
     '''
-    models = create_paths(model_path)
-    guide_list = ['GGTGACAAGTGTGATCACTTCGG','CCTGACAAGTGTGATCACCTCGG']
+    def get_model_outputs_from_synthesized_ots(guide_list):
+        # Create off targets
+        guides_dict = create_off_targets_for_guides(guide_list=guide_list,mismatch_limit=mismatch_limit)
+        # Sample data - 3,4,5,6 to many options
+        
+        # Create epigenetic vector and add it to the off targets
+        
+        
+        epigenetic_disterbution_file = pd.read_csv(epigenetic_disterbution_path)
+        # for clarity creating a new dictionary
+        guide_dict_with_epigentics = add_epigenetic_vector_to_offtargets(guides_dict,features,epigenetic_disterbution_file)
+        
+        del guides_dict
+        
+        # Get scores
+        model_outputs = get_model_scores_for_features(model_path=model_path,
+                                                        guide_dict_with_epi_genetics=guide_dict_with_epigentics,
+                                                        save_model_scores=save_model_scores,
+                                                        output_path=output_path)
+        return model_outputs
+    #NOTE: add the creation of off targets that not included in the model outputs already.
+    guide_list = ['GAAGGCTGAGATCCTGGAGGCGG','GAGAATCAAAATCGGTGAATCGG','GCTGGTACACGGCAGGGTCAAGG','GGACTGAGGGCCATGGACACAGG',
+                  'GTCAGGGTTCTGGATATCTGTGG','GTCCCTAGTGGCCCCACTGTTGG']
+    # guide_list = ['GATGCAGAGACCCTGCTCAACGG','GGGACTCTACATCTGCAAGGAGG','GCTTGTCCGTCTGGTTGCTGCGG','GCTGGCGATGCCTCGGCTGCAGG',
+    #               'GCCCTGCTCGTGGTGACCGATGG','GGTGAGGGAGGAGAGATGCCTGG']
+    mismatch_limit = 3
     features = [get_feature_name(feature) for feature in features]
-    epi_dis_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Epigenetic_disterbution.csv'
+
+    # Open data if given
+    if use_model_scores:
+        model_scores_path = os.path.join(output_path,'Model_scores','Raw_scores')
+        model_outputs,guides_not_checked = open_model_outputs_file(model_scores_path, guide_list, mismatch_limit)
+        if guides_not_checked is not None:
+            print(f'Guides not checked: {guides_not_checked}')
+            model_outputs.update(get_model_outputs_from_synthesized_ots(guides_not_checked))
     
-    mismatch_limit = 2
-    guides_dict = create_off_targets_for_guides(guide_list=guide_list,mismatch_limit=mismatch_limit)
-    epigenetic_disterbution_file = pd.read_csv(epi_dis_path)
-    # for clarity creating a new dictionary
-    guide_dict_with_epi_genetics = {}
-    for guide, mismatch_dict in guides_dict.items():
-        mismatch_dict_with_epigenetics = {mismatch_number: epigenetic_genome_disterbution_vector(features,synthesized_off_targets,epigenetic_disterbution_file) 
-                                          for mismatch_number,synthesized_off_targets in mismatch_dict.items()}
-        guide_dict_with_epi_genetics[guide] =  mismatch_dict_with_epigenetics
-    del guides_dict # free unused mem
-    from run_models import run_models
-    runner = run_models()
-    runner.setup_runner(ml_task='classification',model_num=6,features_method=2,cw=2,encoding_type=2,if_bulges=True)
-    model_outputs = {}
-    for guide, mismatch_dict in guide_dict_with_epi_genetics.items():
-        guide_outputs = {}
-        for mismatch_num, off_targets in mismatch_dict.items():
-            y_scores,test,indexes = runner.test_ensmbel(models,x_features=off_targets,tested_guide_list=None)
-            guide_outputs[mismatch_num] = np.mean(y_scores,axis=0)
-        model_outputs[guide] = guide_outputs 
+    else:
+        model_outputs = get_model_outputs_from_synthesized_ots(guide_list)
+        
     # model outputs {guide: {mismatch_num: ensemble_score}}
     for guide, mismatch_dict in model_outputs.items():
         for mismatch_num, ensemble_score in mismatch_dict.items():
             model_outputs[guide][mismatch_num] = epi_feature_importance_from_model_output(features,ensemble_score)
+    #save_importance_values(model_outputs, output_path)
+    # importance_scores = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability/Model_scores/Importance_scores'
+    # from_file = load_importance_values(importance_scores,guide_list,mismatch_limit)
     # Sub plot all guides togther by mismatch number.
     # Create {guide : {feature : [importance]}} by the same mismatch number
     color_map = return_colormap(features)
+    
+    mismatch_path = create_folder(output_path,'By_mismatch')
 
     for mismatch_num in range(1,mismatch_limit+1):
-        temp_output = create_folder(output_path,f'Mismatch_{mismatch_num}')
-        model_outputs_by_mismatch = {guide: model_outputs[guide][mismatch_num] for guide in model_outputs}
-        plot_epigenetic_importance_by_pertubation(model_outputs_by_mismatch,temp_output,colormap=color_map,title_prefix='trial')
+        model_outputs_by_mismatch = [model_outputs[guide][mismatch_num] for guide in model_outputs]
+        titles = [f'{guide}' for guide in model_outputs]
+        plot_epigenetic_importance_by_pertubation(model_outputs_by_mismatch,mismatch_path,colormap=color_map,title_prefix=f'{mismatch_num}_mismatch',titles=titles)
+        
     # Sub plot all mismatch number by the same guide.
-    for guide,mismatch_dict in model_outputs.keys():
-        temp_output = create_folder(output_path,guide)
-        plot_epigenetic_importance_by_pertubation(mismatch_dict,temp_output,colormap=color_map,title_prefix='mismatch_trial')
+    guide_path = create_folder(output_path,'By_guide')
+    for guide,mismatch_dict in model_outputs.items():
+        data = [mismatch_dict[mismatch_num] for mismatch_num in range(1,mismatch_limit+1)]
+        titles = [f'Mismatch_{mismatch_num}' for mismatch_num in range(1,mismatch_limit+1)]
+        plot_epigenetic_importance_by_pertubation(data,guide_path,colormap=color_map,title_prefix=f'{guide}',titles=titles)
 
+
+
+
+def old_epigenetics_function(model_path,data_path,output_path = None,
+                     num_of_points = 200, specific_guides = None , features = None,
+                     plot_single_guides = True, plot_all_guides = True):
+    '''
+    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1"
+    test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
+    specific_guides = None
+    number_of_points = 200
+    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    run_epigenetics(model_path=epi_model_path,data_path=test_data_path,output_path=output_path,
+                    num_of_points=number_of_points,specific_guides=specific_guides,features=features,
+                    plot_single_guides=False, plot_all_guides=True,save_model_scores=False,use_model_scores=True,
+                    model_scores_path='/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability/Model_scores')
+
+    '''
+    
     models,models_path = get_model(model_path,"deep", sample=5)
     
     x_background,y,guides,otss_dict = get_data(data_path,only_seq=True)
@@ -652,7 +808,45 @@ def run_epigenetics(model_path, data_path, features, output_path = None,
 
         
 
+def open_model_outputs_file(model_scores_path, guide_list, mismatch_limit,
+                            model_suffix = None):
+    """
+    Open the model outputs from the given path.
+    If some guides are not included in the model scores path, the user will be prompted to compute their scores.
     
+    Args:
+        model_scores_path (str): Path to the model scores - folder/guides_mismatches_scores.npy
+        guide_list (list): List of guides to extract from the model scores.
+        mismatch_limit (int): Maximum number of mismatches to consider.
+    """
+    model_outputs = {}
+    if not os.path.exists(model_scores_path):
+        raise ValueError("Model scores path does not exist")
+    guides_in_path = [i.split("_")[0] for i in os.listdir(model_scores_path) if "scores" in i]
+    difference_guides = set(guide_list).difference(set(guides_in_path))
+    if len(difference_guides) > 0:
+        print(f'The guides:\n{difference_guides}\nare not in the model scores path.\nWould you like compute their scores?\n1: Yes\n2: No')
+        answer = input()
+        if answer == "1":
+            difference_guides = list(difference_guides)
+        else:
+            pass
+    else: # Read all the model scores
+        difference_guides = None
+        error_file = f'{model_scores_path}/error_file.txt'
+        for guide in guide_list:
+            mismatch_dict = {}
+            for mismatch_num in range(1,mismatch_limit+1):
+                temp_guide_str = f'{guide}_{mismatch_num}_scores.npy' if not model_suffix else f'{guide}_{mismatch_num}_{model_suffix}_scores.npy'
+                temp_path = os.path.join(model_scores_path,temp_guide_str) 
+                if not os.path.exists(temp_path):
+                    print(f'{temp_guide_str} does not exist')
+                    with open(error_file,'a') as f:
+                        f.write(f'{temp_guide_str}\n')
+                model_scores = np.load(temp_path)
+                mismatch_dict[mismatch_num] = model_scores
+            model_outputs[guide] = mismatch_dict
+    return model_outputs, difference_guides  
 
     
 def plot_epigenetic_importance_by_pertubation(epigenetic_importance_arrays, output_path, colormap=None, title_prefix = "",
@@ -672,10 +866,13 @@ def plot_epigenetic_importance_by_pertubation(epigenetic_importance_arrays, outp
     if isinstance(epigenetic_importance_arrays,list):
         first_guide_dict = epigenetic_importance_arrays[0]
         first_key, first_value = next(iter(first_guide_dict.items()))
-    else:
+    elif isinstance(epigenetic_importance_arrays,dict):
         first_key, first_value = next(iter(epigenetic_importance_arrays.items()))
+        if isinstance(first_value, dict): # Key: {epigenetic: [values]}
+            data = [pd.DataFrame(guide_dict) for guide_dict in epigenetic_importance_arrays.values()]
+            titles = [f'{guide}' for guide in epigenetic_importance_arrays.keys()]
     kwargs = {'colormap': colormap, 'showfliers': False,'showmeans':False,"order_by":"median"}
-
+    
     if first_value.ndim == 2:
         epigenetic_importance_cor = {key: pearsonr(val[0],val[1]) for key, val in epigenetic_importance_arrays.items()}
         plot_subplots(data=epigenetic_importance_cor,plot_types='correlation', titles=None,
@@ -694,19 +891,24 @@ def plot_epigenetic_importance_by_pertubation(epigenetic_importance_arrays, outp
             data = [pd.DataFrame(epigenetic_importance_arrays)]
 
         plot_subplots(data=data,plot_types='boxplot',titles=titles, x_label='Epigenetic marks',y_label=f'{chr(916)} Prediction',
-                output_path= output_path,general_title=f'{title_prefix} 0.5 importance boxplot',**kwargs)
-    
-   
+                output_path= output_path,general_title=f'{title_prefix} importance boxplot',**kwargs)
+ 
 def main_epigenetics():
-    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1"
-    test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
+    #seq_path='/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1'
+    all_epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1"
+    all_epi_features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    all_model_score_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability/Model_scores/Raw_scores'
+    h3k27ac_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/H3K27ac/ensemble_1"
+    h3k27ac_features = ["H3K27ac_peaks_binary"]
+    epi_model_path = all_epi_model_path
+    features = all_epi_features
     output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
-    specific_guides = None
-    number_of_points = 200
-    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
-    run_epigenetics(model_path=epi_model_path,data_path=test_data_path,output_path=output_path,
-                    num_of_points=number_of_points,specific_guides=specific_guides,features=features,
-                    plot_single_guides=False, plot_all_guides=True)
+    model_name = epi_model_path.split('Binary_epigenetics')[1].split('/')[1] # get epigenetics used in the model
+    output_path = create_folder(output_path,model_name)
+    epi_dis_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Epigenetic_disterbution.csv'
+    run_epigenetics(model_path=epi_model_path,output_path=output_path,
+                    features=features, save_model_scores=True,use_model_scores=True,
+                    epigenetic_disterbution_path=epi_dis_path)
 if __name__ == "__main__":
-    main_epigenetics()
+    main_logo()
     

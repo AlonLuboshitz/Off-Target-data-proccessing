@@ -313,6 +313,20 @@ def bws_to_one_hot(file_manager, chr, start, end,encoded_length,bp_presenation):
 1. get epigenetic values from bigwig file and fill window size vector with those values'''
 
 def get_epi_data_bw(epigenetic_bw_file, chrom, center_loc, window_size,max_type):
+    """
+    Get epigenetic mark values per base via big wig file.
+    Given chromosome, center location and window size.
+    
+    Args:
+        epigenetic_bw_file (py.bigwig object): The bigwig file object.
+        chrom (str): The chromosome name.
+        center_loc (int): The center location of the window in that chromosome.
+        window_size (int): The size of the window.
+        max_type (int): The type of maximum value to use:
+            if None: Normalize by the local max.
+            if >1: Normalize by the given value max.
+
+    """
     positive_step = negative_step = int(window_size / 2) # set steps to window/2
     if (window_size % 2): # not even
         positive_step += 1 # set pos step +1 (being rounded down before)
@@ -327,6 +341,8 @@ def get_epi_data_bw(epigenetic_bw_file, chrom, center_loc, window_size,max_type)
     # Get local min and local max
     min_val = epigenetic_bw_file.stats(chrom,indices[0],indices[-1] + 1,type="min")[0] 
     if max_type: # None for local max, other 1 or global
+        if max_type <= 0:
+            raise ValueError("max_type should be positive")
         max_val = max_type
     else :
         max_val = epigenetic_bw_file.stats(chrom,indices[0],indices[-1] + 1,type="max")[0] 
@@ -435,13 +451,14 @@ The function take the guides_indexes and return from ALL_INDEXES and spesific gu
 
 
 def synthesize_mismatch_off_targets(sgRNA_seqeunce, num_missmatches= 0, if_flatten = False,
-                                    if_bulge_encoding = True):
+                                    if_bulge_encoding = True, sample_data = False):
     '''
     Generates all potential off-targets for a given sgRNA sequence with a given number of mismatches/bulges.
     Args:
     sgRNA_seqeunce (str): The sgRNA sequence.
     num_missmatches (int): The number of mismatches.
     num_bulges (int): The number of bulges.
+    sample_data (bool): If True, the data will be sampled.
     Returns:
     nd.array (n_samples, encoded off target): The one-hot encoded off-target sequences.
     '''    
@@ -454,12 +471,23 @@ def synthesize_mismatch_off_targets(sgRNA_seqeunce, num_missmatches= 0, if_flatt
     if n > 24:
         raise RuntimeError(f"sequence length ({n}) is bigger than 24")
     mismatches_indexes = np.array(get_k_choose_n(n, num_missmatches)) - 1 # -1 for 0-based indexing
+    if sample_data:
+        # number of indicies*3^num_missmatches* num_features is the total number of samples
+        # number of features is unkown therefore we want indices*3^num_missmatches < 50000
+        if len(mismatches_indexes) * 3 ** num_missmatches > 25000:
+            number_of_indices = int(25000 // (3 ** num_missmatches))
+            random_incides = np.random.choice(mismatches_indexes.shape[0], number_of_indices, replace=False)
+            mismatches_indexes = mismatches_indexes[random_incides]
+            # get the number of indices needed to get 2000 samples
+            
     mismatches_tuples_dict = get_mismatches_tuples()
     matching_tuples_dict = {'A': (0,0), 'C': (1,1), 'G': (2,2), 'T': (3,3)}
     nucleotide_num =  4 if not if_bulge_encoding else 5
     all_off_targets = []
+    #all_even_dis_off_targets = np.zeros((len(mismatches_indexes),n,nucleotide_num,nucleotide_num),dtype=np.float32)
+    #even_dis_val = 1/3
     indexes_set = set(i for i in range(0,n))
-    for index in mismatches_indexes: 
+    for j,index in enumerate(mismatches_indexes): 
         matching_indexes = np.array(list(indexes_set - set(index))) 
         matching_tuples = np.array([matching_tuples_dict[sgRNA_seqeunce[pos]] for pos in matching_indexes])
         mismatch_tuples = np.array(list(itertools.product(*[mismatches_tuples_dict[sgRNA_seqeunce[pos]] for pos in index])))
@@ -467,7 +495,10 @@ def synthesize_mismatch_off_targets(sgRNA_seqeunce, num_missmatches= 0, if_flatt
         mismatch_array = np.zeros((m,n,nucleotide_num,nucleotide_num),dtype=np.int8)
         mismatch_array[:,matching_indexes,matching_tuples[:,0],matching_tuples[:,1]] = 1 # assign matching positions
         mismatch_array[np.arange(m)[:, None], index, mismatch_tuples[:, :, 0], mismatch_tuples[:, :, 1]] = 1 # assign mismatching positions
-
+        # even_dis = np.zeros((n,nucleotide_num,nucleotide_num),dtype=np.float32)
+        # even_dis[matching_indexes,matching_tuples[:,0],matching_tuples[:,1]] = 1
+        # even_dis[index,mismatch_tuples[:, :, 0], mismatch_tuples[:, :, 1]] = even_dis_val
+        # all_even_dis_off_targets[j] = even_dis
         all_off_targets.append(mismatch_array)
     
     all_off_targets = np.concatenate(all_off_targets, axis=0)
@@ -475,12 +506,19 @@ def synthesize_mismatch_off_targets(sgRNA_seqeunce, num_missmatches= 0, if_flatt
         zeros = np.zeros((all_off_targets.shape[0], 1, nucleotide_num, nucleotide_num),dtype=np.int8)
         all_off_targets = np.concatenate([zeros, all_off_targets], axis=1)
         n = 24
+        # zeros_ = np.zeros((all_even_dis_off_targets.shape[0], 1, nucleotide_num, nucleotide_num),dtype=np.float32)
+        # all_even_dis_off_targets = np.concatenate([zeros_, all_even_dis_off_targets], axis=1)
     if if_flatten:
         all_off_targets = all_off_targets.reshape((all_off_targets.shape[0],n,nucleotide_num**2))
         all_off_targets = all_off_targets.reshape(all_off_targets.shape[0],-1)
+        # all_even_dis_off_targets = all_even_dis_off_targets.reshape((all_even_dis_off_targets.shape[0],n,nucleotide_num**2))
+        # all_even_dis_off_targets = all_even_dis_off_targets.reshape(all_even_dis_off_targets.shape[0],-1)
     return all_off_targets
+    return all_off_targets,all_even_dis_off_targets
+
             
-def synthesize_all_mismatch_off_targets(sgrna_sequence, mismatch_limit = 6, if_range = True, if_flatten = False):
+def synthesize_all_mismatch_off_targets(sgrna_sequence, mismatch_limit = 6, 
+                                        if_range = True, if_flatten = False, sample_data = False):
     """
     Creates a dictionary with {mismatch number: synthesized off targets}
 
@@ -489,14 +527,15 @@ def synthesize_all_mismatch_off_targets(sgrna_sequence, mismatch_limit = 6, if_r
         mismatch_limit (int): the higher limit of the mismatches number to synthesize. defualt -6.
         if_range (bool): True - syntesize off target with 1 - mismatch_limit.
             False - syntesize off target with mismatch_limit only.
-    
+        if_flatten (bool): True - flatten the off target array.
+        sample_data (bool): defualt False, True - sample the data
     Returns:
         dictionary of np.arrays: {mismatch_number: off targets}
     """
     if mismatch_limit < 0:
         raise RuntimeError('Mismatches should be positive')
     missmatches = [i for i in range(1,mismatch_limit+1)] if if_range else [mismatch_limit]
-    return {mismatch_num: synthesize_mismatch_off_targets(sgrna_sequence,mismatch_num,if_flatten) for mismatch_num in missmatches}
+    return {mismatch_num: synthesize_mismatch_off_targets(sgrna_sequence,mismatch_num,if_flatten,sample_data=sample_data) for mismatch_num in missmatches}
                 
 
     # Return the one-hot-encoded off-targets
@@ -624,9 +663,10 @@ def get_duplicates(file_manager):
 
     
 def keep_indexes_per_guide(data_frame = None, target_column = None, 
-                           ot_constrain = 1, mismatch_column = None, bulges_column = None):
+                           ot_constrain = 1, mismatch_column = None, bulges_column = None,
+                           by_mismatch = False):
     """
-    Returns a dictionary of indexes for each guide in the data frame.
+    Returns a dictionary of samples indexes for each guide in the data frame.
     
     Args:
         data_frame (str -path/ panda df): The data frame containing the data.
@@ -637,10 +677,12 @@ def keep_indexes_per_guide(data_frame = None, target_column = None,
             (3) bulges
         mismatch_column (str): The name of the mismatch column.
         bulges_column (str): The name of the bulges column.
+        by_mismatch (bool): If True, return indexes by mismatch.
         
     
     Returns:
         (dict): {guide: indexes}
+        if by_mismatch is True: {mismatch: {guide: indexes}} 
     """
     if isinstance(data_frame, str):
         data_frame = pd.read_csv(data_frame)
@@ -650,7 +692,13 @@ def keep_indexes_per_guide(data_frame = None, target_column = None,
 
     guides = data_frame[target_column].unique() # create a unique list of guides
     if "Index" in data_frame.columns:
-        guides_indexes = {guide: data_frame[data_frame[target_column] == guide]["Index"].values for guide in guides}
+        if by_mismatch:
+            guides_indexes = {mismatch: {guide: data_frame[(data_frame[target_column] == guide) & (data_frame[mismatch_column] == mismatch)]["Index"].values for guide in guides} for mismatch in data_frame[mismatch_column].unique()}
+        else:
+            guides_indexes = {guide: data_frame[data_frame[target_column] == guide]["Index"].values for guide in guides}
     else:
-        guides_indexes = {guide: data_frame[data_frame[target_column] == guide].index for guide in guides}
+        if by_mismatch:
+            guides_indexes = {mismatch: {guide: data_frame[(data_frame[target_column] == guide) & (data_frame[mismatch_column] == mismatch)].index for guide in guides} for mismatch in data_frame[mismatch_column].unique()}
+        else:
+            guides_indexes = {guide: data_frame[data_frame[target_column] == guide].index for guide in guides}
     return guides_indexes

@@ -2,14 +2,14 @@ import numpy as np
 import pandas as pd
 from itertools import combinations
 import os
+from evaluation_utilities import *
 from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve, mean_squared_error
-from utilities import get_X_random_indices, extract_scores_labels_indexes_from_files
+from utilities import get_X_random_indices
 from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv
-from train_and_test_utilities import add_labels_and_indexes_to_predictions
 from k_groups_utilities import get_partition_information
 from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp, plot_subplots
 from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder
-from features_and_model_utilities import get_feature_name,get_features_string, transform_labels
+from features_and_model_utilities import get_feature_name, transform_labels
 from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
 from multiprocessing import Pool
  
@@ -167,13 +167,13 @@ class evaluation():
             mean_std = get_mean_std_from_ensmbel_results(guides_dict[guide])
             guide_path = os.path.join(plots_path,f'{guide}',f'{n_ensembles}_ensembles')
             create_folder(guide_path)
-            partition_info = self.get_guide_information(data_name, guide)
+            partition_info = get_guide_information(data_name, guide,PATH_TO_STATISTICS_FILE)
             args = (mean_std,"all_features",p_vals,guide_path,self.task)
             plot_ensembles_by_features_and_task(args,self.task,partition_info)
         # all guides
         all_guides_path = os.path.join(plots_path,"All_guides",f'{n_ensembles}_ensembles')
         create_folder(all_guides_path)
-        partition_info = self.get_guide_information(data_name, list(guides_dict.keys()))
+        partition_info = get_guide_information(data_name, list(guides_dict.keys()),PATH_TO_STATISTICS_FILE)
         feature_dict = self.evaluate_multiple_models_per_feature(feature_dict)
         p_vals = get_only_seq_vs_group_ensmbels_stats(feature_dict,n_ensembles,compare_to="Only-seq")
         if self.task == "classification":
@@ -184,70 +184,107 @@ class evaluation():
         args = (mean_std,"all_features",p_vals,all_guides_path,self.task)
         plot_ensembles_by_features_and_task(args,self.task,partition_info)
 
-    def get_guide_information(self, data_name, guide):
-
-        '''This function will return the guide information from the statistics file.'''
-        data = pd.read_csv(PATH_TO_STATISTICS_FILE)
-        data = data[data['Data_set'] == data_name] # keep corresponding data
-        # if multiple guides
-        keys  = ["Data_set", "Gene_name", "guide_sequence", "amplified_otss", "vivo_otss", "potential_otss"]
-        if isinstance(guide, list):
-            guide_info = data[data['guide_sequence'].isin(guide)]
-            guide_info = guide_info.to_dict(orient='list')
-            guide_info["Data_set"] = set(guide_info["Data_set"])
-            guide_info["guides_amount"] = len(guide)
-            guide_info["amplified_otss"] = sum(guide_info["amplified_otss"])
-            guide_info["vivo_otss"] = sum(guide_info["vivo_otss"])
-            guide_info["potential_otss"] = sum(guide_info["potential_otss"])
-            keys.append("guides_amount")
-            keys.remove("guide_sequence")
-            keys.remove("Gene_name")
-        else:
-            guide_info = data[data['guide_sequence'] == guide]
-            guide_info = guide_info.to_dict(orient='records')[0]
+    def evaluate_test_per_guide(self, ml_results_paths, n_ensembles,  indexes_dict , plots_path, data_name,
+                                additional_data = None , if_save_last_tp_gap = True, by_mismatch = False):
+        """
+        Evaluate the ensemble/s performance over the different guides in the test set and all of them as whole test set.
+        Plots 3 plots: AUPR,AUROC,LAST-tp, where all the guides are plotted as sub-plots.
+        If by_mismatch is True, it will plot the results for each mismatch.
         
-        guide_info = {key: guide_info[key] for key in keys}
-        
-        return guide_info
-    def evaluate_test_per_guide(self, ml_results_paths, n_ensembles,  indexes_dict , plots_path, data_name ):
-        '''
-        This function evaluates ensembles on all the test data and per 1 guideRNA in the test data.
-        For each ensmbel/s and for each sgRNA + all sgRNAS, it will process the scores and evalaute the metrics.
-        For each guide it will plot the results and save them. 
-        '''
+        Given a list of ensemble results paths, uses init_feature_dict_for_all_scores to get
+        the predictions of each ensemble and the labels. 
+        split the predictions for each guide and evalute the performance.
+        if save_last_tp_gap is True, it will save the INDEXES of all the predictions of the otss till the last-tp.
+        Args:
+            ml_results_paths (list): List of paths to the ML results folders.
+            n_ensembles (int): Number of ensembles.
+            indexes_dict (dict): {guide: indexes} - dictionary with the sample indexes of each guide.
+            plots_path (str): Path to save the plots.
+            data_name (str): Name of the data set.
+            additional_data (tuple): (name, path) - tuple of additional data to add to the feature dict.
+            if_save_last_tp_gap (bool): If to save the last tp gap.
+            by_mismatch (bool): If to split the features dict by mismatch indexes.
+        ----------
+        """
         # get the scores for each ensmbel
-        feature_dict = init_feature_dict_for_all_scores(ml_results_paths, n_ensembles, self.reg_classification)
-        guides_dict = split_feature_dict_by_indexes(feature_dict, indexes_dict)
+        feature_dict = init_feature_dict_for_all_scores(ml_results_paths, n_ensembles,
+                                                         self.reg_classification, additional_data=additional_data)
+        guides_dict = split_feature_dict_by_indexes(feature_dict, indexes_dict, by_mismatch)
         if n_ensembles > 1: 
             self.plot_multiple_ensemble_per_guide(guides_dict,feature_dict,n_ensembles,plots_path, data_name)
         ###### guides_dict = {guide: {feature : (y_scores, y_test)}} #########
+        if by_mismatch:
+            self._evaluate_test_by_mismatch(plots_path, guides_dict, data_name, if_save_last_tp_gap)
+            
         else:
-            guides_results = {}
-            guide_informations = {}
-            for guide, features in guides_dict.items(): # for each guide plots and evaluate all metrics
-                
+            self._evaluate_test_by_guide(guides_dict,feature_dict,data_name,plots_path, if_save_last_tp_gap)
+            
+    
+    def _evaluate_test_by_mismatch(self, plots_path, guides_dict, data_name, if_save_last_tp_gap=True):
+        mismatch_path = create_folder(plots_path, "By_mismatch")
+        
+        error_file = os.path.join(mismatch_path, "error.txt")
+        
+        for mismatch, guide_dict in guides_dict.items(): # for each mismatch
+            temp_path = create_folder(mismatch_path, f'{mismatch}_mismatch')
+            mismatch_results = {}
+            mismatch_guide_information = {}
+            for guide, features in guide_dict.items():
+                test_samples = next(iter(features.values()))[1]
+                if sum(test_samples>0) == 0:
+                    with open(error_file, "a") as f:
+                        f.write(f"Guide {guide} has no positives for mismatch {mismatch}\n")
+                    continue
                 try:
-                    #guide_info =self.get_guide_information('Change_seq', guide)
-                    guide_info = self.get_guide_information('Change_seq', guide)
+                    guide_info = None
+                    #guide_info = get_guide_information(data_name, guide,PATH_TO_STATISTICS_FILE)
                 except:
                     guide_info = None
-                print("Checking guide: ",guide)
-                guides_results[guide] = plot_evalutions_for_multiple_models(task= self.task, scores_dictionary=features,return_metrics=True)
-                guide_informations[guide] = guide_info
-            # All guides
-            all_guides_path = os.path.join(plots_path,"All_guides")
-            create_folder(all_guides_path)
-            guides_sub_plots_classification(guides_results,guide_informations,output_path=all_guides_path,
-                                            generall_title='seperated')
-            # try:
-            #     guide_info = self.get_guide_information(data_name, guide)
-            # except:
-            #     guide_info = None
+                mismatch_results[guide] = plot_evalutions_for_multiple_models(task= self.task, scores_dictionary=features,return_metrics=True)
+                mismatch_guide_information[guide] = guide_info
+            if mismatch_results: # Not empty
+                guides_sub_plots_classification(mismatch_results,mismatch_guide_information,output_path=temp_path,
+                                                generall_title='seperated')
+            # merged guide dict into one test,scores,blablaal
+        merged_guide_dict = merge_by_mismatches(guides_dict, error_file)
+        for mismatch, features_dict in merged_guide_dict.items():
+            merged_guide_dict[mismatch] = plot_evalutions_for_multiple_models(task= self.task, 
+                                                                                    scores_dictionary=features_dict,return_metrics=True)
+        guides_sub_plots_classification(merged_guide_dict,information=None,
+                                            output_path=mismatch_path,generall_title='All guides')
+    
+    def _evaluate_test_by_guide(self,guides_dict, feature_dict, data_name, plots_path, if_save_last_tp_gap=True):
+        guides_results = {}
+        guide_informations = {}
+        for guide, features in guides_dict.items(): # for each guide plots and evaluate all metrics
             
-            # print("Checking all guides")
-            # plot_evalutions_for_multiple_models(task= self.task, output_path=all_guides_path,plot_title="All_guides",
-            #                                         results=None,scores_dictionary=feature_dict, information=guide_info)
-
+            try:
+                guide_info =get_guide_information(data_name, guide,PATH_TO_STATISTICS_FILE)
+                #guide_info = get_guide_information('Change_seq', guide,PATH_TO_STATISTICS_FILE)
+            except:
+                guide_info = None
+            guides_results[guide] = plot_evalutions_for_multiple_models(task= self.task, scores_dictionary=features,return_metrics=True)
+            guide_informations[guide] = guide_info
+        
+        all_guides_path = create_folder(plots_path,"All_guides")
+        if if_save_last_tp_gap:
+            guide_indexes_till_last_tp = get_ots_indexes_till_last_tp(guides_results, guides_dict)
+            last_tp_index_path = create_folder(all_guides_path, 'last_tp_indexes')
+            for guide_seq, indexes_array in guide_indexes_till_last_tp.items():
+                np.save(os.path.join(last_tp_index_path, f'{guide_seq}.npy'), indexes_array)
+        # sub plot all the guides separtley.
+        guides_sub_plots_classification(guides_results,guide_informations,output_path=all_guides_path,
+                                        generall_title='seperated')
+        try:
+            guide_lists = list(guides_dict.keys())
+            guide_info = get_guide_information(data_name, guide_lists,PATH_TO_STATISTICS_FILE)
+        except:
+            guide_info = None
+        
+        print("Checking all guides")
+        plot_evalutions_for_multiple_models(task= self.task, output_path=all_guides_path,plot_title="All_guides",
+                                                results=None,scores_dictionary=feature_dict, information=guide_info)
+    
     def evaluate_all_partitions_multiple_metrics(self,args):
         self.evaluate_all_partitions(*args, metric="difference")
         self.evaluate_all_partitions(*args, metric="ratio")
@@ -356,78 +393,11 @@ def init_partitions_dict_by_features(data_path, compare_to, partitions_number, n
     features = list(data["feature"].values)
     features.remove(compare_to)
     return {feature: {n_models:np.zeros(shape=(partitions_number,3))} for feature in features}
-def keep_indexes_from_scores_labels_indexes(y_scores, y_test, indexes, spesific_indexes):
-    '''
-    Given a list of scores, labels and indexes, keep only the spesific indexes given
-    Args:
-    1. y_scores - np.array of scores - 
-    ----------
-    returns: tuple of (y_scores, y_test, indexes)
-    '''
-    positional_indexes = np.where(np.isin(indexes, spesific_indexes))[0] # get the postional indexes of the spesific indexes
-    if y_scores.ndim == 1:
-        selected_y_scores = y_scores[positional_indexes]
-    elif y_scores.ndim == 2:
-        selected_y_scores = y_scores[:, positional_indexes]
-    
-    selected_y_test = y_test[positional_indexes]
-    return selected_y_scores, selected_y_test, spesific_indexes
-def init_feature_dict_for_all_scores(ml_results_paths,n_ensebmles,  reg_classification = False):
-    '''
-    This function will return a dictionary with all the features and their scores, labels and indexes.
-    Args:
-    1. ml_results_paths - list of paths to the ml results folders.
-    2.
-    3. reg_classification - (bool) if the task is classification by regression.
-    -----------
-    Returns: dictionary {feature: (y_scores, y_test, indexes)}'''
-    fill_feature_dict_args = []
-    for ml_results_path in ml_results_paths:
-        if "Only_sequence" in ml_results_path:
-            feature = "Only-seq"
-        else : 
-            feature = ml_results_path.split("/")[-1]
-        fill_feature_dict_args.append(({},feature,ml_results_path,n_ensebmles,reg_classification))
-    proccess = min(os.cpu_count(), len(fill_feature_dict_args))
-    with Pool(proccess) as pool:
-        results = pool.starmap(fill_feature_dict_with_scores, fill_feature_dict_args)
-    features_dict = {}
-    for result in results:
-        features_dict.update(result)
-    return features_dict
 
-def fill_feature_dict_with_scores(feature_dict, feature, scores_folder_path, n_ensembles, reg_classification = False):
-    if n_ensembles > 1: # multiple ensembles in the results
-        ensembles = create_paths(os.path.join(scores_folder_path, "Scores"))
-        y_scores = []
-        for ensemble in ensembles:
-            ensemble_scores, y_test, indexes = extract_scores_labels_indexes_from_files([ensemble])
-            ensemble_scores = np.mean(ensemble_scores, axis = 0)
-            y_scores.append(ensemble_scores)
-        y_scores = np.array(y_scores)
-    else: # one ensemble
-        y_scores, y_test, indexes = extract_scores_labels_indexes_from_files(create_paths(os.path.join(scores_folder_path, "Scores")))
-        y_scores = np.mean(y_scores, axis = 0)
-    if reg_classification: # transform y to binary labels
-        y_test = (y_test > 0).astype(int)
-    feature_dict[feature] = (y_scores, y_test, indexes)
-    return feature_dict
-def split_feature_dict_by_indexes(features_dict, indexes_dict):
-    '''
-    This function will split the features dict by the indexes given.
-    Args:
-    1. (dict) features_dict - dictionary with the features and their scores, labels and indexes.
-    2. (dict) indexes_dict - dictionary with the indexes to split the features.
-    -----------
-    Returns: dictionary {guide: {feature : (y_scores, y_test)}}
-    '''
-    guides_dict = {}
-    for guide,indexes in indexes_dict.items():
-        guides_dict[guide] = {}
-        for feature, (y_scores, y_test, all_indexes) in features_dict.items():
-            y_indexed_scores, y_indexed_test, indexes = keep_indexes_from_scores_labels_indexes(y_scores, y_test, all_indexes, indexes)
-            guides_dict[guide][feature] = y_indexed_scores, y_indexed_test, indexes
-    return guides_dict
+
+
+
+
 def compare_feature_in_partition(partition_data,compare_to,metric):
     '''This function will return a comparison metric between the compare_to label to all other labels.
     It will return the metric for all partitions to check.
@@ -720,7 +690,6 @@ def get_predictions_needed_to_1_tpr(tpr_arr, tresholds = None, predictions = Non
     if return_1_tpr:
         return len(predictions[predictions >= tresholds[tpr_1_index]]), tpr_1_index
     return len(predictions[predictions >= tresholds[tpr_1_index]])
-
 def get_last_fn_ratio(predictions, labels=None, tpr = None, last_index = None, tresholds = None):
     """
     Calculate the ratio of the last false negative index to the total number of labels,
@@ -913,13 +882,13 @@ def plot_classifications_metrics_multiple_models(metrics_dict, titles, output_pa
     # n_rank_vals, n_rank_tprs = zip(*metrics_dict["n_ranks"])
     # plot_n_rank(n_rank_values=n_rank_vals,n_tpr_arrays=n_rank_tprs,titles=titles,output_path=output_path,general_title=plot_title)
     last_fn_indexes, last_fn_ratios, tpr_values = zip(*metrics_dict["last_fn_values"])
-    plot_last_tp(last_fn_indexes,last_fn_ratios,tpr_values,titles,output_path,plot_title,information)
+    plot_last_tp(last_fn_indexes,last_fn_ratios,tpr_values,titles,output_path=output_path,general_title=plot_title,information=information)
 
 def guides_sub_plots_classification(guides_results_dict, information, output_path, generall_title):
     titles = [guide for guide in guides_results_dict.keys()]
     roc_data,pr_data,last_tp_data,guide_info = [],[],[],[]
     for guide,(metrics_dict_model_names) in guides_results_dict.items():
-        guide_info.append(information[guide])
+        guide_info.append(information[guide] if information else None)
         metrics_dict, model_names = metrics_dict_model_names
         roc_data.append((metrics_dict["fprs"],metrics_dict["tprs"],metrics_dict["aucs"]))
         pr_data.append((metrics_dict["recalls"],metrics_dict["percs"],metrics_dict["auprcs"]))

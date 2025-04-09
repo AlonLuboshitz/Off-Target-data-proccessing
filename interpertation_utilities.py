@@ -2,14 +2,23 @@
 This module contain helper function and utilities for model and data interpertability.
 '''
 import numpy as np
-from features_engineering import extract_features, generate_features_and_labels, synthesize_all_mismatch_off_targets
+from features_engineering import extract_features, generate_features_and_labels, synthesize_all_mismatch_off_targets, get_epi_data_bw
 from features_and_model_utilities import get_feature_name
 
-from file_utilities import create_paths
+from file_utilities import create_paths, create_folder
 import itertools
 from scipy.stats import zscore
 import pandas as pd
+import os
+import pickle
+from datetime import datetime
 
+# Get the current date and time
+current_datetime = datetime.now()
+
+# Extract date and time separately
+current_date = current_datetime.date()
+current_time = current_datetime.strftime("%H:%M:%S")  # Format time as HH:MM:SS
 
 ######## DATA ########
 def nucleotides_for_heatmap():
@@ -262,7 +271,15 @@ def epigenetic_genome_disterbution_vector(features, sg_ot_pair, epigenetic_diste
         epi_vector = np.tile(epi_vector, (sg_ot_pair.shape[0], 1)) 
     x_input = np.concatenate([constant_sg_ot, epi_vector],axis=1) # Create input for model
     return x_input
-def create_off_targets_for_guides(guide_list,if_flatten = True, mismatch_limit = 6):
+
+def add_epigenetic_vector_to_offtargets(guides_dict,features,epigenetic_disterbution_file):
+    guide_dict_with_epi_genetics = {}
+    for guide, mismatch_dict in guides_dict.items():
+        mismatch_dict_with_epigenetics = {mismatch_number: epigenetic_genome_disterbution_vector(features,synthesized_off_targets,epigenetic_disterbution_file) 
+                                        for mismatch_number,synthesized_off_targets in mismatch_dict.items()}
+        guide_dict_with_epi_genetics[guide] =  mismatch_dict_with_epigenetics
+    return guide_dict_with_epi_genetics
+def create_off_targets_for_guides(guide_list,if_flatten = True, mismatch_limit = 6, sample_data=True):
     """
     Create synthetic off-target for sgRNAs in the guide_list.
     
@@ -274,10 +291,15 @@ def create_off_targets_for_guides(guide_list,if_flatten = True, mismatch_limit =
         dict: Dictionary of sgRNA and their synthetic off-targets.
         {guide: {mismatch_number: np.array[off-targets]}}
     """
+    
     guides_dict = {}
     for guide in guide_list:
-        guides_dict[guide] = synthesize_all_mismatch_off_targets(sgrna_sequence=guide,mismatch_limit=mismatch_limit,if_range=True,if_flatten=if_flatten)
+        guides_dict[guide] = synthesize_all_mismatch_off_targets(sgrna_sequence=guide,mismatch_limit=mismatch_limit,
+                                                                 if_range=True,if_flatten=if_flatten,
+                                                                 sample_data=sample_data)
     return guides_dict
+    
+
 def epi_feature_importance_from_model_output(features, model_output):
     """
     Calculate the epigenetic feature importance from the model outputs.
@@ -465,3 +487,138 @@ def keep_data_percentile(data, lower_bound = 0.05, upper_bound = 0.95):
         raise ValueError("Data should be a numpy array or a pandas dataframe")
     print(f"Removed {amount - len(filtered)} outliers")
     return filtered
+
+def get_model_scores_for_features(model_path, guide_dict_with_epi_genetics, save_model_scores = False, output_path = None,
+                                  model_suffix=None):
+    """
+    Use the run_models class to get the model scores for each guide and mismatch number.
+    
+    Args:
+        model_path (str): Path to the model/s.
+        guide_dict_with_epi_genetics (dict): Dictionary of guides and their off-targets - 
+            {guide: {mismatch_number: off-targets}}
+        save_model_scores (bool): If True, save the model scores in a npy file for each guide and mismatch number - 
+            {guide}_{mismatch_number}_scores.npy.
+        output_path (str): Path to save the model scores.
+        model_suffix (str): Suffix to add to the model name.
+    Returns:
+        dict: Dictionary of model scores for each guide and mismatch number.
+            {guide: {mismatch_number: model_scores}}
+        """
+    # Run the ensemble on the data
+    from run_models import run_models
+    models = create_paths(model_path)
+    runner = run_models()
+    runner.setup_runner(ml_task='classification',cross_val=3,model_num=6,features_method=2,cw=2,encoding_type=2,if_bulges=True)
+    model_outputs = {}
+    if save_model_scores:
+        save_folder_name = os.path.join("Model_scores","Raw_scores")
+        model_temp_path = create_folder(output_path,save_folder_name)
+        
+    for guide, mismatch_dict in guide_dict_with_epi_genetics.items():
+        guide_outputs = {}
+        for mismatch_num, off_targets in mismatch_dict.items():
+            y_scores,test,indexes = runner.test_ensmbel(models,x_features=off_targets,tested_guide_list=None)
+            avg_scores = np.mean(y_scores,axis=0)
+            if save_model_scores:
+                guide_mis_path = f'{guide}_{mismatch_num}_{model_suffix}_scores.npy' if model_suffix else f'{guide}_{mismatch_num}_scores.npy'
+                np.save(f'{model_temp_path}/{guide_mis_path}',avg_scores)
+            guide_outputs[mismatch_num] = avg_scores
+        model_outputs[guide] = guide_outputs 
+    return model_outputs
+
+def save_importance_values(model_outputs, output_path):
+    save_folder_name = os.path.join("Model_scores","Importance_scores")
+    output_path = create_folder(output_path,save_folder_name)
+    for guide, mismatch_dict in model_outputs.items():
+        
+        for mismatch_num, importance_dict in mismatch_dict.items():
+            temp_output = os.path.join(output_path,f'{guide}_{mismatch_num}.pkl')
+            with open(temp_output, 'wb') as f:
+                pickle.dump(importance_dict, f)
+def load_importance_values(importance_path, guide_list, mismatch_limit):
+    importance_dict = {}
+    error_file = f'{importance_path}/error_file_{current_date}:{current_time}.txt'
+    for guide in guide_list:
+        importance_dict[guide] = {}
+        for mismatch_num in range(1,mismatch_limit + 1):
+            temp_output = os.path.join(importance_path,f'{guide}_{mismatch_num}.pkl')
+            try:
+                with open(temp_output, 'rb') as f:
+                    importance_dict[guide][mismatch_num] = pickle.load(f)
+            except Exception as e:
+                print(f"Error: {e}")
+                with open(error_file, 'a') as error_f:
+                    error_f.write(f"Error: {e} - {temp_output}\n")
+    return importance_dict
+
+def bla():
+
+    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
+    file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
+    label_list = [("GUIDE-seq",1),("CHANGE-seq",0)]
+    
+    guide_change_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager,window_size=20000)
+    label_list = [("CASOFINDER",0)]
+    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_casofinder_withEpigenetic.csv")
+    casofinder_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager)
+    merged_dict = {key: guide_change_dict[key] + casofinder_dict[key] for key in guide_change_dict.keys() & casofinder_dict.keys()}
+
+def get_sampled_coords(data, mismatch_lim = 6, mismatch_column = None, 
+                       chrom_column = None, center_position_column = None, sample_size = 1000):
+    """
+    Returns a dictionary of sampled coordinates, chromosomes and center positions for each mismatch number.
+    {missmatch_number: ([chromosomes], [center_positions])}
+
+    Args:
+        data (pd.DataFrame): Data frame with the data.
+        mismatch_lim (int): Maximum number of mismatches.
+        mismatch_column (str): Column name for the mismatch number.
+        chrom_column (str): Column name for the chromosome.
+        center_position_column (str): Column name for the center position.
+        sample_size (int): Number of samples to return.
+    Returns:
+        dict: Dictionary of sampled coordinates, chromosomes and center positions for each mismatch number.
+    """
+    mismatch_groups = data.groupby(mismatch_column)
+    sampled_coords = {}
+    for mismatch_num, group in mismatch_groups:
+        if mismatch_num > mismatch_lim or mismatch_num==0:
+            continue
+        sampled_group = group.sample(n=min(sample_size, len(group)), random_state=42)
+        sampled_coords[mismatch_num] = (sampled_group[chrom_column].tolist(), sampled_group[center_position_column].tolist())
+    return sampled_coords
+
+def get_basepair_epigenetics_around_center(chrom_list, center_position_list,
+                                            bigiwg_file, window_size, if_average=True):
+    """
+    Returns the epigenetic base pair values for given chromosomes and positions.
+    
+    Args:
+        chrom_list (list): List of chromosomes names.
+        center_position_list (list): List of center positions.
+        bigiwg_file (pybigwig object): bigwig object.
+        window_size (int): Window size for averaging.
+        if_average (bool defualt - True): If True, average the values over the window size.
+    
+    Returns:
+        np.array: Epigenetic values for the given chromosomes and positions.
+    """
+    if len(chrom_list) != len(center_position_list):
+        raise ValueError("Chromosome and center position lists must have the same length.")
+    epigenetic_values = np.zeros((len(chrom_list), window_size),dtype=np.float32)
+    for i, (chrom, center_position) in enumerate(zip(chrom_list, center_position_list)):
+        epigenetic_values[i] = get_epi_data_bw(epigenetic_bw_file=bigiwg_file,chrom=chrom,center_loc=center_position,window_size=window_size,max_type=1)
+    if if_average:
+        epigenetic_values = np.mean(epigenetic_values, axis=0)
+    return epigenetic_values
+
+def get_epigentics_around_center(merged_data,on_column,label_value_list,center_value_column,chrom_column,file_manager,window_size):
+    epigenetics_object = file_manager.get_bigwig_files()
+    epi_dict = {}
+    for epigeneitc_mark, epigenetic_file in epigenetics_object: # for each epi mark create a list with tuples - (name, average values)
+        epi_dict[epigeneitc_mark] = []
+        for name,label_value in label_value_list: # for each data points get averages value
+            averages = average_epi_around_center(merged_data=merged_data,on_column=on_column,label_value=label_value,center_value_column=center_value_column,chrom_column=chrom_column,epigenetic_file=epigenetic_file,window_size=window_size)
+            epi_dict[epigeneitc_mark].append((name,averages))
+    return epi_dict

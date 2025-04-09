@@ -1,5 +1,7 @@
 {
 "Columns_dict" : {
+    "BULGES_COLUMN": "bulges",
+    "MISMATCH_COLUMN": "missmatches",
     "TARGET_COLUMN": "target",
     "REALIGNED_COLUMN": "realigned_target",
     "OFFTARGET_COLUMN": "offtarget_sequence",
@@ -25,15 +27,15 @@
    
 },
 "Hendel" : {
-    "Train_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/train_guides",
-    "Test_guides" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Partitions_guides/test_guides",
-    "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
+    "Guides_path" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/parti_2",
+    "Vivo-silico" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores_withEpigenetic.csv",
     "Vivo-vitro" : "Null",
+    "Vitro-silico" : "Null",
     "Model_path" : "/localdata/alon/Models/Hendel",
     "ML_results_path" : "/localdata/alon/ML_results/Hendel",
     "Epigenetic_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics",
-    "Big_wig_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig",
-    "Partition_information" : "",
+    "Big_wig_folder" : "/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/bigwig",
+    "Partition_information" : "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel-Partition_1.csv",
     "Data_name" : "Hendel",
     "Plots_path" : "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel"
 },

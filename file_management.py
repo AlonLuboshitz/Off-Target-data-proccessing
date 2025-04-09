@@ -19,7 +19,7 @@ Epigenetic data:
 
 import os
 
-#import pyBigWig
+import pyBigWig
 from utilities import validate_non_negative_int
 from k_groups_utilities import create_guides_list
 from file_utilities import create_paths, get_ending
@@ -34,6 +34,8 @@ class File_management:
         self.set_paths = False
         if job:
             self.job = job.lower()
+            if self.job == 'interpertation':
+                return
         else:
             raise Exception("Job type not set")
         self.set_all_paths(models = models_path, ml_results = ml_results_path, guides_path = guides_path,
@@ -136,7 +138,9 @@ class File_management:
         self.guides_partition_path = os.path.join(self.guides_partition_path,data_type)
         self.validate_path_exsits(self.guides_partition_path)
 
-
+    def set_bigwig_folder_path(self, bigwig_folder_path):
+        self.validate_path_exsits(bigwig_folder_path)
+        self.bigwig_folder_path = bigwig_folder_path
   
     def set_epigenetic_paths(self, epigenetics_bed, bigwig):
         self.validate_path_exsits(epigenetics_bed)

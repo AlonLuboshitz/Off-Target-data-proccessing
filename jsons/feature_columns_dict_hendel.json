@@ -1,0 +1,6 @@
+{
+    "Other_models" : ["MOFF"],
+    "Other_columns" : ["distance"],
+    "Binary_epigenetics" : ["Atac-seq_peaks_binary","Dnase_peaks_binary","Chia-pet_peaks_binary"],
+    "Subset1-Binary_epigenetics": ["Atac-seq_peaks_binary","Dnase_peaks_binary","Chia-pet_peaks_binary"]
+}

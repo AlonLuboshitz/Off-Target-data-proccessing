@@ -5,6 +5,7 @@ import seaborn as sns
 import os
 from file_utilities import create_paths
 from plotting_utilities import *
+import logomaker
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 
@@ -251,122 +252,30 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
     ax.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}\nn = {num_of_points}', 
             fontsize=12, ha='center', va='center', transform=ax.transAxes)
     
-    
-
-  
-
-
-
-
-def box_plot(data, ax, x_label, y_label, title, output_path,  showmeans=True,
-             x_in_data=None, y_in_data=None, colormap=None, showfliers=True, order_by=None):
+def plot_logo(counts_df, ax=None, ax_title=None, output_path=None,y_label=None, x_label=None):
+    """
+    Plots a sequence logo using the provided counts DataFrame.
+    """
+    one_pic = False
     if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 6))
-    meanprops = mean_order = None
-    if showmeans:
-        meanprops = {"marker": "o", "markerfacecolor": "red", "markeredgecolor": "black"}
-        mean_order = data.mean().sort_values(ascending=False).index
-    if order_by =="median":
-        mean_order = data.median().sort_values(ascending=False).index
-    elif order_by == "mean":
-        mean_order = data.mean().sort_values(ascending=False).index
-    # No need to create a new figure when using ax
-    ax.set_title(title)
-    sns.boxplot(data=data, x=x_in_data, y=y_in_data, order=mean_order,
-                showmeans=showmeans, meanprops=meanprops, boxprops={"facecolor": "lightblue"},
-                  ax=ax,palette=colormap, showfliers=showfliers)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        one_pic = True
+        if ax_title is None:
+            ax_title = "Logo Plot"
     
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')
-
-    if x_label:
-        ax.set_xlabel(x_label)
-    if y_label:
-        ax.set_ylabel(y_label)
-    if output_path and ax is None:  # Only save if no subplot (otherwise, user should save the full figure)
-        plt.savefig(output_path, dpi=300)
+    logo = logomaker.Logo(counts_df, ax=ax, color_scheme='classic')
+    logo.style_spines(visible=False)
+    logo.style_spines(spines=['left', 'bottom'], visible=True)
+    logo.ax.set_ylabel(y_label, fontsize=12)
+    logo.ax.set_xlabel(x_label, fontsize=12)
+    logo.ax.set_xticks(range(len(counts_df)))
+    logo.ax.set_xticklabels(range(1,len(counts_df)+1), fontsize=12)
+    ax.set_title(ax_title, fontsize=14)
+    if one_pic:
+        plt.tight_layout()
+        plt.savefig(output_path + f"/{ax_title}.png", dpi=300)
         plt.close()
 
-
-def get_rows_cols(num_plots):
-        """
-        Returns a rows and cols number by trying to fill sqroot of num_plots.
-        """
-        rows = int(np.sqrt(num_plots))
-        cols = int(np.ceil(num_plots / rows))
-        return (rows, cols)
-def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, y_label=None,
-                   x_ticks=None, y_ticks=None, output_path=None, general_title=None,
-                   sgrna_otss =None,**kwargs):
-    """
-    Plots multiple subplots based on the provided data and plot types.
-
-    Parameters:
-        data (list,3D np.array, dict): 
-            1. (list): of data arrays for each subplot.
-            2. (3D np.array): 1d- amount of plots, 2-3d data for each plot.
-            3. (Dict): keys -> plots and titles, values -> data for each plot.
-        plot_types (list,str): List of plot types (e.g., 'line', 'scatter') for each subplot. 
-            If 1 str is given all the subplots are from that type.
-        titles (list): List of titles for each subplot.
-        x_label (str, optional): Label for the x-axis.
-        y_label (str, optional): Label for the y-axis.
-        x_ticks (list, optional): List of x-tick values.
-        y_ticks (list, optional): List of y-tick values.
-        output_path (str, optional): If provided, saves the plot to this path.
-        generall_title (str, optional): A string representing the general title for the plot.
-        **kwargs: Additional keyword arguments for the sub plotting function."""
-    if isinstance(data, list):
-        num_plots = len(data)
-    elif isinstance(data, np.ndarray):
-        if data.ndim != 3:
-            raise ValueError("Data shape not supported for subplots")
-        num_plots = data.shape[0]
-        data = [data[i] for i in range(num_plots)]
-    elif isinstance(data, dict):
-        titles = list(data.keys())
-        num_plots = len(titles)
-        data = [data[key] for key in data.keys()]
-    
-    rows,cols = get_rows_cols(num_plots)
-    fig, axes = plt.subplots(nrows=rows,ncols=cols,  figsize=(cols * 5, rows * 4))
-    if axes.ndim > 1:
-        axes = axes.flatten()
-    if num_plots == 1:
-        axes = [axes]
-    if isinstance(plot_types, str):
-        plot_types = [plot_types for i in range(num_plots)]
-        general_title = general_title + " " + plot_types[0]
-    if titles is None:
-        titles = [f"Plot {i + 1}" for i in range(num_plots)]
-    if sgrna_otss is None:
-        sgrna_otss = [None for i in range(num_plots)]
-
-    for ax_index,(plots_tuple) in enumerate(zip(axes, plot_types, titles, data,sgrna_otss)):
-        ax, plot_type, title, data_,sgrna_ots = plots_tuple
-        if plot_type == "heatmap":
-            plot_heatmap(data_, ax=ax, row_labels=y_ticks, col_labels=x_ticks,
-                          x_label=x_label, y_label=y_label, title=title,sgrna_ots=sgrna_ots, **kwargs)
-        elif plot_type == "boxplot":
-            box_plot(data_, x_label=x_label, y_label=y_label, title=title, ax=ax,output_path=output_path, **kwargs)
-        elif plot_type == 'correlation':
-            if type(data_).__name__ == 'PearsonRResult':
-                plot_correlation(data_._x, data_._y, x_label, y_label, data_.statistic, data_.pvalue, title, output_path, ax=ax)
-            else:
-                plot_correlation(data_[0], data_[1], x_label, y_label, data_[2], data_[3], title, output_path, ax=ax)
-        elif plot_type == 'last_tp':
-            plot_last_tp(data_[0],data_[1],data_[2],information=sgrna_ots,ax=ax,ax_title=title,**kwargs)
-        elif plot_type == 'roc':
-            plot_roc(data_[0],data_[1],data_[2],ax=ax,ax_title=title,output_path=None,general_title=None,**kwargs)
-        elif plot_type == 'pr':
-            plot_pr(data_[0],data_[1],data_[2],ax=ax,ax_title=title,output_path=None,general_title=None,**kwargs)
-
-    for j in range(ax_index + 1, len(axes)): # Shut down unused axes
-        axes[j].axis('off')
-    plt.tight_layout()
-    if output_path:
-        output_path = os.path.join(output_path, general_title + ".png")
-        plt.savefig(output_path,dpi=300)
-    plt.close()
     
 
 
@@ -430,6 +339,129 @@ def plot_heatmap(data, ax=None, row_labels=None, col_labels=None,
         plt.savefig(output_path, dpi=300)
         plt.close()
 
+  
+
+
+
+
+def box_plot(data, ax, x_label, y_label, title, output_path,  showmeans=True,
+             x_in_data=None, y_in_data=None, colormap=None, showfliers=True, order_by=None):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    meanprops = mean_order = None
+    if showmeans:
+        meanprops = {"marker": "o", "markerfacecolor": "red", "markeredgecolor": "black"}
+        mean_order = data.mean().sort_values(ascending=False).index
+    if order_by =="median":
+        mean_order = data.median().sort_values(ascending=False).index
+        medians = data.median()
+    elif order_by == "mean":
+        mean_order = data.mean().sort_values(ascending=False).index
+    # No need to create a new figure when using ax
+    ax.set_title(title)
+    sns.boxplot(data=data, x=x_in_data, y=y_in_data, order=mean_order,
+                showmeans=showmeans, meanprops=meanprops, boxprops={"facecolor": "lightblue"},
+                  ax=ax,palette=colormap, showfliers=showfliers)
+    for i, category in enumerate(mean_order):
+        median_val = medians[category]
+        ax.text(i, median_val, f'{median_val:.2e}', ha='center', va='bottom', 
+                fontsize=10, color='black', fontweight='bold',rotation = 90)
+    
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')
+
+    if x_label:
+        ax.set_xlabel(x_label)
+    if y_label:
+        ax.set_ylabel(y_label)
+    if output_path and ax is None:  # Only save if no subplot (otherwise, user should save the full figure)
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+
+
+def get_rows_cols(num_plots):
+        """
+        Returns a rows and cols number by trying to fill sqroot of num_plots.
+        """
+        rows = int(np.sqrt(num_plots))
+        cols = int(np.ceil(num_plots / rows))
+        return (rows, cols)
+def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, y_label=None,
+                   x_ticks=None, y_ticks=None, output_path=None, general_title=None,
+                   sgrna_otss =None,**kwargs):
+    """
+    Plots multiple subplots based on the provided data and plot types.
+
+    Parameters:
+        data (list,3D np.array, dict): 
+            1. (list): of data arrays for each subplot.
+            2. (3D np.array): 1d- amount of plots, 2-3d data for each plot.
+            3. (Dict): keys -> plots and titles, values -> data for each plot.
+        plot_types (list,str): List of plot types (e.g., 'line', 'scatter') for each subplot. 
+            If 1 str is given all the subplots are from that type.
+        titles (list): List of titles for each subplot.
+        x_label (str, optional): Label for the x-axis.
+        y_label (str, optional): Label for the y-axis.
+        x_ticks (list, optional): List of x-tick values.
+        y_ticks (list, optional): List of y-tick values.
+        output_path (str, optional): If provided, saves the plot to this path.
+        generall_title (str, optional): A string representing the general title for the plot.
+        **kwargs: Additional keyword arguments for the sub plotting function."""
+    if isinstance(data, list):
+        num_plots = len(data)
+    elif isinstance(data, np.ndarray):
+        if data.ndim != 3:
+            raise ValueError("Data shape not supported for subplots")
+        num_plots = data.shape[0]
+        data = [data[i] for i in range(num_plots)]
+    elif isinstance(data, dict):
+        titles = list(data.keys())
+        num_plots = len(titles)
+        data = [data[key] for key in data.keys()]
+    
+    rows,cols = get_rows_cols(num_plots)
+    fig, axes = plt.subplots(nrows=rows,ncols=cols,  figsize=(cols * 5, rows * 4))
+    if num_plots >1:
+        if axes.ndim > 1:
+            axes = axes.flatten()
+    if num_plots == 1:
+        axes = [axes]
+    if isinstance(plot_types, str):
+        plot_types = [plot_types for i in range(num_plots)]
+        general_title = general_title + " " + plot_types[0]
+    if titles is None:
+        titles = [f"Plot {i + 1}" for i in range(num_plots)]
+    if sgrna_otss is None:
+        sgrna_otss = [None for i in range(num_plots)]
+
+    for ax_index,(plots_tuple) in enumerate(zip(axes, plot_types, titles, data,sgrna_otss)):
+        ax, plot_type, title, data_,sgrna_ots = plots_tuple
+        if plot_type == "heatmap":
+            plot_heatmap(data_, ax=ax, row_labels=y_ticks, col_labels=x_ticks,
+                          x_label=x_label, y_label=y_label, title=title,sgrna_ots=sgrna_ots, **kwargs)
+        elif plot_type == "boxplot":
+            box_plot(data_, x_label=x_label, y_label=y_label, title=title, ax=ax,output_path=output_path, **kwargs)
+        elif plot_type == 'correlation':
+            if type(data_).__name__ == 'PearsonRResult':
+                plot_correlation(data_._x, data_._y, x_label, y_label, data_.statistic, data_.pvalue, title, output_path, ax=ax)
+            else:
+                plot_correlation(data_[0], data_[1], x_label, y_label, data_[2], data_[3], title, output_path, ax=ax)
+        elif plot_type == 'last_tp':
+            plot_last_tp(data_[0],data_[1],data_[2],information=sgrna_ots,ax=ax,ax_title=title,**kwargs)
+        elif plot_type == 'roc':
+            plot_roc(data_[0],data_[1],data_[2],ax=ax,ax_title=title,output_path=None,general_title=None,**kwargs)
+        elif plot_type == 'pr':
+            plot_pr(data_[0],data_[1],data_[2],ax=ax,ax_title=title,output_path=None,general_title=None,**kwargs)
+        elif plot_type =='bigwig':
+            plot_bigwig_enrichment_per_coords(data_,ax=ax,ax_title=title,**kwargs)
+    for j in range(ax_index + 1, len(axes)): # Shut down unused axes
+        axes[j].axis('off')
+    plt.tight_layout()
+    if output_path:
+        output_path = os.path.join(output_path, general_title + ".png")
+        plt.savefig(output_path,dpi=300)
+    plt.close()
+    
+
 def plot_binary_feature_heatmap(data_paths, plots_paths):
    
     # Get all data tables paths
@@ -485,48 +517,42 @@ def plot_binary_feature_heatmap(data_paths, plots_paths):
 
 
 
-def draw_averages_epigenetics():
-    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
-    file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
-    label_list = [("GUIDE-seq",1),("CHANGE-seq",0)]
+def plot_bigwig_enrichment_per_coords(bigwig_values_dict= None, window_size = 20000, ax=None, ax_title=None):
     
-    guide_change_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager,window_size=20000)
-    label_list = [("CASOFINDER",0)]
-    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_casofinder_withEpigenetic.csv")
-    casofinder_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager)
-    merged_dict = {key: guide_change_dict[key] + casofinder_dict[key] for key in guide_change_dict.keys() & casofinder_dict.keys()}
     #  set x coords for -10kb, center, +10 kb
-    x_positions = np.linspace(-10000, 10000, 20000)
+    if bigwig_values_dict is None:
+        raise ValueError("bigwig_values_dict is None")
+    one_pic = False
+    if ax is None:
+        one_pic = True
+        fig, ax = plt.subplots(figsize=(10, 6))
+    left_lim = (int(-1*(window_size/2)))
+    right_lim = (int(window_size/2))
+    x_positions = np.linspace(left_lim, right_lim, window_size)
+    y_values_example = next(iter(bigwig_values_dict.values()))  # Get y-values from the first entry
+    if len(y_values_example) != len(x_positions):
+        raise ValueError("Length of y-values does not match length of x_positions")
     colors = ['blue', 'green', 'red']
-
-    # Plot each line
-    for key, name_y_values_list in merged_dict.items():
-        plt.figure()  # Create a new figure for each key
-
-        for i, (name, y_values) in enumerate(name_y_values_list):
-            color = colors[i % len(colors)]  # Cycle through the colors
-            plt.plot(x_positions, y_values, label=name, color=color)
-
-        # Set x-axis limits
-        plt.xlim(-10000, 10000)
-        
-        # Add vertical line in ther center      
-        plt.axvline(x=0, color='black', linestyle='--', linewidth=1, label='Center')
-        plt.axvline(x=-10000, color='red', linestyle='-', linewidth=1, label='-10kb')
-        plt.axvline(x=10000, color='red', linestyle='-', linewidth=1, label='+10kb')
-
-        # Add legend and labels
-        plt.legend()
-        plt.xlabel('base pairs')
-        plt.ylabel('average values')
-        plt.title(f'{key}')
-        plt.grid(True)
-
-        # Save the plot
-        plt.savefig(f'averages_plot_{key}.png')
-
-        # Close the current figure to start a new one for the next key
+    for i,(data_type, big_wig_values) in enumerate(bigwig_values_dict.items()):
+        ax.plot(x_positions, big_wig_values, label=data_type, color=colors[i % len(colors)])
+    # Set x-axis limits
+    ax.set_xlim(left_lim, right_lim)
+    # Add vertical line in ther center
+    ax.axvline(x=0, color='black', linestyle='--', linewidth=1, label='Center')
+    left_label = f"{left_lim / 10**3:.0f}kb" if -1*(left_lim/ 10**3) >=1 else f"{left_lim:.0f}bp"
+    right_label = f"{right_lim / 10**3:.0f}kb" if right_lim/ 10**3 >=1 else f"{right_lim:.0f}bp"
+    ax.axvline(x=left_lim, color='red', linestyle='-', linewidth=1, label=left_label)
+    ax.axvline(x=right_lim, color='red', linestyle='-', linewidth=1, label=right_label)
+    ax.legend()
+    ax.set_xlabel('base pairs')
+    ax.set_ylabel('average values')
+    ax.set_title(f'{ax_title}')
+    ax.grid(True)
+    if one_pic:
+        # Save
+        plt.savefig(f'bigwig_enrichment_{ax_title}.png')
         plt.close()
+   
 '''function to draw some profiles of bw data for positive lables and negative labels'''
 def draw_pos_neg_bw_profiles(pos_data_points, neg_data_points, epigenetic_name,window_size):
     # Find the maximum value in all datasets (positive and negative)
@@ -604,28 +630,6 @@ def run_pos_neg_profiles(data,file_manager):
         draw_pos_neg_bw_profiles(pos_coords, neg_coords,epigenetic_name=epi_name,window_size=window_size)
 
 
-def get_epigentics_around_center(merged_data,on_column,label_value_list,center_value_column,chrom_column,file_manager,window_size):
-    epigenetics_object = file_manager.get_bigwig_files()
-    epi_dict = {}
-    for epigeneitc_mark, epigenetic_file in epigenetics_object: # for each epi mark create a list with tuples - (name, average values)
-        epi_dict[epigeneitc_mark] = []
-        for name,label_value in label_value_list: # for each data points get averages value
-            averages = average_epi_around_center(merged_data=merged_data,on_column=on_column,label_value=label_value,center_value_column=center_value_column,chrom_column=chrom_column,epigenetic_file=epigenetic_file,window_size=window_size)
-            epi_dict[epigeneitc_mark].append((name,averages))
-    return epi_dict
-'''draw +- 10kb range of center off target averages with epigenetics markers'''
-def average_epi_around_center(merged_data,on_column,label_value,center_value_column,chrom_column,epigenetic_file,window_size):
-    # get data points (ots)
-    data_points = merged_data[merged_data[on_column]==label_value] # filter data by label
-    # Initialize variables for accumulating sum and count
-    sum_values = np.zeros(window_size)
-    count_values = np.zeros(window_size)
-    for center_loc,chrom in zip(data_points[center_value_column], data_points[chrom_column]): # retive center location, chr
-        y_values = get_epi_data_bw(epigenetic_bw_file=epigenetic_file,chrom=chrom,center_loc=center_loc,window_size=window_size)
-        sum_values += y_values
-        count_values += 1
-    average_values = sum_values / count_values
-    return average_values
 
 def draw_histogram_bigwig(file_manager):
     epigenetics_object = file_manager.get_bigwig_files()
