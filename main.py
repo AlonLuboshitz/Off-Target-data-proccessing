@@ -9,7 +9,7 @@ from utilities import write_2d_array_to_csv
 from utilities import get_k_choose_n,  convert_partition_str_to_list, keep_positives_by_ratio, keep_negatives_by_ratio
 from data_constraints_utilities import with_bulges
 from k_groups_utilities import get_k_groups_ensemble_args, create_guides_list,get_k_groups_guides, partition_data_for_histograms
-from train_and_test_utilities import split_by_guides, add_labels_and_indexes_to_predictions
+from train_and_test_utilities import  add_labels_and_indexes_to_predictions
 from features_engineering import generate_features_and_labels, keep_indexes_per_guide
 from features_and_model_utilities import get_features_columns_args_ensembles, parse_feature_column_dict,split_epigenetic_features_into_groups, get_feature_column_suffix
 from parsing import features_method_dict, cross_val_dict, model_dict,encoding_dict, early_stoping_dict
@@ -24,6 +24,7 @@ import sys
 import time
 import atexit
 import traceback
+import pickle
 
 global ARGS, PHATS, COLUMNS, TRAIN, TEST, MULTI_PROCESS
 
@@ -34,6 +35,8 @@ def set_args(argv):
     args = parse_args(argv, parser)
     global ARGS, PHATS, COLUMNS
     ARGS, PHATS, COLUMNS = validate_main_args(args)
+    time.sleep(2)
+    print("Config files:\n")
     print_dict_values(PHATS)
     print_dict_values(COLUMNS)
     time.sleep(1)
@@ -482,6 +485,8 @@ def run_k_groups(train = False, test = False,process=False,evaluation=False, met
     elif test:
         test_dict = test_k_groups()
         test_dict[method]()
+    elif evaluation:
+        evaluate_k_groups()
 
 def train_k_groups():
     return {
@@ -493,8 +498,13 @@ def test_k_groups():
         1: test_k_groups_only_seq,
         2: test_k_groups_by_features,
     }
-def test_k_groups_by_features():
-    pass
+def evaluate_k_groups():
+    file_manager = init_file_management()
+    ml_results_path = file_manager.get_ml_results_path()
+    plots_path = file_manager.get_plots_path()
+    evaluation_obj = evaluation(ARGS.task)
+    evaluation_obj.evaluate_k_cross_results(ml_results_path,plots_path,save_results=True)
+
 def run_leave_one_out(train = False, test = False):
     pass
 def train_k_groups_by_features(feature_dict = None, all_epigenetics = True):
@@ -523,7 +533,8 @@ def train_k_groups_by_features(feature_dict = None, all_epigenetics = True):
         file_manager.add_type_to_models_paths(temp_suffix) # add path to train ensmbel
         runner.set_features_columns(feature) # set feature   
         train_k_groups_only_seq(runner,file_manager,x_features,y_features,all_guides,t_guides)
-def train_k_groups_only_seq(runner = None, file_manager = None, x_features= None, y_features = None, all_guides=None, guides = None):
+def train_k_groups_only_seq(runner = None, file_manager = None, x_features= None,
+                             y_features = None, all_guides=None, guides = None):
     '''
     This function trains a model for each partition.
     In total k models will be created with the suffix partition_number.keras
@@ -546,13 +557,41 @@ def train_k_groups_only_seq(runner = None, file_manager = None, x_features= None
         for m_,arg in enumerate(args):
             print(f'train model number: {m_+1}/{models}')
             runner.create_model(*arg)       
-def test_k_groups_only_seq(if_plot = True):
-    '''
+def test_k_groups_only_seq(runner = None, file_manager = None,
+                            x_features= None, y_features = None, all_guides=None, 
+                            guides = None, save_raw_scores = True ):
+    """
+
     This functions tests every model in k_cross partition and calculate it evaluation metric.
+    It uses evaluation object to evalute the model preformance.
+    It can use evaluation object to plot the results.
+    If return_raw_scores is True, the function will return the raw scores of the models.
+    This is used by external function like different feature testing so one can use all the different
+    features raw results and evalaute tham togther.
+
+    Args:
+        
+        runner (object): The model runner object.
+        file_manager (object): The file manager object.
+        x_features (array): The features used for training.
+        y_features (array): The labels used for training.
+        all_guides (array): The guides used for training.
+        guides (dict): The guides used for testing.
+        save_raw_scores (bool): If True, the function will save the raw scores of the models.
+    
+    Returns:
+        if_return_raw_scores (bool): If True, the function will return the raw scores of the models.
+        scores_dictionary (dict): The scores of the models.
     NOTE: ADD ARGUMENTS FOR FEATURES AND MULTIPROCESSING
     NOTE: DEAL WITH PLOT PATH FROM FILE MANAGER AS IT NOT SET FOR TESTING!
-    '''
-    runner, file_manager , x_features, y_features, all_guides, guides, n_models, n_ensmbels = init_run()
+    """
+    if runner is None or file_manager is None:
+        runner,file_manager = init_model_runner_file_manager()
+    if guides is None:
+        guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = False, test = True)
+    if x_features is None or y_features is None:
+        x_features, y_features, all_guides = get_x_y_data(file_manager, runner.get_model_booleans())
+    
     models_path = file_manager.get_model_path()
     scores_dictionary = {}
     if ARGS.test_on_other_data: # Test on other data so 
@@ -561,18 +600,48 @@ def test_k_groups_only_seq(if_plot = True):
             scores, test, idx = runner.test_model(model, guides, x_features, y_features, all_guides)
             scores_dictionary[model] = (scores,test,idx)
     else:
-        for partition in ARGS.partition:
+        partitions = len(guides)
+        for partition,guides_in_partition in guides.items():
+            print(f'Testing partition number: {partition}/{partitions}')
             temp_path = os.path.join(models_path, f"{partition}.keras")
-            scores, test, idx = runner.test_model(temp_path, guides[partition], x_features, y_features, all_guides)
+            scores, test, idx = runner.test_model(temp_path, guides_in_partition, x_features, y_features, all_guides)
             scores_dictionary[partition] = (scores,test,idx)
-    evaluation_obj = evaluation(ARGS.task)
-    results = evaluation_obj.get_k_groups_results(scores_dictionary)
-    ml_results = file_manager.get_ml_results_path()
-    results.to_csv(os.path.join(ml_results, "results.csv"), index=False)
-    if if_plot:
-        plots_path = file_manager.get_plots_path()
-        evaluation_obj.plot_k_groups_results(scores_dictionary,plots_path, features_method_dict()[ARGS.features_method])
-        
+    if save_raw_scores:
+        ml_results = file_manager.get_ml_results_path()
+        raw_scores_path = os.path.join(ml_results, "raw_scores.pkl")
+        with open(raw_scores_path, 'wb') as f:
+            pickle.dump(scores_dictionary, f)
+        return
+    
+def test_k_groups_by_features(feature_dict = None, all_epigenetics = True):
+    runner,file_manager = init_model_runner_file_manager()
+    train_guides, n_models, n_ensmbels = set_cross_val_args(file_manager, train = False, test = True)
+    model_base_path, ml_results_base_path = file_manager.get_model_path(), file_manager.get_ml_results_path()
+    if not feature_dict: # None
+        ### NOTE: ONLY EPIGENETICS IS SET TO TRUE!!!
+        features_dict = parse_feature_column_dict(ARGS.features_columns, only_epigenetics=True)
+    else:
+        features_dict = feature_dict
+    args = get_features_columns_args_ensembles(runner=runner,file_manager=file_manager,t_guides=train_guides,
+                                               model_base_path=model_base_path,ml_results_base_path=ml_results_base_path,
+                                               n_models=None,n_ensmbels=None,features_dict=features_dict,multi_process=False)
+    epi_results = {}
+    for arg in args:
+        group, feature,runner, file_manager,t_guides,model_base_path,ml_results_base_path, n_models, n_ensmbels,multi_process = arg
+        log_time(f'Create_ensmbels_with_epigenetic_features_{group}_{feature}_start')
+        print(f"Testing K cross for group: {group} with feature: {feature}")
+        temp_suffix = get_feature_column_suffix(group,feature) # set path to epigenetic data type - binary, by score, by enrichment.
+        if not all_epigenetics: # Dont run all epigenetics
+            if "All-epigenetics" in temp_suffix:
+                return
+        x_features,y_features,all_guides = get_x_y_data(file_manager, runner.get_model_booleans(),  feature)
+        file_manager.set_models_path(model_base_path) # set model path
+        file_manager.set_ml_results_path(ml_results_base_path) # set ml results path
+        file_manager.add_type_to_models_paths(temp_suffix) # add path to train ensmbel
+        runner.set_features_columns(feature) # set feature  
+        epi_results[temp_suffix.split('/')[1]] = test_k_groups_only_seq(runner=runner,file_manager=file_manager,
+                               x_features=x_features,y_features=y_features,all_guides=all_guides,
+                               guides=t_guides,save_raw_scores=True)       
     
 def train_leave_one_out():
     pass

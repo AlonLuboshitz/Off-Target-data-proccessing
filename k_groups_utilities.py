@@ -196,6 +196,8 @@ def get_k_groups_guides(guides_path, partition_list, train = False, test = False
         temp_path = os.path.join(guides_path, f"{prefix}_{partition}_partition.txt")
         k_partitions[partition] =  create_guides_list(temp_path, 0)
     return k_partitions
+
+
 ##########################################
 '''
 Partition utilities

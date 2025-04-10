@@ -2,10 +2,293 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 from utilities import extract_scores_labels_indexes_from_files
+from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve, mean_squared_error
+from scipy.stats import pearsonr, spearmanr,wilcoxon
 from multiprocessing import Pool
 import os
 from file_utilities import create_paths
+##NOTE: MOVE ML STATISTICS OVER HERE
 
+######## Generall evaluations ##########
+
+def evaluate_model(y_test, y_scores, task = None):
+    """
+    Evaluates the model given its task.
+
+    For classification: 
+        auroc, auprc, n_rank, last_fn_index, last_fn_ratio.
+    For regression:
+        pearson_r, spearman_r, mse, pearson_p, spearman_p.
+    Args:
+        y_test (array-like): The actual labels.
+        y_scores (array-like): The predicted scores.
+        task (str): The task of the model. Options: "classification", "regression".
+    Returns:
+        metrics (dict): The evaluation metrics.
+    """
+    if task.lower() == "classification":
+        return evaluate_classification(y_test, y_scores)
+    elif task.lower() == "reg_classification":
+        y_test = (y_test > 0).astype(int) # transform to binary labels
+        return evaluate_classification(y_test, y_scores)
+    elif task.lower() == "regression" or task.lower() == "t_regression":
+        return evalaute_regression(y_test, y_scores)
+    else:
+        raise RuntimeError(f"Task {task} is not supported")
+    
+
+def evaluate_classification( y_test, y_pos_scores_probs, return_rates = False):
+    '''
+    This function evaluates classification task.
+    Given, Args:
+    1. y_test - (list/ndarray) the actual labels.
+    2. y_pos_scores_probs - (list/ndarray) the predicted scores.
+    3. return_rates - (bool) if to return the rates.
+    Calculate the fpr,tpr,roc_tresholds, auroc, percesion, recall, auprc, n_rank, last_fn_index, last_fn_ratio.
+    -----------
+    Returns: by defualt tuple of auroc, auprc, n_rank, last_fn_index, last_fn_ratio.
+    if return_rates: (defualt results, dict{fpr,tpr,percesion,recall})
+    '''
+    fpr, tpr, roc_tresholds = roc_curve(y_test, y_pos_scores_probs)
+    auroc = auc(fpr, tpr)
+    percesion, recall, tresholds = precision_recall_curve(y_test, y_pos_scores_probs)
+    auprc = average_precision_score(y_test, y_pos_scores_probs)
+    n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_pos_scores_probs,y_test,1000,tpr))[0]
+    last_fn_index = get_predictions_needed_to_1_tpr(tpr, roc_tresholds, y_pos_scores_probs)
+    last_fn_ratio = get_last_fn_ratio(labels=y_test,predictions=None,tpr=None,last_index=last_fn_index)
+    metrics_tuple = (auroc,auprc,n_rank,last_fn_index,last_fn_ratio)
+    if return_rates:
+        rate_dict = {"fpr":fpr, "tpr":tpr, "percesion":percesion, "recall":recall}
+        return (metrics_tuple, rate_dict)
+    return metrics_tuple
+
+def evalaute_regression(y_test, y_scores):
+    '''This function evaluate the regression model by calculating the pearson and spearman correlations, it also reports the MSE.
+    The evaluation is between all data points, and between only the positive OTSs with label > 0.
+
+    Args:
+    1. y_test - the actual labels.
+    2. y_scores - the predicted scores.
+    ------------   
+    Returns: tuple of pearson_r, spearman_r, mse, pearson_p, spearman_p.
+    '''
+    p_r, p_p = pearsonr(y_test, y_scores)
+    s_r, s_p = spearmanr(y_test, y_scores)
+    mse= mean_squared_error(y_test , y_scores)
+    
+    return p_r, s_r, mse, p_p, s_p 
+
+
+### Metrics evaluations: AUC, AUPRC, N-rank, 
+
+def get_tpr_by_n_expriments(predicted_vals,y_test,n, tpr = None):
+    '''This function gets the true positive rate for n expriemnets by calculating:
+for each 1 <= n' <= n prediction values, what the % of positive predcition out of the the whole TP amount.
+for example: '''
+    if not tpr is None:
+        if len(tpr) >= n:
+            return tpr[:n]
+        else:
+            print("there are more true positives than expriments return the whole tpr")
+            return tpr
+
+    # valid that test amount is more then n
+    if n > len(y_test):
+        print(f"n expriments: {n} is bigger then data points amount: {len(y_test)}, n set to data points")
+        n = len(y_test)
+    
+    tp_amount = np.count_nonzero(y_test) # get tp amount
+    if predicted_vals.ndim > 1:
+        predicted_vals = predicted_vals.ravel()
+    sorted_indices = np.argsort(predicted_vals)[::-1] # Get the indices that would sort the prediction values array in descending order    
+    tp_amount_by_prediction = 0 # set tp amount by prediction
+    
+    tpr_array = np.zeros(n)
+    for i in range(n):
+        # Accumulate true positives
+        tp_amount_by_prediction += y_test[sorted_indices[i]]
+        # Calculate TPR
+        tpr_array[i] = tp_amount_by_prediction / tp_amount
+        # If TPR reaches 1, fill the remaining array with 1s and break
+        if tp_amount_by_prediction == tp_amount:
+            tpr_array[i:] = 1
+            break
+
+    return tpr_array
+       
+
+
+def get_predictions_needed_to_1_tpr(tpr_arr, tresholds = None, predictions = None, return_1_tpr = False):
+    """
+    Get the index of the last occurrence of the true positive.
+    This is equal asking when the tpr =1.
+    
+    Parameters:
+    - tpr_arr (array-like): Array of True Positive Rates (TPR).
+    - tresholds (array-like): Array of tresholds.
+    - predictions (array-like): Array of predictions.
+    - return_1_tpr (bool): If True, return the index of the first TPR = 1.
+    Returns:
+    - The amount of predictions needed to get tpr = 1.
+    if return_1_tpr is True, return the index of the first TPR = 1.
+                             
+    """
+    if len(tpr_arr) == 0:
+        raise ValueError("TPR array is empty.")
+    if tresholds is None or predictions is None:
+        raise ValueError("Predictions or tresholds are missing.")
+    tpr_1_index = np.where(tpr_arr == 1)[0][0]
+    if return_1_tpr:
+        return len(predictions[predictions >= tresholds[tpr_1_index]]), tpr_1_index
+    return len(predictions[predictions >= tresholds[tpr_1_index]])
+def get_last_fn_ratio(predictions, labels=None, tpr = None, last_index = None, tresholds = None):
+    """
+    Calculate the ratio of the last false negative index to the total number of labels,
+    adjusted by the number of positive labels.
+    
+    Parameters:
+    - predictions (array-like): The predicted binary labels.
+    - labels (array-like): The true binary labels (ground truth).
+    
+    Returns:
+    - last_fn_ratio (float): Adjusted ratio of the last false negative index.
+    """
+    if labels is None:
+        raise ValueError("Labels are missing.")
+    active_labels = np.count_nonzero(labels)
+    total_labels = len(labels)
+    if last_index is not None:
+        return (last_index - active_labels) / total_labels
+    if tpr is None:
+        fpr,tpr,_ = roc_curve(labels, predictions)
+    last_fn_index = get_predictions_needed_to_1_tpr(tpr, tresholds, predictions)
+    return (last_fn_index - active_labels) / total_labels
+
+
+def get_auc_by_tpr(tpr_arr):
+    """
+    Calculate the Area Under the Curve (AUC) for the given TPR array.
+
+    Parameters:
+    - tpr_arr (array-like): Array of TPR values (y-axis of the curve).
+
+    Returns:
+    - calculated_auc (float): AUC value.
+    - amount_of_points (int): Number of points in the TPR array.
+    """
+    amount_of_points = len(tpr_arr)
+    x_values = np.arange(1, amount_of_points + 1) / amount_of_points
+    calculated_auc = auc(x_values, tpr_arr)
+
+    return calculated_auc, amount_of_points
+
+######## K_cross #########
+def convert_k_cross_dict(feature_dict, error_file):
+    """
+    Given a k_cross feature_dict from the shape:
+        {Feature: {Partition: (y_scores, y_test, indexes)}}
+    Convert it to the shape:
+        {Partition: {Feature: (y_scores, y_test, indexes)}}
+    Args:
+        feature_dict (dict): Dictionary containing the features data.
+        error_file (str): Path to the error file to log issues.
+    Returns:
+        dict: Converted dictionary with the structure {partition: {feature: (y_scores, y_test, indexes)}}
+    """
+    feature_partitions = {feature: list(partitions.keys()) for feature, partitions in feature_dict.items()}
+    max_feature, max_partitions = max(
+    ((feature, len(partitions)) for feature, partitions in feature_partitions.items()),
+    key=lambda x: x[1]
+    )
+    max_partition_list = feature_partitions[max_feature]
+    print(f"Feature: {max_feature} has maximum partitions of {max_partitions} with the partitions:\n{max_partition_list}")
+    # Check if all features have the same partitions
+    for feature, partitions in feature_partitions.items():
+        difference = set(max_partition_list).difference(partitions)
+        if len(difference) > 0:
+            print(f"Feature {feature} missing the following partitions: {difference}.")
+            with open(error_file, "a") as f:
+                f.write(f"Feature {feature} missing the following partitions: {difference}.\n")
+    # convert dict
+    converted_dict = defaultdict(dict)
+    for feature, partitions in feature_dict.items():
+        for partition, (y_scores, y_test, indexes) in partitions.items():
+            converted_dict[partition][feature] = (y_scores, y_test, indexes)
+    return converted_dict
+
+
+def get_k_groups_results(k_results_dictionary, task, k_group_columns):
+    """
+    This function calculates the evaluations metrics for each partition.
+    If task is regression evalute model by regression metrics - pearson,spearman,mse
+    If task is classification evalute model by classification metrics - auroc,auprc,n-rank,last-tp
+    
+    Args:
+        k_results_dictionary (dict): dictionary with the results for each group. 
+        {group: (score,test,indexes)}
+
+    Returns:
+        results_data_frame (pd.DataFrame): data frame with the evaluations for each group.        
+    """
+    results_data_frame = pd.DataFrame(columns = k_group_columns)
+    for index,(group, results) in enumerate(k_results_dictionary.items()):
+        predictions, labels, _ = results
+        results = evaluate_model(labels, predictions,task)
+        results_data_frame.loc[index] = [group, *results]
+    return results_data_frame
+
+def averaged_k_cross_results(feature_dict, k_group_columns, error_file):
+    """
+    Given a feature dict:{feature_name: results dataframe} summarize the results of all the features by
+    calculating the mean and std for each column in the k_group_columns.
+
+    Args:
+        feature_dict (dict): Dictionary containing the features data.
+        k_group_columns (list): List of columns to summarize.
+        error_file (str): Path to the error file to log issues.
+    Returns:
+        pd.DataFrame: Data frame with the summarized results.
+    """
+    columns = [f'{col}_mean' for col in k_group_columns] + [f'{col}_std' for col in k_group_columns] 
+    summerized_data_frame = pd.DataFrame(index=feature_dict.keys(), columns=columns)
+    
+    for feature, results in feature_dict.items():  # Open each DataFrame once
+        for col in k_group_columns:
+            values = results[col].values
+            mean = np.mean(values)
+            std = np.std(values)
+            summerized_data_frame.loc[feature, f'{col}_mean'] = mean
+            summerized_data_frame.loc[feature, f'{col}_std'] = std
+    return summerized_data_frame
+
+def get_p_val_k_cross(feature_dict, feature_to_compare_to, k_group_columns, alternative_dict = None):
+    """
+    Given a feature dict:{feature_name: results dataframe} and a feature to compare to,
+    calculate the p-value using wilxoscon test for each column in the k_group_columns.
+
+    Args:
+        feature_dict (dict): Dictionary containing the features data.
+        feature_to_compare_to (str): Name of the feature to compare to.
+        k_group_columns (list): List of columns to summarize.
+        alternative_dict (dict): Dictionary containing the alternative hypothesis for each column.
+    Returns:
+        pd.DataFrame: Data frame with the p-values.
+    """
+    p_values = pd.DataFrame(columns = k_group_columns, index = feature_dict.keys())
+    for feature, results in feature_dict.items():
+        if feature == feature_to_compare_to:
+            continue
+        for col in k_group_columns:
+            if alternative_dict is not None:
+                alternative = alternative_dict[col]
+            else:
+                alternative = "two-sided"
+            try:
+                stat, p_value = wilcoxon(results[col].values, feature_dict[feature_to_compare_to][col].values,alternative=alternative)
+                p_values.loc[feature, col] = p_value
+            except ValueError as e:
+                print(f"Error calculating p-value for {feature} and {feature_to_compare_to} on column {col}: {e}")
+    return p_values  
 def merge_by_mismatches(guides_dict, error_file):
     """
     Given a dicionary of {mismatch: {guide: {feature: (y_scores, y_test, indexes)}}}
@@ -232,3 +515,4 @@ def split_feature_dict_by_indexes(features_dict, indexes_dict, by_mismatch = Fal
             y_indexed_scores, y_indexed_test, indexes = keep_indexes_from_scores_labels_indexes(y_scores, y_test, all_indexes, indexes)
             guides_dict[guide][feature] = y_indexed_scores, y_indexed_test, indexes
     return guides_dict
+

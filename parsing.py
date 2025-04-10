@@ -1,6 +1,9 @@
 import argparse
 import os
 import json
+PRINTS = ''
+
+## NOTE: Remove 'ALL' when evaluating
 def features_method_dict():
     '''A dictionary for the feature incorporate in the model.'''
     return {
@@ -177,6 +180,7 @@ def validate_main_args(args):
         data_configs = configs[args.data_name]
         args,data_columns = set_task_label(args, data_columns)
         args = set_method(args)
+        print(PRINTS)
         return args, data_configs, data_columns
     
 def set_test_on_other_data(test_on_other_data = None):
@@ -202,17 +206,24 @@ def set_test_on_other_data(test_on_other_data = None):
 def validate_test_on_other_data(args):
     '''
     This function validates that if job is test and partitions is all then test_on_other_data must be given.'''
+    global PRINTS
     if isinstance(args.partition[0],str):
         if args.job.lower() == "train":
             args.test_on_other_data = None
         elif args.partition[0].lower() == 'all': # job is test/evaluation/process
+            
         # other data should be given
             try:
                 args.test_on_other_data = set_test_on_other_data(args.test_on_other_data)
             except ValueError as e:
+                
+                    
                 print(e)
                 raise ValueError("Test on other data must be given for partition == all and job == test")
             if args.test_on_other_data is None:
+                if args.cross_val ==2:
+                    PRINTS = PRINTS + "CROSS VALIDATION IS K-CROSS, PARTITION IS 'ALL' AND JOB IS TEST.\nOTHER TESTING DATA HAS NOT BEEN GIVEN TESTING ALL THE PARTITIONS IN THE PARTITIONS FOLDER!\n"
+                    return args
                 raise ValueError("Test on other data must be given for partition == all and job == test")
         else : # partition is not all/ job is not test
             args.test_on_other_data = None # set to None

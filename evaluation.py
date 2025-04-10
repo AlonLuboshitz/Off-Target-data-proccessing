@@ -1,18 +1,20 @@
 import numpy as np
 import pandas as pd
+import pickle
+
 from itertools import combinations
 import os
 from evaluation_utilities import *
-from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve, mean_squared_error
+from sklearn.metrics import roc_curve, auc, average_precision_score, precision_recall_curve
 from utilities import get_X_random_indices
 from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv
 from k_groups_utilities import get_partition_information
 from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp, plot_subplots
-from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder
+from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder, find_target_files
 from features_and_model_utilities import get_feature_name, transform_labels
-from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results, pearson_correlation, spearman_correlation
+from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results
 from multiprocessing import Pool
- 
+
 PATH_TO_STATISTICS_FILE = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/guides_statistics.csv"
 class evaluation():
     def __init__(self, task, only_pos=False):
@@ -50,29 +52,74 @@ class evaluation():
 
             self.data_evaluation_columns = ['feature', 'auroc', 'auroc_std','auroc_pval', 'auprc', 'auprc_std','auprc_pval', 'n-rank', 
                                             'n-rank_std','n-rank_pval', 'last-tp', 'last-tp_std','last-tp_pval','last-tp_ratio','last-tp_ratio_std']
-            self.k_group_columns = ['partition','auroc', 'auprc', 'n-rank', 'last-tp']
+            self.k_group_columns = ['partition','auroc', 'auprc', 'n-rank', 'last-tp-ratio','last-tp-index']
+            self.k_groups_alternatives = {"auroc":'greater', "auprc":'greater', "n-rank":'greater', "last-tp-ratio":'less', "last-tp-index":'less'}
         elif self.task.lower() == "regression" or self.task.lower() == "t_regression":
             self.data_evaluation_columns = ['feature', 'pearson', 'pearson_std','pearson_pval', 'spearman', 'spearman_std','spearman_pval', 'mse', 'mse_std','mse_pval']
             self.k_group_columns = ['partition','pearson', 'spearman', 'mse']
+            self.k_groups_alternatives = {"pearson":'greater', "spearman":'greater', "mse":'less'}
     
 
     #### Evaluate predictions ####
-    def get_k_groups_results(self, k_results_dictionary):
-        '''
-        This function calculates the evaluations metrics for each partition.
-        Returns a data frame with the results.
+    def evaluate_k_cross_results(self, ml_results_path, plots_path, save_results = True, evaluate_single_partition = True):
+        """
+        Evaluate the k-fold cross-validation results.
+        Given an ml_results_path, extracts the raw_scores.pkl files for the k_cross partitions.
+        Conduct 2 evaluations:
+            1) Evaluate each partition by it self comparing all the different models.
+                if evaluate_single_partition is False it will avoid this part.
+            2) Evaluate the average performance of each model over all partitions.
+        Plots the 2 types of evluations.
+        
         Args:
-        1. k_results_dictionary - dictionary with the results for each group. group: (score,test,indexes)
-        2. task - the task of the model. (classification, regression)
-        -----------
-        Returns: data frame with the results for each group.
-        '''
-        results_data_frame = pd.DataFrame(columns = self.k_group_columns)
-        for index,(group, results) in enumerate(k_results_dictionary.items()):
-            predictions, labels, _ = results
-            results = evaluate_model(labels, predictions, self.task)
-            results_data_frame.loc[index] = [group, *results]
-        return results_data_frame
+            ml_results_path (str): Path to the ML results folder.
+            plots_path (str): Path to save the plots.
+            save_results (bool): If True, create a results folder in the plots path
+                and saves the results in it.
+            evaluate_single_partition (bool): If True, evaluate each partition by itself.
+        """
+        # Get the scores for all the models. Score are in pkl files.
+        paths_to_scores = find_target_files(os.path.join(ml_results_path.split('K_cross')[0], "K_cross"), "raw_scores.pkl")
+        # Open pkl files for each feature.
+        features_dict = {}
+        for path in paths_to_scores:
+            feature_name = os.path.basename(path)
+            score_file = os.path.join(path,'raw_scores.pkl')
+            with open(score_file, 'rb') as file:
+                features_dict[feature_name] = pickle.load(file)
+        features_dict['Only-sequence'] = features_dict.pop('Only_sequence') # change key name
+        # Feature dict : {feature: {partition: (y_scores, y_test, indexes)}}
+        error_file = os.path.join(plots_path, "error.txt")
+        if evaluate_single_partition:
+            converted_feature_dict = convert_k_cross_dict(features_dict,error_file) # convert to {partition: {feature:(y_scores, y_test, indexes)}}
+            # 1. Evaluate each partition by it self comparing all the different models.
+            by_partition_path = create_folder(plots_path, "By_partition")
+            for partition, partition_dict in converted_feature_dict.items():
+                temp_path = create_folder(by_partition_path, f'{partition}_partition')
+                plot_evalutions_for_multiple_models(task=self.task,output_path=temp_path,
+                                                    scores_dictionary=partition_dict)
+        # 2. Evaluate the average performance of each model over all partitions.
+        features_results = {}
+        for feature, feature_partitions in features_dict.items():
+            feature_results = get_k_groups_results(feature_partitions, self.task, self.k_group_columns)
+            features_results[feature] = feature_results
+        self.k_group_columns.remove('partition')
+        averaged_results = averaged_k_cross_results(features_results, self.k_group_columns,error_file)
+        p_vals = get_p_val_k_cross(features_results,'Only-sequence',self.k_group_columns,self.k_groups_alternatives)
+        all_partitions_path = create_folder(plots_path, "All_partitions")
+        if save_results:
+            averaged_results.to_csv(os.path.join(all_partitions_path, "averaged_results.csv"), index=False)
+            p_vals.to_csv(os.path.join(all_partitions_path, "p_vals.csv"), index=False)
+        features = list(averaged_results.index)
+        for col in self.k_group_columns:
+            mean = averaged_results[f'{col}_mean'].values
+            std = averaged_results[f'{col}_std'].values
+            p_val = p_vals[col]
+            plot_ensemble_performance_mean_std(mean_values=mean,std_values=std,x_values=features,
+                                               p_values=p_val,title=col,y_label=col,
+                                               path=all_partitions_path,only_seq='Only-sequence')
+        
+        
     
     def plot_k_groups_results(self, k_results_dicionary, plots_path, feature_name):
         plot_evalutions_for_multiple_models(self.task,plots_path,feature_name,None,k_results_dicionary)
@@ -628,168 +675,7 @@ def eval_all_combinatorical_ensmbel(y_scores, y_test, header = None, task = None
 
 
 
-### Metrics evaluations: AUC, AUPRC, N-rank, 
 
-def get_tpr_by_n_expriments(predicted_vals,y_test,n, tpr = None):
-    '''This function gets the true positive rate for n expriemnets by calculating:
-for each 1 <= n' <= n prediction values, what the % of positive predcition out of the the whole TP amount.
-for example: '''
-    if not tpr is None:
-        if len(tpr) >= n:
-            return tpr[:n]
-        else:
-            print("there are more true positives than expriments return the whole tpr")
-            return tpr
-
-    # valid that test amount is more then n
-    if n > len(y_test):
-        print(f"n expriments: {n} is bigger then data points amount: {len(y_test)}, n set to data points")
-        n = len(y_test)
-    
-    tp_amount = np.count_nonzero(y_test) # get tp amount
-    if predicted_vals.ndim > 1:
-        predicted_vals = predicted_vals.ravel()
-    sorted_indices = np.argsort(predicted_vals)[::-1] # Get the indices that would sort the prediction values array in descending order    
-    tp_amount_by_prediction = 0 # set tp amount by prediction
-    
-    tpr_array = np.zeros(n)
-    for i in range(n):
-        # Accumulate true positives
-        tp_amount_by_prediction += y_test[sorted_indices[i]]
-        # Calculate TPR
-        tpr_array[i] = tp_amount_by_prediction / tp_amount
-        # If TPR reaches 1, fill the remaining array with 1s and break
-        if tp_amount_by_prediction == tp_amount:
-            tpr_array[i:] = 1
-            break
-
-    return tpr_array
-       
-
-
-def get_predictions_needed_to_1_tpr(tpr_arr, tresholds = None, predictions = None, return_1_tpr = False):
-    """
-    Get the index of the last occurrence of the true positive.
-    This is equal asking when the tpr =1.
-    
-    Parameters:
-    - tpr_arr (array-like): Array of True Positive Rates (TPR).
-    - tresholds (array-like): Array of tresholds.
-    - predictions (array-like): Array of predictions.
-    - return_1_tpr (bool): If True, return the index of the first TPR = 1.
-    Returns:
-    - The amount of predictions needed to get tpr = 1.
-    if return_1_tpr is True, return the index of the first TPR = 1.
-                             
-    """
-    if len(tpr_arr) == 0:
-        raise ValueError("TPR array is empty.")
-    if tresholds is None or predictions is None:
-        raise ValueError("Predictions or tresholds are missing.")
-    tpr_1_index = np.where(tpr_arr == 1)[0][0]
-    if return_1_tpr:
-        return len(predictions[predictions >= tresholds[tpr_1_index]]), tpr_1_index
-    return len(predictions[predictions >= tresholds[tpr_1_index]])
-def get_last_fn_ratio(predictions, labels=None, tpr = None, last_index = None, tresholds = None):
-    """
-    Calculate the ratio of the last false negative index to the total number of labels,
-    adjusted by the number of positive labels.
-    
-    Parameters:
-    - predictions (array-like): The predicted binary labels.
-    - labels (array-like): The true binary labels (ground truth).
-    
-    Returns:
-    - last_fn_ratio (float): Adjusted ratio of the last false negative index.
-    """
-    if labels is None:
-        raise ValueError("Labels are missing.")
-    active_labels = np.count_nonzero(labels)
-    total_labels = len(labels)
-    if last_index is not None:
-        return (last_index - active_labels) / total_labels
-    if tpr is None:
-        fpr,tpr,_ = roc_curve(labels, predictions)
-    last_fn_index = get_predictions_needed_to_1_tpr(tpr, tresholds, predictions)
-    return (last_fn_index - active_labels) / total_labels
-
-
-def get_auc_by_tpr(tpr_arr):
-    """
-    Calculate the Area Under the Curve (AUC) for the given TPR array.
-
-    Parameters:
-    - tpr_arr (array-like): Array of TPR values (y-axis of the curve).
-
-    Returns:
-    - calculated_auc (float): AUC value.
-    - amount_of_points (int): Number of points in the TPR array.
-    """
-    amount_of_points = len(tpr_arr)
-    x_values = np.arange(1, amount_of_points + 1) / amount_of_points
-    calculated_auc = auc(x_values, tpr_arr)
-
-    return calculated_auc, amount_of_points
-
-def evaluate_model(y_test, y_scores, task = None):
-    '''This function evaluate the model given its task.
-    Args:
-    1. y_test - the actual labels.
-    2. y_scores - the predicted scores.
-    3. task - the task of the model. (classification, regression)
-    ----------
-    returns: dict of the evaluation metrics in regression or auroc,auprc in classification.
-    '''
-    if task.lower() == "classification":
-        return evaluate_classification(y_test, y_scores)
-    elif task.lower() == "reg_classification":
-        y_test = (y_test > 0).astype(int) # transform to binary labels
-        return evaluate_classification(y_test, y_scores)
-    elif task.lower() == "regression" or task.lower() == "t_regression":
-        return evalaute_regression(y_test, y_scores)
-    else:
-        raise RuntimeError(f"Task {task} is not supported")
-
-def evaluate_classification( y_test, y_pos_scores_probs, return_rates = False):
-    '''
-    This function evaluates classification task.
-    Given, Args:
-    1. y_test - (list/ndarray) the actual labels.
-    2. y_pos_scores_probs - (list/ndarray) the predicted scores.
-    3. return_rates - (bool) if to return the rates.
-    Calculate the fpr,tpr,roc_tresholds, auroc, percesion, recall, auprc, n_rank, last_fn_index, last_fn_ratio.
-    -----------
-    Returns: by defualt tuple of auroc, auprc, n_rank, last_fn_index, last_fn_ratio.
-    if return_rates: (defualt results, dict{fpr,tpr,percesion,recall})
-    '''
-    fpr, tpr, roc_tresholds = roc_curve(y_test, y_pos_scores_probs)
-    auroc = auc(fpr, tpr)
-    percesion, recall, tresholds = precision_recall_curve(y_test, y_pos_scores_probs)
-    auprc = average_precision_score(y_test, y_pos_scores_probs)
-    n_rank = get_auc_by_tpr(get_tpr_by_n_expriments(y_pos_scores_probs,y_test,1000,tpr))[0]
-    last_fn_index = get_predictions_needed_to_1_tpr(tpr, roc_tresholds, y_pos_scores_probs)
-    last_fn_ratio = get_last_fn_ratio(labels=y_test,predictions=None,tpr=None,last_index=last_fn_index)
-    metrics_tuple = (auroc,auprc,n_rank,last_fn_index,last_fn_ratio)
-    if return_rates:
-        rate_dict = {"fpr":fpr, "tpr":tpr, "percesion":percesion, "recall":recall}
-        return (metrics_tuple, rate_dict)
-    return metrics_tuple
-
-def evalaute_regression(y_test, y_scores):
-    '''This function evaluate the regression model by calculating the pearson and spearman correlations, it also reports the MSE.
-    The evaluation is between all data points, and between only the positive OTSs with label > 0.
-
-    Args:
-    1. y_test - the actual labels.
-    2. y_scores - the predicted scores.
-    ------------   
-    Returns: tuple of pearson_r, spearman_r, mse, pearson_p, spearman_p.
-    '''
-    p_r, p_p = pearson_correlation(y_test, y_scores)
-    s_r, s_p = spearman_correlation(y_test, y_scores)
-    mse= mean_squared_error(y_test , y_scores)
-    
-    return p_r, s_r, mse, p_p, s_p 
 
 ## Saving the evaluations results
 def save_model_results(classification_tuple = None, regression_dict = None, table = None, ml_feature_key_tuple = None, n_rank = None, tpn_tuple = None, task = None):
@@ -849,16 +735,26 @@ def saving_regression_results(pearson, spearman, mse, file_left_out, table, ml_t
 
 def plot_evalutions_for_multiple_models(  task, output_path = None, plot_title = None, results = None,
                                          scores_dictionary = None, information=None, return_metrics = False):
-    '''
+    """
     This function iterates the scores dictionary and extract the evlaution for each model in the dict.
-    Than plots the results of each model togther.
+    Than plots the results of each model on the same plot.
+    If return_metrics is True the function will return the metrics dictionary for each model.
+    
     Args:
-    1. scores_dictionary - dictionary with the scores for each model. model_name: predictions,tests,idx
-    2. task - the task of the model. (classification, regression)
-    3. output_path - path to save the plot.
-    4. plot_title - title for the plot.
-    5. results - the results of the models. If None the function will evaluate the models.
-    '''
+        task (str): The task of the model. (classification, regression)
+        output_path (str): The path to save the plot.
+        plot_title (str): The title for the plot.
+        results (dict): The results of the models. If None the function will evaluate the models.
+        scores_dictionary (dict): The scores dictionary with the scores for each model. model_name: predictions,tests,idx
+        information (dict): The information of the models.
+            i.e. dict with keys and values like positives:, negatives:, so on.
+        return_metrics (bool): If True, return the metrics dictionary and model names.
+    
+    Returns:
+        if return_metrics is True:
+        metrics_dict (dict): The metrics dictionary for each model.
+        {model: (fprs,tprs,aucs,percs,recalls,auprcs,n_ranks,last_fn_values)} for classification
+        {model: (pearson_r, spearman_r, mse)} for regression"""
     # NOTE: NEED TO ARANAGE THIS PLOTTING.
     if scores_dictionary is None:
         raise RuntimeError("No scores dictionary was given")
@@ -873,12 +769,20 @@ def plot_evalutions_for_multiple_models(  task, output_path = None, plot_title =
     if return_metrics:
         return metrics_dict, model_names
     else:
+        if information is None:
+            if task.lower() == "classification":
+                information = {'Positives': sum(test>0), 'Negatives': sum(test==0)}
+            elif task.lower() == "regression":
+                pass
         plot_multiple_models_by_task(metrics_dict, model_names, task, output_path, plot_title, information)
 def plot_classifications_metrics_multiple_models(metrics_dict, titles, output_path, plot_title, information):
+    plot_title = '' if plot_title is None else plot_title
+    
     plot_roc(fpr_list=metrics_dict["fprs"],tpr_list=metrics_dict["tprs"],aurocs=metrics_dict["aucs"],
              model_names=titles,output_path=output_path,general_title=plot_title)
     plot_pr(recall_list=metrics_dict['recalls'],precision_list=metrics_dict['percs'],
-            auprcs=metrics_dict['auprcs'],model_names=titles,output_path=output_path,general_title=plot_title)
+            auprcs=metrics_dict['auprcs'],model_names=titles,
+            output_path=output_path,general_title=plot_title,information=information)
     # n_rank_vals, n_rank_tprs = zip(*metrics_dict["n_ranks"])
     # plot_n_rank(n_rank_values=n_rank_vals,n_tpr_arrays=n_rank_tprs,titles=titles,output_path=output_path,general_title=plot_title)
     last_fn_indexes, last_fn_ratios, tpr_values = zip(*metrics_dict["last_fn_values"])

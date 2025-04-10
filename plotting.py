@@ -70,90 +70,22 @@ def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, model_names,  informa
     
     
 
-# def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, titles, output_path, general_title, information):
-#     '''
-#     This functions plost the last true positive index and TPR for that point for each model.
-#     Args:
-#     1. last_tp_values: (list) of last true positive index values for each model.
-#     2. tpr_arrays: (list) of true positive rates for each model.
-#     3. titles: (list) of titles for each model.
-#     4. output_path: (str) output path for saving the plot.
-#     5. general_title: (str) general title for the plot.
-#     6. information_dict: (dict) of information to add to the plot.
-#     '''
-#     if len(last_tp_index) != len(last_tp_ratio) != len(tpr_arrays) != len(titles):
-#         raise ValueError('All input lists must have the same length.')
-#     # argsort in asecnding order by the last tp values
-#     last_tp_indices_sorted,tpr_arrays_sorted,titles_sorted = argsort_by(last_tp_index,last_tp_index, tpr_arrays,titles )
-
+def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title,
+              ax=None, ax_title=None, information=None):
+    """
+    Plots the ROC curve for 1 or more models.
     
-#     # Create a figure
-#     plt.figure(figsize=(8, 6))
-#     for i in range(len(last_tp_indices_sorted)):
-#         x_values = np.arange(1, len(tpr_arrays_sorted[i]) + 1)
-#         color = plt.rcParams['axes.prop_cycle'].by_key()['color'][i % len(plt.rcParams['axes.prop_cycle'].by_key()['color'])]
-#         plt.plot(x_values, tpr_arrays_sorted[i], lw=2,color=color, label=f'{titles_sorted[i]} (Last TP = {last_tp_indices_sorted[i]})')
-#         plt.axvline(x=last_tp_indices_sorted[i], color=color,lw=1, linestyle='--')
-
-#     plt.xlabel('Number of experiments', fontsize=14)
-#     plt.ylabel('True positive rate', fontsize=14)
-#     plt.yticks(fontsize=12)
-#     plt.title('Last true positive index')
-#     if information:
-#         label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
-#         plt.plot([], [], ' ', label=label_text)  # Invisible line with empty style
-
-#     plt.legend(loc='lower right',fontsize=11)
-#     plt.grid(True)
-#     if not "Last_TP" in general_title:
-#         general_title = general_title + "_Last_TP"
-#     plt.tight_layout()  # Adjust layout to minimize whitespace
-#     plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
-#     plt.close()  # Close the figure to free memory
-# def plot_roc(fpr_list,tpr_list, aurocs,titles,output_path,general_title):
-#     '''This function plots the ROC curve for 1 or more models.
-#     Args:
-#     1. fpr_list: A list of false positive rates for each model.
-#     2. tpr_list: A list of true positive rates for each model.
-#     3. aurocs: A list of AUROC values for each model.
-#     4. titles: A list of titles for each model.
-#     5. output_path: A string representing the output path for saving the plot.
-#     6. general_title: A string representing the general title for the plot.
-#     ----------
-#     Show the figure and saves it.'''
-#     if len(fpr_list) != len(tpr_list) != len(aurocs) != len(titles):
-#         raise ValueError('All input lists must have the same length.')
-#     fpr_list,tpr_list,titles,aurocs = argsort_by(aurocs,  fpr_list, tpr_list, titles,aurocs, descending=True)
-    
-#     plt.figure(figsize=(8, 6))
-#     for i in range(len(fpr_list)):
-#         plt.plot(fpr_list[i], tpr_list[i], lw=2,label=f'{titles[i]} (AUC = {aurocs[i]:.4f})')
-    
-#     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
-#     plt.xlabel('False positive rate', fontsize=14)
-#     plt.xticks(fontsize=12)
-#     plt.ylabel('True positive rate', fontsize=14)
-#     plt.yticks(fontsize=12)
-#     plt.title('Receiver Operating Characteristic (ROC) Curve')
-#     plt.legend(loc='lower right',fontsize=11)
-#     plt.grid(True)
-    
-#     if not "AUROC" in general_title:
-#         general_title = general_title + "_AUROC"
-#     plt.tight_layout()  # Adjust layout to minimize whitespace
-#     plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
-#     plt.close()  # Close the figure to free memory
-
-def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title, ax=None, ax_title=None):
-    '''This function plots the ROC curve for 1 or more models.
     Args:
-    1. ax: Matplotlib axis object to plot on.
-    2. fpr_list: A list of false positive rates for each model.
-    3. tpr_list: A list of true positive rates for each model.
-    4. aurocs: A list of AUROC values for each model.
-    5. titles: A list of titles for each model.
-    ----------
-    Displays the ROC curve.'''
+        fpr_list (list): A list of false positive rates for each model.
+        tpr_list (list): A list of true positive rates for each model.
+        aurocs (list): A list of AUROC values for each model.
+        model_names (list): A list of model names.
+        output_path (str): The path to save the plot.
+        general_title (str): The general title for the plot.
+        ax (matplotlib.axes.Axes, optional): The axis to plot on. If None, a new figure is created.
+        ax_title (str, optional): The title for the plot. If None, a default title is used.
+        information (dict, optional): A dictionary of additional information to display on the plot.
+    """
     if len(fpr_list) != len(tpr_list) != len(aurocs) != len(model_names):
         raise ValueError('All input lists must have the same length.')
     
@@ -170,6 +102,9 @@ def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title, 
         ax.plot(fpr_list[i], tpr_list[i], lw=2, label=f'{model_names[i]} (AUC = {aurocs[i]:.4f})')
     
     ax.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
+    if information:
+        label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
+        ax.plot([], [], ' ', label=label_text) # Invisible line with empty style
     ax.set_xlabel('False positive rate', fontsize=14)
     ax.set_ylabel('True positive rate', fontsize=14)
     ax.set_title(ax_title)
@@ -185,17 +120,24 @@ def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title, 
 
 
 def plot_pr(recall_list, precision_list, auprcs, model_names, output_path, general_title,
-            ax=None, ax_title=None):
-    '''This function plots the Precision-Recall curve for 1 or more models.
+            ax=None, ax_title=None,information=None):
+    """
+    Plots the Precision-Recall curve for 1 or more models.
+    
     Args:
-    1. recall_list: A list of recall values for each model.
-    2. precision_list: A list of precision values for each model.
-    3. auprcs: A list of AUPRC values for each model with base line value.
-    4. titles: A list of titles for each model.
-    5. output_path: A string representing the output path for saving the plot.
-    6. general_title: A string representing the general title for the plot.
+        recall_list (list): A list of recall values for each model.
+        precision_list (list): A list of precision values for each model.
+        auprcs (list): A list of AUPRC values for each model.
+        model_names (list): A list of model names.
+        output_path (str): The path to save the plot.
+        general_title (str): The general title for the plot.
+        ax (matplotlib.axes.Axes, optional): The axis to plot on. If None, a new figure is created.
+        ax_title (str, optional): The title for the plot. If None, a default title is used.
+        information (dict, optional): A dictionary of additional information to display on the plot.
+    
     ----------
-    Show the figure and saves it.'''
+    Show the figure and saves it.
+    """
     if len(recall_list) != len(precision_list) != len(auprcs) != len(model_names):
         raise ValueError('All input lists must have the same length.')
     auprcs_ = [auprc[0] for auprc in auprcs]
@@ -211,6 +153,9 @@ def plot_pr(recall_list, precision_list, auprcs, model_names, output_path, gener
     for i in range(len(recall_list)):
         ax.plot(recall_list[i], precision_list[i], lw=2,label=f'{model_names[i]} (AUC = {auprcs[i][0]:.3f})')
     ax.plot([], [], ' ', label=f'Baseline = {auprcs[0][1]:.5f}')  # Empty plot for baseline legend entry
+    if information:
+        label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
+        ax.plot([], [], ' ', label=label_text)  # Invisible line with empty style
     ax.set_xlabel('Recall', fontsize=14)
     ax.set_ylabel('Precision', fontsize=14)
     
@@ -680,7 +625,11 @@ def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,o
     plt.savefig(output_path)
 
 def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, 
-                                       title, y_label, path,partition_information= None ,asecnding = False, fmt='.3f'):
+                                       title, y_label, path,partition_information= None ,asecnding = False, fmt='.3f', 
+                                       only_seq = 'Only-seq'):
+    """
+    Plots a horizontal bar plot with mean and standard deviation values.
+    """
     plt.clf()
     # Sort indices based on mean values
     sorted_indices = np.argsort(mean_values)
@@ -711,10 +660,10 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     min_x = min(mean_values_sorted) - 3 * std_gap if min(mean_values_sorted) > 0 else 0
     max_x = max(mean_values_sorted) + 2 * std_gap
     # Add p-value annotations
-    if p_values: # not empty
+    if len(p_values) > 0: # not empty
         for i, bar in enumerate(bars):
             model = x_values_sorted[i]
-            if model == "Only-seq":
+            if model == only_seq:
                 plt.text((bar.get_width() - 2*std_sorted[i])  , bar.get_y() + (width/2), f'{mean_values_sorted[i]:{fmt}}', va='center', fontsize=10, color='white')
                 continue
             else :
@@ -773,35 +722,3 @@ def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_value
     plt.savefig(path,dpi=300)
     plt.close()
 
-if __name__ == "__main__":
-#     #file_manager = File_management("pos","neg","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/Chromstate","/home/alon/masterfiles/pythonscripts/Changeseq/Epigenetics/bigwig")
-#     #run_pos_neg_profiles(data="/home/alon/masterfiles/pythonscripts/Changeseq/merged_csgs_withEpigenetic.csv",file_manager=file_manager)
-#     #draw_averages_epigenetics()
-#     #draw_histogram_bigwig(file_manager)
-#     import numpy as np
-    # scores = np.genfromtxt("/localdata/alon/ML_results/Change-seq/vivo-vitro/Change_seq/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi/ensemble_1.csv", delimiter=',')
-    # y_auroc = scores[2:,0]
-    # y_auprc = scores[2:,1]
-    # y_nrank = scores[2:,2]
-    # x = np.arange(2,51)
-    # output_ath = "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/ensembles/change_seq"
-    # plot_ensemeble_preformance(y_auroc,x,"auroc by models in ensembel","Auroc",output_ath)
-    # plot_ensemeble_preformance(y_auprc,x,"auprc by models in ensembel","Auprc",output_ath)
-    # plot_ensemeble_preformance(y_nrank,x,"nrank by models in ensembel","N-rank",output_ath)
-    pass
-    # list_arg = [0.3, 0.7, 0.1, 0.5]  # The list by which to sort
-    # from sklearn.metrics import roc_curve  
-    # fprs = []
-    # tprs =[]
-    # for i in range(4):
-    #     tpr,fpr,_ = roc_curve([0,1,1,0],[0.1,0.2,0.3,0.4])
-    #     tprs.append(tpr)
-    #     fprs.append(fpr)
-    # list1 = ['a', 'b', 'c', 'd']  # Example list 1
-
-    # list2 = [[1,2,3], np.array(2), np.array(3),np.array(4) ]  # Example list 2
-    # list3 = [10, 20, 30, 40]  # Example list 3
-    # titles = ['Title1', 'Title2', 'Title3', 'Title4']  # Another list to sort by the same indices
-    
-    # # Call the function to sort based on `argsort_by`
-    # list_arg, fprs,tprs, sorted_list3, sorted_titles = argsort_by(list_arg,list_arg, fprs, tprs, list3, titles, descending=True)

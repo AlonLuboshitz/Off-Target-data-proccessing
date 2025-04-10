@@ -69,6 +69,26 @@ def find_target_folders(root_dir, target_subdirs):
             target_folders.append(current_dir)
     return target_folders
 
+def find_target_files(root_dir, target_file):
+    """
+    Find paths where file/s with the target name are located.
+    Returns all the paths that contain that file/s from the given root dir.
+    
+    Args:
+        root_dir (str): Path to the root directory to search in.
+        target_file (list): list of files to look for.
+    Returns:
+        list: List of paths where all target files are found.
+    """
+    if not isinstance(target_file, list):
+        target_file = [target_file]
+    target_folders = []
+    for current_dir, dirs, files in os.walk(root_dir):
+        if all(filename in files for filename in target_file):
+            target_folders.append(current_dir)
+    return target_folders
+
+
 def extract_ensmbel_combi_inner_paths(base_path):
     '''This function will iterate the base path:
     Base path -> partitions -> inner folders (number of ensmbels) - > Combi
