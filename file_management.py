@@ -23,7 +23,7 @@ import pyBigWig
 from utilities import validate_non_negative_int
 from k_groups_utilities import create_guides_list
 from file_utilities import create_paths, get_ending
-#import pybedtools
+import pybedtools
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
@@ -61,7 +61,7 @@ class File_management:
         return self.plots_path
 
     def get_epigenetics_folder(self):
-        return self.epigenetics_folder_path
+        return self.bed_folder_path
     def get_bigwig_folder(self):
         return self.bigwig_folder_path
     def get_number_of_bigiwig(self):
@@ -141,11 +141,15 @@ class File_management:
     def set_bigwig_folder_path(self, bigwig_folder_path):
         self.validate_path_exsits(bigwig_folder_path)
         self.bigwig_folder_path = bigwig_folder_path
-  
+    
+    def set_bed_folder_path(self, bed_folder_path):
+        self.validate_path_exsits(bed_folder_path)
+        self.bed_folder_path = bed_folder_path
+
     def set_epigenetic_paths(self, epigenetics_bed, bigwig):
         self.validate_path_exsits(epigenetics_bed)
         self.validate_path_exsits(bigwig)
-        self.epigenetics_folder_path = epigenetics_bed
+        self.bed_folder_path = epigenetics_bed
         self.bigwig_folder_path = bigwig
         #self.create_bigwig_files_objects()
         #self.set_global_bw_max()
@@ -473,16 +477,16 @@ class File_management:
                 print(e)
         self.bigwig_amount = len(self.bigwig_files) # set amount
         
-    # def create_bed_files_objects(self):
-    #     self.bed_files = []
-    #     for path in create_paths(self.epigenetics_folder_path):
-    #         name = get_ending(path) # retain the name of the file (includes the marker)
-    #         try:
-    #             name_object_tpl = (name,pybedtools.BedTool(path))
-    #             self.bed_files.append(name_object_tpl)
-    #         except Exception as e:
-    #             print(e)
-    #     self.bed_files_amount = len(self.bed_files) # set amount
+    def create_bed_files_objects(self):
+        self.bed_files = []
+        for path in create_paths(self.bed_folder_path):
+            name = get_ending(path) # retain the name of the file (includes the marker)
+            try:
+                name_object_tpl = (name,pybedtools.BedTool(path))
+                self.bed_files.append(name_object_tpl)
+            except Exception as e:
+                print(e)
+        self.bed_files_amount = len(self.bed_files) # set amount
     '''Function to close all bigwig objects'''
     def close_big_wig(self,new_bw_object_list):
         if self.bigwig_files: # not empty
@@ -494,9 +498,9 @@ class File_management:
                         file_object.close()
                     except Exception as e:
                         print(e)
-    # def close_bed_files(self):
-    #     if self.bed_files:
-    #         pybedtools.cleanup(remove_all=True)
+    def close_bed_files(self):
+        if self.bed_files:
+            pybedtools.cleanup(remove_all=True)
     def set_global_bw_max(self):
         self.glb_max_dict = {}
         for bw_name,bw_file in self.bigwig_files:
@@ -557,8 +561,8 @@ class File_management:
             raise Exception("Models path not set")
     '''dtor'''
     def __del__(self):
-        #self.close_big_wig([])
-        #self.close_bed_files()
+        self.close_big_wig([])
+        self.close_bed_files()
         # call more closing
         pass
 

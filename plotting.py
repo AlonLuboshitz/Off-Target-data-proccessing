@@ -407,58 +407,79 @@ def plot_subplots(data, plot_types, titles,  additional_data=None,x_label=None, 
     plt.close()
     
 
-def plot_binary_feature_heatmap(data_paths, plots_paths):
-   
-    # Get all data tables paths
-    all_tables = create_paths(data_paths)
-    all_tables = [(pd.read_csv(table), table.split(".csv")[0].split("/")[-1]) for table in all_tables] 
-    all_tables.sort(key=lambda x: x[1])    
-    # Number of tables
-    num_tables = len(all_tables)
+def plot_binary_feature_heatmap(df, axes=None, title=None, plots_path = None):
+    
+    enrichment_ratio = df.loc[['positive_enrichment','negative_enrichment']].copy()
+    geo_fold_df = df.loc[['geo_fold_pos', 'geo_fold_negative']].copy()
 
-    # Determine grid dimensions for 2 rows
-    num_rows = 2
-    num_cols = int(np.ceil(num_tables / num_rows))
+    enrichment_ratio.index = ['Positive enrichment', 'Negative enrichment']
+    geo_fold_df.index = ['Positive geo_fold', 'Negative geo_fold']
 
-    # Create a grid of subplots
-    fig, axes = plt.subplots(num_rows, num_cols, figsize=(6 * num_cols, 8 * num_rows), sharey=True)
-    axes = axes.flatten()  # Flatten for easy indexing
+    columns = df.columns
+    annotations = []
+    for col in columns:
+        p = df.loc['p_val', col]
+        pos = int(df.loc['positive_peaks', col])
+        neg = int(df.loc['negative_peaks', col])
+        ann = f"p={p:.2e}\n+{pos}\n-{neg}"
+        annotations.append(ann)
+    one_pic = False
+    if axes is None:
+        fig, axes = plt.subplots(2, 1, figsize=(14, 8), gridspec_kw={'height_ratios': [1, 2]})
+        one_pic = True
+    # First heatmap: enrichment
+    sns.heatmap(
+        enrichment_ratio,
+        ax=axes[0],
+        cmap='coolwarm',
+        annot=True,
+        fmt=".3f",
+        cbar=True,
+        xticklabels=annotations
+    )
+    axes[0].set_ylabel("")
+    axes[0].set_title("Positive & Negative Enrichment")
 
-    # Iterate over tables and axes
-    for idx, (table_tuple, ax) in enumerate(zip(all_tables, axes)):
-        # Extract `geo_fold_pos` and `geo_fold_negative`
-        table, table_name = table_tuple
-        table.set_index("Index", inplace=True)
-        heatmap_data = table.loc[["geo_fold_pos", "geo_fold_negative"]]
+    # Second heatmap: geo_fold
+    sns.heatmap(
+        geo_fold_df,
+        ax=axes[1],
+        cmap='vlag',
+        annot=True,
+        fmt=".3f",
+        cbar=True
+    )
+    axes[1].set_ylabel("")
+    axes[1].set_title("Geometric Fold Change (Positive and Negative)")
+    if title:
+        fig.suptitle(title, fontsize=14)
+    
+    if one_pic:
+        fig.tight_layout()
+        if plots_path:
+            fig.savefig(os.path.join(plots_path, title + ".png"), dpi=300)
+        else:
+            fig.savefig(title + ".png", dpi=300)
+        plt.close()
 
-        # Transpose the data for heatmap
-        heatmap_data = heatmap_data.T
+def plot_multiple_binary_feature_heatmaps(df_list, titles=None, save_path=None):
+    num = len(df_list)
+    fig, axes = plt.subplots(2, num, figsize=(6 * num, 10), gridspec_kw={'height_ratios': [1, 2]})
 
-        # Create heatmap rotated for readability
-        sns.heatmap(
-            heatmap_data,
-            ax=ax,
-            annot=True,
-            fmt=".2f",
-            cmap="coolwarm",
-            cbar=True,
-            xticklabels=heatmap_data.columns,
-            yticklabels=heatmap_data.index,
-        )
-        ax.set_title(f"{table_name}", fontsize=14)
-        ax.set_ylabel("Features", fontsize=12)
-        ax.tick_params(axis="x", rotation=90)  # Rotate x-axis labels for better readability
+    # If only one DataFrame, axes will be 1D instead of 2D
+    if num == 1:
+        axes = np.expand_dims(axes, axis=1)
 
-    # Turn off any unused axes
-    for ax in axes[num_tables:]:
-        ax.axis('off')
+    for i, df in enumerate(df_list):
+        plot_binary_feature_heatmap(df, axes[:, i], title=titles[i] if titles else None)
 
-    # Set common ylabel
-
-    # Save the plot before calling plt.show()
-    output_file = plots_paths + "binary_feature_heatmap.png"
     plt.tight_layout()
-    plt.savefig(output_file)
+    if save_path:
+        plot_name = os.path.join(save_path, "binary_feature_heatmaps.png")
+        plt.savefig(plot_name, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
 
 
 

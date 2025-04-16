@@ -2,7 +2,7 @@
 This module contain helper function and utilities for model and data interpertability.
 '''
 import numpy as np
-from features_engineering import extract_features, generate_features_and_labels, synthesize_all_mismatch_off_targets, get_epi_data_bw
+from features_engineering import extract_features, generate_features_and_labels, synthesize_all_mismatch_off_targets
 from features_and_model_utilities import get_feature_name
 
 from file_utilities import create_paths, create_folder
@@ -552,73 +552,8 @@ def load_importance_values(importance_path, guide_list, mismatch_limit):
                     error_f.write(f"Error: {e} - {temp_output}\n")
     return importance_dict
 
-def bla():
 
-    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_withEpigenetic.csv")
-    file_manager = File_management("pos","neg","bed","/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/bigwig")
-    label_list = [("GUIDE-seq",1),("CHANGE-seq",0)]
-    
-    guide_change_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager,window_size=20000)
-    label_list = [("CASOFINDER",0)]
-    data = pd.read_csv("/home/dsi/lubosha/Off-Target-data-proccessing/merged_csgs_casofinder_withEpigenetic.csv")
-    casofinder_dict = get_epigentics_around_center(data,on_column="Label",label_value_list=label_list,center_value_column="chromStart",chrom_column="chrom",file_manager=file_manager)
-    merged_dict = {key: guide_change_dict[key] + casofinder_dict[key] for key in guide_change_dict.keys() & casofinder_dict.keys()}
 
-def get_sampled_coords(data, mismatch_lim = 6, mismatch_column = None, 
-                       chrom_column = None, center_position_column = None, sample_size = 1000):
-    """
-    Returns a dictionary of sampled coordinates, chromosomes and center positions for each mismatch number.
-    {missmatch_number: ([chromosomes], [center_positions])}
 
-    Args:
-        data (pd.DataFrame): Data frame with the data.
-        mismatch_lim (int): Maximum number of mismatches.
-        mismatch_column (str): Column name for the mismatch number.
-        chrom_column (str): Column name for the chromosome.
-        center_position_column (str): Column name for the center position.
-        sample_size (int): Number of samples to return.
-    Returns:
-        dict: Dictionary of sampled coordinates, chromosomes and center positions for each mismatch number.
-    """
-    mismatch_groups = data.groupby(mismatch_column)
-    sampled_coords = {}
-    for mismatch_num, group in mismatch_groups:
-        if mismatch_num > mismatch_lim or mismatch_num==0:
-            continue
-        sampled_group = group.sample(n=min(sample_size, len(group)), random_state=42)
-        sampled_coords[mismatch_num] = (sampled_group[chrom_column].tolist(), sampled_group[center_position_column].tolist())
-    return sampled_coords
 
-def get_basepair_epigenetics_around_center(chrom_list, center_position_list,
-                                            bigiwg_file, window_size, if_average=True):
-    """
-    Returns the epigenetic base pair values for given chromosomes and positions.
-    
-    Args:
-        chrom_list (list): List of chromosomes names.
-        center_position_list (list): List of center positions.
-        bigiwg_file (pybigwig object): bigwig object.
-        window_size (int): Window size for averaging.
-        if_average (bool defualt - True): If True, average the values over the window size.
-    
-    Returns:
-        np.array: Epigenetic values for the given chromosomes and positions.
-    """
-    if len(chrom_list) != len(center_position_list):
-        raise ValueError("Chromosome and center position lists must have the same length.")
-    epigenetic_values = np.zeros((len(chrom_list), window_size),dtype=np.float32)
-    for i, (chrom, center_position) in enumerate(zip(chrom_list, center_position_list)):
-        epigenetic_values[i] = get_epi_data_bw(epigenetic_bw_file=bigiwg_file,chrom=chrom,center_loc=center_position,window_size=window_size,max_type=1)
-    if if_average:
-        epigenetic_values = np.mean(epigenetic_values, axis=0)
-    return epigenetic_values
-
-def get_epigentics_around_center(merged_data,on_column,label_value_list,center_value_column,chrom_column,file_manager,window_size):
-    epigenetics_object = file_manager.get_bigwig_files()
-    epi_dict = {}
-    for epigeneitc_mark, epigenetic_file in epigenetics_object: # for each epi mark create a list with tuples - (name, average values)
-        epi_dict[epigeneitc_mark] = []
-        for name,label_value in label_value_list: # for each data points get averages value
-            averages = average_epi_around_center(merged_data=merged_data,on_column=on_column,label_value=label_value,center_value_column=center_value_column,chrom_column=chrom_column,epigenetic_file=epigenetic_file,window_size=window_size)
-            epi_dict[epigeneitc_mark].append((name,averages))
-    return epi_dict
+ 

@@ -264,18 +264,35 @@ def run_correlation(x_data,y_data,x_name,y_name,cor_name,data,columns_info):
     returned_params["P-val"] = p_value
     return returned_params
 
-def hypergeometric_test(offtarget_data,feature,label_column,disterbution_stats = None, if_enrichment= False):
-    '''This function calculates the hyper geo test for given data set and feature.
-    How enrichmet the feature is in the data set. Args:
-    1. offtarget data:
-    2. feature 
-    Disterbution_stats = (active,inactive,sample_size,succesees_in_samples)
+def hypergeometric_test(offtarget_data, feature, label_column, 
+                        disterbution_stats = None, if_enrichment= False):
+    """
+    
+    Calculate the hypergeometrics statistic test for given data set and feature.
+    Determine how much the feature is enriched given a label.
+
     Population - off targets - active + in acttive
     Succses - active of target
-    Sample size - chromatin info intergration amount
-    succses in sample - active off target via sample size
-returns p-val,fold enrichment
- '''
+    Sample size - feature abudance in the population
+    Succses in sample - active off target with the feature
+
+    Args:
+        offtarget_data (pd.DataFrame): DataFrame containing the off-target data.
+        feature (str): Name of the feature column to analyze.
+        label_column (str): Name of the label column to analyze.
+        disterbution_stats (tuple, optional): Pre-computed distribution statistics. Defaults to None.
+            (active, inactive, sample_size, succesees_in_samples)
+        if_enrichment (bool, optional): If True, calculate fold enrichment. Defaults to False.
+    
+    Returns:
+        p-value (float) :  for the hypergeometric test.
+        
+        If_enrichment is True, return a 3 (tuple):
+        (p_value, positive_fold_enrichment, failure_fold_enrichment).
+
+        positive_fold_enrichment (float): successes_in_sample / expected_successes (expected_successes = (active / population_size) * sample_size)
+        failure_fold_enrichment (float): failures_in_sample / expected_failures (expected_failures = (inactive/population_size) * sample_size)
+"""
     if disterbution_stats is None:
         # Get active and inactive off targets
         active,inactive = extract_amount_of_pos_neg(offtarget_data,label=label_column)
