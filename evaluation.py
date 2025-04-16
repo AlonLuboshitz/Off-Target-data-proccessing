@@ -104,20 +104,14 @@ class evaluation():
             feature_results = get_k_groups_results(feature_partitions, self.task, self.k_group_columns)
             features_results[feature] = feature_results
         self.k_group_columns.remove('partition')
-        averaged_results = averaged_k_cross_results(features_results, self.k_group_columns,error_file)
-        p_vals = get_p_val_k_cross(features_results,'Only-sequence',self.k_group_columns,self.k_groups_alternatives)
         all_partitions_path = create_folder(plots_path, "All_partitions")
-        if save_results:
-            averaged_results.to_csv(os.path.join(all_partitions_path, "averaged_results.csv"), index=False)
-            p_vals.to_csv(os.path.join(all_partitions_path, "p_vals.csv"), index=False)
-        features = list(averaged_results.index)
-        for col in self.k_group_columns:
-            mean = averaged_results[f'{col}_mean'].values
-            std = averaged_results[f'{col}_std'].values
-            p_val = p_vals[col]
-            plot_ensemble_performance_mean_std(mean_values=mean,std_values=std,x_values=features,
-                                               p_values=p_val,title=col,y_label=col,
-                                               path=all_partitions_path,only_seq='Only-sequence')
+        # Average
+        # compute_average_k_cross_results(features_results, self.k_group_columns, self.k_groups_alternatives,
+        #                                 all_partitions_path,error_file=error_file,save_results=save_results)
+        # Ratio
+        compute_average_k_cross_ratios(features_results, self.k_group_columns, self.k_groups_alternatives,
+                                        all_partitions_path,error_file=error_file,save_results=save_results)    
+        
         
         
     

@@ -6,7 +6,8 @@ from sklearn.metrics import roc_curve, auc, average_precision_score, precision_r
 from scipy.stats import pearsonr, spearmanr,wilcoxon
 from multiprocessing import Pool
 import os
-from file_utilities import create_paths
+from file_utilities import create_paths, create_folder
+from plotting import plot_ensemble_performance_mean_std
 ##NOTE: MOVE ML STATISTICS OVER HERE
 
 ######## Generall evaluations ##########
@@ -261,6 +262,35 @@ def averaged_k_cross_results(feature_dict, k_group_columns, error_file):
             summerized_data_frame.loc[feature, f'{col}_std'] = std
     return summerized_data_frame
 
+def compare_by_ratio(feature_dict, feature_to_compare_to, k_group_columns):
+    """
+    Given a feature dict:{feature_name: results dataframe} and a feature to compare to,
+    calculate the ratio of each metric in the k_group_columns compared to the feature_to_compare_to.
+
+    Args:
+        feature_dict (dict): Dictionary containing the features data.
+        feature_to_compare_to (str): Name of the feature to compare to.
+        k_group_columns (list): List of columns to summarize.
+    Returns:
+        pd.DataFrame: Data frame with the ratios.
+    """
+    ratios = pd.DataFrame(columns = k_group_columns, index = feature_dict.keys())
+    compare_to_data = feature_dict[feature_to_compare_to]
+    number_of_partitions = len(compare_to_data)
+    ones_array = np.ones(number_of_partitions,dtype=np.int8)
+    ratios.loc[feature_to_compare_to] = {col: ones_array for col in k_group_columns}
+    for feature, results in feature_dict.items():
+        if feature == feature_to_compare_to:
+            continue
+        for col in k_group_columns:
+            try:
+                # Calculate the ratio of each entery and than the mean
+                ratio = results[col].values / compare_to_data[col].values
+                ratios.loc[feature, col] = ratio
+            except ValueError as e:
+                print(f"Error calculating ratio for {feature} and {feature_to_compare_to} on column {col}: {e}")
+    return ratios
+
 def get_p_val_k_cross(feature_dict, feature_to_compare_to, k_group_columns, alternative_dict = None):
     """
     Given a feature dict:{feature_name: results dataframe} and a feature to compare to,
@@ -274,6 +304,9 @@ def get_p_val_k_cross(feature_dict, feature_to_compare_to, k_group_columns, alte
     Returns:
         pd.DataFrame: Data frame with the p-values.
     """
+
+    if isinstance(feature_dict, pd.DataFrame):
+        feature_dict = feature_dict.to_dict(orient='index')
     p_values = pd.DataFrame(columns = k_group_columns, index = feature_dict.keys())
     for feature, results in feature_dict.items():
         if feature == feature_to_compare_to:
@@ -284,11 +317,66 @@ def get_p_val_k_cross(feature_dict, feature_to_compare_to, k_group_columns, alte
             else:
                 alternative = "two-sided"
             try:
-                stat, p_value = wilcoxon(results[col].values, feature_dict[feature_to_compare_to][col].values,alternative=alternative)
+                stat, p_value = wilcoxon(results[col], feature_dict[feature_to_compare_to][col],alternative=alternative)
                 p_values.loc[feature, col] = p_value
             except ValueError as e:
                 print(f"Error calculating p-value for {feature} and {feature_to_compare_to} on column {col}: {e}")
     return p_values  
+
+def compute_average_k_cross_results(features_results, k_group_columns,
+                                     k_groups_alternatives, all_partitions_path, error_file, save_results = True):
+    """
+    Given a dictionary of {feature_name: results dataframe} calculate the average results of each column in the data frame.
+    
+    Args:
+        features_results (dict): Dictionary containing the features data.
+        k_group_columns (list): List of columns to summarize.
+        k_groups_alternatives (dict): Dictionary containing the alternative hypothesis for each column.
+        all_partitions_path (str): Path to save the results.
+        error_file (str): Path to the error file to log issues.
+    """
+    features = list(features_results.keys())
+    averaged_results = averaged_k_cross_results(features_results, k_group_columns,error_file)
+    p_vals = get_p_val_k_cross(features_results,'Only-sequence',k_group_columns,k_groups_alternatives)
+    average_path = create_folder(all_partitions_path, "averaged_results")
+    
+
+    for col in k_group_columns:
+        mean = averaged_results[f'{col}_mean'].values
+        std = averaged_results[f'{col}_std'].values
+        p_val = p_vals[col]
+        plot_ensemble_performance_mean_std(mean_values=mean,std_values=std,x_values=features,
+                                            p_values=p_val,title=col,y_label=col,
+                                            path=average_path,only_seq='Only-sequence')
+    if save_results:
+        averaged_results.to_csv(os.path.join(average_path, "averaged_results.csv"))
+        p_vals.to_csv(os.path.join(average_path, "p_vals.csv"))
+        print(f"Results and p vals are saved in {average_path}")
+
+def compute_average_k_cross_ratios(features_results, k_group_columns,
+                                     k_groups_alternatives, all_partitions_path, error_file, save_results = True):
+    """
+    Given a dictionary of {feature_name: results dataframe} calculate the average ratios of each column in the data frame
+    compared to the 'Only-sequence' feature."""
+    features = list(features_results.keys())
+    ratio_results = compare_by_ratio(features_results,'Only-sequence',k_group_columns)
+    ratio_columns = ['auroc','auprc']
+    ratio_results = ratio_results[ratio_columns]
+    ratio_p_vals = get_p_val_k_cross(ratio_results,'Only-sequence',ratio_columns,k_groups_alternatives)
+    ratios_path = create_folder(all_partitions_path, "ratios")
+    for col in ratio_columns:
+        all_features_values = np.stack(ratio_results[col].values)
+        mean = np.mean(all_features_values,axis=1)
+        std = np.std(all_features_values,axis=1)
+        p_val = ratio_p_vals[col]
+        
+        plot_ensemble_performance_mean_std(mean_values=mean,std_values=std,x_values=features,
+                                            p_values=p_val,title=col,y_label=col,
+                                            path=ratios_path,only_seq='Only-sequence')
+    if save_results:
+        ratio_results.to_csv(os.path.join(ratios_path, "ratios.csv"))
+        ratio_p_vals.to_csv(os.path.join(ratios_path, "p_vals.csv"))
+        print(f"Ratios and p vals are saved in {ratios_path}")
 def merge_by_mismatches(guides_dict, error_file):
     """
     Given a dicionary of {mismatch: {guide: {feature: (y_scores, y_test, indexes)}}}

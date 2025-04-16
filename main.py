@@ -503,7 +503,7 @@ def evaluate_k_groups():
     ml_results_path = file_manager.get_ml_results_path()
     plots_path = file_manager.get_plots_path()
     evaluation_obj = evaluation(ARGS.task)
-    evaluation_obj.evaluate_k_cross_results(ml_results_path,plots_path,save_results=True)
+    evaluation_obj.evaluate_k_cross_results(ml_results_path,plots_path,save_results=True, evaluate_single_partition=False)
 
 def run_leave_one_out(train = False, test = False):
     pass
