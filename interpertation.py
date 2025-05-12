@@ -7,7 +7,7 @@ import os
 import shap
 from file_utilities import create_folder
 from features_and_model_utilities import get_feature_name
-from plotting import plot_subplots
+from plotting import plot_subplots, sub_plot_shap_beeswarn
 from train_and_test_utilities import keep_intersect_guides_indices
 from interpertation_utilities import *
 from scipy.stats import pearsonr
@@ -15,12 +15,26 @@ from plotting_utilities import return_colormap
 
 
 import tensorflow as tf
-
+tf.experimental.numpy.experimental_enable_numpy_behavior()
 ##################### MODEL INTERPERTABILITY #####################
 
 ##################### SHAP #####################
+def shap_partition():
+    X_sub = X_train[:, 600:608]
+    X_test_sub = X_test[:, 600:608]
 
-def get_shaply_values(model, x_background, explainer_type, x_selected = None):
+    # Compute clustering on these 8 features
+    link = linkage(X_sub.T, method="ward", metric="correlation")
+
+    # Masker and explainer only for last 8 features
+    masker = shap.maskers.Partition(X_sub, clustering=link)
+    explainer = shap.Explainer(lambda x: model.predict(np.hstack([X_test[:, :600], x])), masker)
+
+    # Explain
+    shap_values = explainer(X_test_sub)
+    shap.plots.waterfall(shap_values[0])
+
+def get_shaply_values(model, x_background, explainer_type, x_selected = None, only_seq = False):
     """
     Computes SHAP values for the given model using the specified explainer type.
     
@@ -34,25 +48,51 @@ def get_shaply_values(model, x_background, explainer_type, x_selected = None):
         shap_values (list of numpy arrays): Computed SHAP values for each output class (or regression target).
     """
     
-    
-    if explainer_type == 'deep':
-        # if isinstance(x_background,list):
-        #     x_background = [x[:100] for x in x_background if x.shape[0] > 100]
-        # elif x_background.shape[0] > 100:
-        #     x_background = x_background[:100]
-        #explainer = shap.Explainer(model, x_background)
-        explainer = shap.explainers.Permutation(model,x_background ,max_evals = 15000)
-        #explainer = shap.DeepExplainer(model, x_background)
+    class SHAPModelWrapper(tf.keras.Model):
+        def __init__(self, model, encoded_length=600):
+            super().__init__()
+            self.model = model
+            self.encoded_length = encoded_length
+            self.inputs = model.inputs
+            self.outputs = model.outputs
+        def call(self, X):
+            if isinstance(X, list) and len(X) == 1:
+                X = X[0]
+            if not only_seq:
+                X = extract_features(X, encoded_length=self.encoded_length)
+
+            return self.model(X)  # Use this, NOT .predict()
+
+        def predict(self, X, **kwargs):
+            return self.call(X).numpy()
+    def model_wrapper(X):
+        num_of_points = len(X)
+        if not only_seq:
+                
+            X = extract_features(X, encoded_length= 600)
+        if isinstance(model,list):
+            predictions = np.zeros((len(model),num_of_points))
+            for index,model_ in enumerate(model):
+                predictions[index] = model_.predict(X).ravel()
+            predictions = predictions.mean(axis=0)
+            return predictions 
+        return model.predict(X)
+    if explainer_type == 'deep': # doesnt work
+        deep_shap = SHAPModelWrapper(model=model,encoded_length=600)
+        explainer = shap.DeepExplainer(deep_shap, x_background)
     elif explainer_type == 'gradient':
         explainer = shap.GradientExplainer(model, x_background)
     elif explainer_type == 'kernel':
-        explainer = shap.KernelExplainer(model.predict, x_background)
+        x_background = np.random.permutation(x_background)
+        x_background = x_background[:10000]
+        explainer = shap.KernelExplainer(model_wrapper, x_background)
     else:
-        print('using default explainer: shap.Explainer')
-        explainer = shap.Explainer(model, x_background)
+        print('using permutation explainer')
+        explainer = shap.PermutationExplainer(model_wrapper, x_background, max_evals = 1217,max_samples=1000) # 608 *2 +1
     if x_selected is None:
         x_selected = x_background
     shap_values = explainer(x_selected)
+    
     return shap_values
 
 def transform_to_heatmap(shap_values, seqeunce_length, bits_per_base, additional_features_length = 0):
@@ -65,7 +105,9 @@ def transform_to_heatmap(shap_values, seqeunce_length, bits_per_base, additional
     max_shap = shap_values.max()
     epigenetics_values = None
     if additional_features_length > 0: # split the shap values to sequence and epigenetics
-        sequence_values = shap_values[:,seqeunce_length * bits_per_base]
+        if shap_values.ndim == 1:
+            shap_values = shap_values.reshape(1, -1)
+        sequence_values = shap_values[:,:seqeunce_length * bits_per_base]
         epigenetics_values = shap_values[:,seqeunce_length * bits_per_base:]
     else: sequence_values = shap_values
     if sequence_values.ndim == 1:
@@ -76,9 +118,10 @@ def transform_to_heatmap(shap_values, seqeunce_length, bits_per_base, additional
         raise ValueError("SHAP values should be 1D or 2D")
     return sequence_values, epigenetics_values, min_shap, max_shap
 
-def run_shap(model_path,data_path,explainer_type,output_path,
-             num_of_points=None,specific_indices=None, specific_guides=None,
-             only_seq=False, plot_all_guides = True, plot_single_guides = True):
+def run_shap(model_path, background_data_path, explainer_type, output_path, explain_data_path = None,
+             num_of_points=None, specific_indices=None, specific_guides=None,
+             only_seq=False, plot_all_guides = True, plot_single_guides = True, 
+             set_background_from_explain = False):
     '''
     Runs on the data and model given and extract shap values
     Plots the bars, beeswarm and waterfall plots
@@ -93,73 +136,160 @@ def run_shap(model_path,data_path,explainer_type,output_path,
         specific_guides (list, optional): Specific guides to extract from x_background.
         only_seq (bool, optional) defualt True: If True, only the sequence features will be used otherwise split to sequence and epigenetics.
     '''
+    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    
     if not (plot_all_guides or plot_single_guides):
         raise ValueError("At least one of the plot options should be True")
-    models = get_model(model_path,"deep")
+    models,model_path = get_model(model_path,"deep")
     model = models[0]
-    x_background,y,guides,otss_dict = get_data(data_path,only_seq)
+    
+    x_background,y,guides,otss_dict = get_data(background_data_path,features)
+    
+    if explain_data_path:
+        x_explain,y,guides,otss_dict = get_data(explain_data_path,features)
+        if set_background_from_explain:
+            x_background = x_explain
+    else: x_explain = x_background
     if specific_guides is None:
         specific_guides = guides
-    guide_idx = keep_intersect_guides_indices(guides,specific_guides)
+        guide_idx = keep_intersect_guides_indices(guides,specific_guides)
+    
     whole_background = np.concatenate(x_background)
     whole_selected = []
+    additional_features = whole_background.shape[1] - 600 if not only_seq else 0
+    shap_vals = []
+    output_path = create_folder(output_path,'SHAP_values')
+
     for idx in guide_idx:
         sgrna = specific_guides[idx]
-        sg_x_background = x_background[idx]
+        sg_x_background = x_explain[idx]
         sg_y = y[idx]
         sg_otss = otss_dict[sgrna]
-        sg_x_selected, sgrna_otss, additional_features = filter_data_for_interpertation(sg_x_background, sg_y, sg_otss,  only_seq, specific_indices)
+        sg_x_selected, sgrna_otss = filter_data_for_interpertation(sg_x_background, sg_y, sg_otss, number_of_points=num_of_points)
         whole_selected.append(sg_x_selected)
-        # NOTE: Background set is spesific to each gRNA, maybe check for equal background for all guides.
-        if plot_single_guides:
-            temp_output = create_folder(output_path,sgrna)
-            shap_values = get_shaply_values(model, whole_background, explainer_type, sg_x_selected)
-            plot_shap(shap_values, additional_features, sgrna_otss, temp_output)
-    # plot all guides
-    if plot_all_guides:
-        whole_selected = [x[:100] for x in whole_selected] # get first 100 samples
-        whole_selected = np.concatenate(whole_selected)
-        shap_values = get_shaply_values(model, whole_background, explainer_type, whole_selected)
-        temp_output = create_folder(output_path,"All_guides")
-        plot_shap(shap_values, additional_features, None, temp_output)
+        # NOTE: Background set to the whole data
+        print(f'shap vals for {sgrna}')
+        shap_values = get_shaply_values(models, whole_background, explainer_type, sg_x_selected, only_seq=only_seq)
+        shap_vals.append(shap_values)
+        np.save(os.path.join(output_path,f'{sgrna}.npy'), shap_values.values)
+            
+    # all explaination togther:
+    whole_selected = [x[:100] for x in whole_selected] # get first 100 samples
+    whole_selected = np.concatenate(whole_selected)
+    shap_values = get_shaply_values(models, whole_background, explainer_type, whole_selected, only_seq=only_seq)
+    shap_vals.append(shap_values)
+    np.save(os.path.join(output_path,f'all_guides.npy'), shap_values.values)
+    guides.append('All_guides')
+    features = [get_feature_name(feature) for feature in features]
+    #return shap_vals, features, output_path, guides
+    plot_shap_only_epigenetics(shap_vals, output_path = output_path, 
+                               feature_names = features, sgrna_otss= guides)
+
+def plot_shap_only_epigenetics(shap_values, output_path, feature_names, sgrna_otss = None):
+    '''
+    Given a list of shap.explantions, extract the shap values for the epigenetic features and plot them.
+    '''
+    if isinstance(shap_values,list):
+        shap_values = [convert_shap_to_shap_epi(shap_vals,feature_names=feature_names)for shap_vals in shap_values]
+        if not sgrna_otss:
+            sgrna_otss = [f'Guide {i+1}'for i in range(len(shap_values))]
+        sub_plot_shap_beeswarn(shap_values,sgrna_otss,output_path)
+        # Plot box plot, and absmean 
+        
+    # if isinstance(shap_values,shap.Explanation):
+    #     shap_values = shap_values.values
+    # num_of_features = len(feature_names)
+    # if shap_values.ndim == 1:
+    #     shap_values = shap_values.reshape(1, -1) 
+    # epigenetic_values = shap_values[:,-num_of_features:]
+    # np.save(os.path.join(output_path,'epigenetic_vals.npy'),epigenetic_values)
+
+def convert_shap_to_shap_epi(shap_values, feature_names):
+    """
+    Create a shap explanantion object for the epigenetic features from a given shap explantation object.
+    The feature_names should match the order of the feature in the shap object.
+
+    Args:
+
+    Returns:
+
+"""
+    feature_number = len(feature_names)
+    if feature_number > shap_values.values.shape[1]:
+        raise RuntimeError("number of features is bigger than shap values")
+    subset_shap = shap.Explanation(
+    values=shap_values.values[:, -feature_number:],
+    base_values=shap_values.base_values,
+    data=shap_values.data[:, -feature_number:],
+    feature_names=feature_names  # custom names
+)
+    return subset_shap
 
 
-
-def plot_shap(shap_values, additional_features, sgrna_otss, output_path):
-    row_labels, x_ticks = nucleotides_for_heatmap()
     
-    # Plot first 10 samples
-    single_shap_values = shap_values[:10] 
-    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(single_shap_values, 24,25,additional_features)
-    kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
-    plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
-                    y_ticks=row_labels, output_path=output_path, general_title="10-SHAP values all_bg",sgrna_otss=sgrna_otss,**kwargs)
-    # Summarized plot of all samples
-    summarized_shap_values = np.sum(shap_values.values, axis=0)
-    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(summarized_shap_values, 24,25,additional_features)
-    kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
 
-    plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
+def shap_for_epigenetic_only(model_path,data_path,explainer_type,output_path,
+             num_of_points=None,specific_indices=None, specific_guides=None,
+             only_seq=False, plot_all_guides = True, plot_single_guides = True):
+    dis_file = pd.read_csv('/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/Change-seq/Epigenetic_disterbution.csv')
+    features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    column_features = {col: get_feature_name(col) for col in dis_file.columns}
+    epigenetic_disterbution_file = dis_file.rename(columns=column_features)
+    features = [get_feature_name(feature) for feature in features]
+    epi_vector = np.zeros(len(features))
+    for i,feature in enumerate(features):
+        epi_vector[i] = epigenetic_disterbution_file[feature].values[0]     
+
+def plot_shap(shap_values, sgrna_otss, output_path,  number_of_epigenetic_features = 0, epigenetic_features = None,
+              only_epigenetics = False):
+    '''
+    Plot the shap values for sgRNA and off-target sequences and the epignetics.
+    If only epigenetics plot box plots for epigentic for the shap values.
+
+'''
+    if only_epigenetics:
+        plot_shap_only_epigenetics(shap_values,output_path=output_path,feature_names=epigenetic_features)
+        
+        # plot only epigenetic shap values
+    row_labels, x_ticks = nucleotides_for_heatmap()
+    if number_of_epigenetic_features > 0 and len(epigenetic_features) == number_of_epigenetic_features:
+        kwargs = {'additional_vector_y':"Epigenetic\nfeatures",'additional_vector_x':epigenetic_features}
+    # # Plot first 10 samples
+    # single_shap_values = shap_values[:10] 
+    # sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(single_shap_values, 24,25,additional_features)
+    # kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values','additional_vector': epigenetic_shap_values}
+    # plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
+    #                 y_ticks=row_labels, output_path=output_path, general_title="10-SHAP values all_bg",sgrna_otss=sgrna_otss,**kwargs)
+    # Summarized plot of all samples
+    
+    summarized_shap_values = np.sum(shap_values.values, axis=0)
+    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(summarized_shap_values, 24,25,number_of_epigenetic_features)
+    data = [(sequence_shap_values,epigenetic_shap_values)]
+    kwargs.update({'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'})
+
+    plot_subplots(data,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
                     y_ticks=row_labels, output_path=output_path, general_title="Summed-SHAP values all_bg",sgrna_otss=None,**kwargs)
     # Abs mean
     abs_mean_shap_values = np.mean(np.abs(shap_values.values), axis=0)
-    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(abs_mean_shap_values, 24,25,additional_features)
-    kwargs = {'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'}
-    plot_subplots(sequence_shap_values,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
+    sequence_shap_values, epigenetic_shap_values, min_shap,max_shap  = transform_to_heatmap(abs_mean_shap_values, 24,25,number_of_epigenetic_features)
+    data = [(sequence_shap_values,epigenetic_shap_values)]
+    kwargs.update({'vmin': min_shap, 'vmax': max_shap,'cbar': 'SHAP values'})
+    plot_subplots(data,plot_types='heatmap',titles=None, x_label="Position", y_label="Nucleotides",x_ticks=x_ticks,
                         y_ticks=row_labels, output_path=output_path, general_title="AbsMean-SHAP values all_bg",sgrna_otss=None,**kwargs)
 
 def main_shap():
-    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1/model_1.keras"
+    epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1"
     seq_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1/model_1.keras"
     test_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
-    
-    explainer_type = "deep"
+    background_data = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vivo-silico-78_withEpigenetic.csv"
+    explainer_type = ""
     output_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability'
     specific_guides = None
-    number_of_points = 10
-    run_shap(model_path=seq_model_path,data_path=test_data_path,explainer_type=explainer_type,
-             output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=True,plot_all_guides=False)
-
+    number_of_points = 200
+    run_shap(model_path=epi_model_path,background_data_path = background_data,explain_data_path=test_data_path,explainer_type=explainer_type,
+                output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=False,plot_all_guides=False)
+    # shap_for_epigenetic_only(model_path=epi_model_path,data_path=test_data_path,explainer_type=explainer_type,
+    #          output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=False,plot_all_guides=False)
 ##################### Gradient asecnt #####################
 def main_gradient_ascent():
     epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1/model_1.keras"
@@ -579,6 +709,7 @@ def main_epigenetics():
     #seq_path='/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Only_sequence/All_guides/1_ensembels/50_models/ensemble_1'
     all_epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1"
     all_epi_features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    
     all_model_score_path = '/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Change-seq/vivo-silico/Exclude_Refined_TrueOT/on_Refined_TrueOT_Lazzarroto/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/Model_interpertability/Model_scores/Raw_scores'
     h3k27ac_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/H3K27ac/ensemble_1"
     h3k27ac_features = ["H3K27ac_peaks_binary"]
@@ -592,5 +723,5 @@ def main_epigenetics():
                     features=features, save_model_scores=True,use_model_scores=True,
                     epigenetic_disterbution_path=epi_dis_path)
 if __name__ == "__main__":
-    pass
+    main_shap()
     

@@ -57,7 +57,7 @@ def get_model(model_path, model_type, sample = 0):
             pass
     return models, models_path
  
-def get_data(data_path, only_seq):
+def get_data(data_path, features = None):
     '''
     Loads the data from the given path
     Uses generate_features_and_labels function to get x,y,guides, off-targets.
@@ -85,9 +85,7 @@ def get_data(data_path, only_seq):
     "BULGES_COLUMN": "bulges"
 }
     Columns_dict['Y_LABEL_COLUMN'] = Columns_dict['BINARY_LABEL_COLUMN']
-    features = None
-    if not only_seq:
-        features = ["H3K27me3_peaks_binary", "H3K27ac_peaks_binary", "H3K9ac_peaks_binary", "H3K9me3_peaks_binary", "H3K36me3_peaks_binary", "ATAC-seq_peaks_binary", "H3K4me3_peaks_binary", "H3K4me1_peaks_binary"]
+    only_seq = False if features else True
     x,y,guides,otss = generate_features_and_labels(data_path=data_path,manager=None,
                                               if_bp=False,if_only_seq=only_seq,if_seperate_epi=False,
                                               epigenetic_window_size=0,features_columns=features,
@@ -95,7 +93,7 @@ def get_data(data_path, only_seq):
                                               sequence_coding_type=2,if_bulges=True,return_otss=True, exclude_ontarget=True)
     return x,y,guides,otss
 
-def filter_data_for_interpertation(x_background, y,  sgrna_otss, only_seq = False,
+def filter_data_for_interpertation(x_background, y,  sgrna_otss, 
                         specific_indices = None, number_of_points = 200):
     '''
     Sample a subset of the data for interpertation.
@@ -103,7 +101,6 @@ def filter_data_for_interpertation(x_background, y,  sgrna_otss, only_seq = Fals
         x_background (array): all ENCODED gRNA-OT pairs of a sgRNA.
         y (array): labels of the pairs.
         sgrna_otss (array): all (gRNA,OT) seqeuences.
-        only_seq (bool): If True, only the sequence features will be used otherwise split to sequence and epigenetics.
         specific_indices (list, optional): List of specific indices to sample.
         number_of_points (int, optional): Total number of samples.
             None: Balanced amount of positive and negatives will be returned.
@@ -119,11 +116,6 @@ def filter_data_for_interpertation(x_background, y,  sgrna_otss, only_seq = Fals
     if specific_indices is not None:
         pass #NOTE: ADD SPESIFIC INDICES WITH FEATURE ENGINGERRING FUNCTION
     
-    additional_features = 0
-    if not only_seq:
-        x_background = extract_features(x_background, encoded_length= 600)
-        additional_features = x_background[1].shape[1]
-    
     # NOTE: SAMPLE OUT NEGATIVES (NOT BY STARTIFYING - NEED TO COMPLETE)
     sampled_indices = get_sampled_indices(y, number_of_points = number_of_points)
     if isinstance(x_background,list):
@@ -131,7 +123,7 @@ def filter_data_for_interpertation(x_background, y,  sgrna_otss, only_seq = Fals
     else:
         x_selected = x_background[sampled_indices]
     sgrna_otss = sgrna_otss[sampled_indices]
-    return x_selected, sgrna_otss, additional_features
+    return x_selected, sgrna_otss
     
     
 def get_sampled_indices(y, number_of_points = None):
@@ -155,8 +147,13 @@ def get_sampled_indices(y, number_of_points = None):
         negative_indexes = np.random.choice(negative_indexes, positive_number, replace=False)
         return np.concatenate((positive_indexes, negative_indexes))
     elif number_of_points <= positive_number:
-        print("total number of points is smaller than the number of positives return all positives")
-        return positive_indexes
+        if number_of_points == 0:
+            print("number of points is 0, return all positives")
+            return positive_indexes
+        else:
+            positive_indexes = np.random.choice(positive_indexes, number_of_points, replace=False)
+            return positive_indexes
+        
     negative_number = number_of_points - positive_number # else sample negatives    
     random_negative_indices = np.random.choice(negative_indexes, negative_number, replace=False)
     return np.concatenate((positive_indexes, random_negative_indices))
@@ -272,6 +269,11 @@ def epigenetic_genome_disterbution_vector(features, sg_ot_pair, epigenetic_diste
     x_input = np.concatenate([constant_sg_ot, epi_vector],axis=1) # Create input for model
     return x_input
 
+def return_epigentic_disterbution_vector(disterbution_file, features):
+    epi_vector = []
+    for feature in features:
+        if feature in disterbution_file.columns:
+            pass
 def add_epigenetic_vector_to_offtargets(guides_dict,features,epigenetic_disterbution_file):
     guide_dict_with_epi_genetics = {}
     for guide, mismatch_dict in guides_dict.items():

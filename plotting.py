@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -6,6 +8,7 @@ import os
 from file_utilities import create_paths
 from plotting_utilities import *
 import logomaker
+from shap.plots import beeswarm
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 
@@ -227,7 +230,7 @@ def plot_logo(counts_df, ax=None, ax_title=None, output_path=None,y_label=None, 
 def plot_heatmap(data, ax=None, row_labels=None, col_labels=None, 
                  x_label=None, y_label=None, title=None, output_path=None, 
                  cbar = None, vmin = None, vmax = None, sgrna_ots = None,
-                 additional_vector = None):
+                 additional_vector_y = None, additional_vector_x = None):
     """
     Plots a heatmap on a given subplot axis or creates a new figure if no axis is provided.
 
@@ -242,10 +245,19 @@ def plot_heatmap(data, ax=None, row_labels=None, col_labels=None,
         output_path (str, optional): If provided, saves the plot to this path.
         cbar (str, optional): If provided, adds a label to the colorbar.
     """
+    if isinstance(data, list) or isinstance(data, tuple):
+        if len(data) <=1:
+            raise ValueError("Data list must contain more than one element for heatmap")
+        additional_vector = data[1]
+        data = data[0]
+    
     if not isinstance(data, np.ndarray):
         raise ValueError("Data must be a NumPy array")
     if data.ndim == 1: # Reshape 1D data to 2D
         data = data.reshape(1, -1)
+    elif data.ndim ==3 and data.shape[0] == 1: # Reshape 3D data to 2D
+        data = data[0]
+
     if data.ndim != 2:
         raise ValueError("Data shape not supported for heatmap")
     
@@ -255,6 +267,8 @@ def plot_heatmap(data, ax=None, row_labels=None, col_labels=None,
         fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 8), gridspec_kw={'height_ratios': [5, 1]})
         ax = axes[0]  # The first axis for the heatmap
         ax_vector = axes[1]  # The second axis for the additional vector
+        vmin = min(vmin, np.min(additional_vector)) if vmin is not None else np.min(additional_vector)
+        vmax = max(vmax, np.max(additional_vector)) if vmax is not None else np.max(additional_vector)
     # Plot the heatmap
     sns.heatmap(data.T, cmap='coolwarm', ax=ax, xticklabels=col_labels,
                 yticklabels=row_labels, annot=False,  vmin=vmin, vmax=vmax, linewidths=0.1, linecolor='black')
@@ -262,8 +276,13 @@ def plot_heatmap(data, ax=None, row_labels=None, col_labels=None,
     if additional_vector is not None:
         # Reshape the vector to match the heatmap format (1 row, n columns)
         additional_vector = np.reshape(additional_vector, (1, -1))
-        sns.heatmap(additional_vector, cmap='viridis', ax=ax_vector, cbar=True, annot=False, vmax=vmax, vmin=vmin)
-        ax_vector.set_xticks([])  # Remove x-ticks for the additional vector heatmap
+        sns.heatmap(additional_vector, cmap='coolwarm', ax=ax_vector, cbar=True, annot=False, 
+                    vmax=vmax, vmin=vmin,xticklabels=[], yticklabels=[])
+        if additional_vector_x is not None:
+            ax_vector.set_xticks(np.arange(len(additional_vector_x)))
+            ax_vector.set_xticklabels(additional_vector_x, rotation=90)
+        ax_vector.set_ylabel(additional_vector_y if additional_vector_y else "")
+        
     if sgrna_ots is not None:
         positions, labels = render_sg_ot_to_positions(sgrna_ots[0],sgrna_ots[1])
         labels[0] = "sgRNA:\nOT: " + labels[0]
@@ -462,24 +481,7 @@ def plot_binary_feature_heatmap(df, axes=None, title=None, plots_path = None):
             fig.savefig(title + ".png", dpi=300)
         plt.close()
 
-def plot_multiple_binary_feature_heatmaps(df_list, titles=None, save_path=None):
-    num = len(df_list)
-    fig, axes = plt.subplots(2, num, figsize=(6 * num, 10), gridspec_kw={'height_ratios': [1, 2]})
 
-    # If only one DataFrame, axes will be 1D instead of 2D
-    if num == 1:
-        axes = np.expand_dims(axes, axis=1)
-
-    for i, df in enumerate(df_list):
-        plot_binary_feature_heatmap(df, axes[:, i], title=titles[i] if titles else None)
-
-    plt.tight_layout()
-    if save_path:
-        plot_name = os.path.join(save_path, "binary_feature_heatmaps.png")
-        plt.savefig(plot_name, dpi=300, bbox_inches='tight')
-        plt.close()
-    else:
-        plt.show()
 
 
 
@@ -623,6 +625,55 @@ def draw_histogram_bigwig(file_manager):
 
     # Save the entire figure to a file
     plt.savefig('epigenetics_histograms.png')
+
+
+def sub_plot_shap_beeswarn(shap_explanations, guide_rnas, output_path):
+    """
+    Plot beeswarn explanations togther for given guide rnas and their shap explanations objects.
+    """
+    if len(shap_explanations)!= len(guide_rnas):
+        raise RuntimeError("number of guides not equal to number of shap objects")
+
+    num_plots = len(shap_explanations)
+    cols = 3
+    rows = int(np.ceil(num_plots/cols))
+    fig, axes = plt.subplots(rows, cols,sharex=True ,figsize=(cols * 6, rows * 5))
+
+    # Flatten axes array for easy indexing
+    axes = axes.flatten()
+
+    for i, shap_exp in enumerate(shap_explanations):
+        plt.sca(axes[i])  # set current axis
+        beeswarm(shap_exp, show=False,color_bar_label="",color_bar=False)
+        axes[i].set_title(f"{guide_rnas[i]}", fontsize=8)  # or any smaller size
+        for tick in axes[i].get_yticklabels():
+            tick.set_fontsize(8)
+        #axes[i].set_xticklabels([])
+        axes[i].set_xlabel("")
+        axes[i].set_ylabel("")
+    # for j in range(i+1, len(axes)):
+    #     fig.delaxes(axes[j])
+    fig.supxlabel("SHAP value", fontsize=12)
+    fig.supylabel("Feature", fontsize=12)
+    plt.tight_layout()
+    plt.subplots_adjust(hspace=0.4)
+    red_circle = mlines.Line2D([0], [0], marker='o', color='red', label='1', markersize=5, markerfacecolor='red', markeredgewidth=0)
+    blue_circle = mlines.Line2D([0], [0], marker='o', color='blue', label='0', markersize=5, markerfacecolor='blue', markeredgewidth=0)
+
+    # Add the legend with circular markers
+    fig.legend(
+        handles=[red_circle, blue_circle],
+        loc='lower center',
+        bbox_to_anchor=(0.35, -0.02),
+        ncol=2,
+        title="Feature value",
+        frameon=False
+    )
+
+    
+    output_path = os.path.join(output_path,'shap_beeswarn.pdf')
+    plt.savefig(output_path, format="pdf")
+
 '''Draw a bar plot. y- metric\premonace, x - num of models in the ensemble'''
 def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,output_path,if_scaling = True, if_ticks = False):
     '''This is a scatter plot function that plots '''
