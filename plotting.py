@@ -8,7 +8,7 @@ import os
 from file_utilities import create_paths
 from plotting_utilities import *
 import logomaker
-from shap.plots import beeswarm
+import shap
 #from file_management import File_management
 #from features_engineering import get_epi_data_bw,get_epi_data_bed
 
@@ -627,7 +627,39 @@ def draw_histogram_bigwig(file_manager):
     plt.savefig('epigenetics_histograms.png')
 
 
-def sub_plot_shap_beeswarn(shap_explanations, guide_rnas, output_path):
+
+def sub_plot_shap_bar_plot(shap_explanations, guide_rnas, output_path, linkage = None, suffix = None):
+    
+    if len(shap_explanations)!= len(guide_rnas):
+        raise RuntimeError("number of guides not equal to number of shap objects")
+    num_plots = len(shap_explanations)
+    cols = 3
+    rows = int(np.ceil(num_plots / cols))
+    fig, axes = plt.subplots(rows, cols, sharex=True, figsize=(cols * 6, rows * 5))
+    axes = axes.flatten()
+    for i in range(num_plots):
+        plt.sca(axes[i])
+        shap.plots.bar(shap_explanations[i], show=False, clustering=linkage,clustering_cutoff=2)
+        
+        for text in axes[i].texts:
+            if text.get_text():
+                text.set_visible(False)
+        for tick in axes[i].get_yticklabels():
+            tick.set_fontsize(8)
+        axes[i].set_title(f"{guide_rnas[i]}", fontsize=8)
+        axes[i].set_xlabel("")
+        axes[i].set_ylabel("")
+    for j in range(i + 1, len(axes)):
+        fig.delaxes(axes[j])
+    
+    plt.tight_layout()
+    fig_name = f'shap_bar_{suffix}.pdf' if suffix else 'shap_bar.pdf'
+    output_path = os.path.join(output_path,fig_name)
+    plt.savefig(output_path, format="pdf")
+    
+    
+
+def sub_plot_shap_beeswarn(shap_explanations, guide_rnas, output_path, suffix = None):
     """
     Plot beeswarn explanations togther for given guide rnas and their shap explanations objects.
     """
@@ -644,15 +676,15 @@ def sub_plot_shap_beeswarn(shap_explanations, guide_rnas, output_path):
 
     for i, shap_exp in enumerate(shap_explanations):
         plt.sca(axes[i])  # set current axis
-        beeswarm(shap_exp, show=False,color_bar_label="",color_bar=False)
+        shap.plots.beeswarm(shap_exp, show=False,color_bar_label="",color_bar=False)
         axes[i].set_title(f"{guide_rnas[i]}", fontsize=8)  # or any smaller size
         for tick in axes[i].get_yticklabels():
             tick.set_fontsize(8)
         #axes[i].set_xticklabels([])
         axes[i].set_xlabel("")
         axes[i].set_ylabel("")
-    # for j in range(i+1, len(axes)):
-    #     fig.delaxes(axes[j])
+    for j in range(i+1, len(axes)):
+        fig.delaxes(axes[j])
     fig.supxlabel("SHAP value", fontsize=12)
     fig.supylabel("Feature", fontsize=12)
     plt.tight_layout()
@@ -670,8 +702,8 @@ def sub_plot_shap_beeswarn(shap_explanations, guide_rnas, output_path):
         frameon=False
     )
 
-    
-    output_path = os.path.join(output_path,'shap_beeswarn.pdf')
+    fig_name = f'shap_beeswarn_{suffix}.pdf' if suffix else 'shap_beeswarn.pdf'
+    output_path = os.path.join(output_path,fig_name)
     plt.savefig(output_path, format="pdf")
 
 '''Draw a bar plot. y- metric\premonace, x - num of models in the ensemble'''
