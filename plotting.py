@@ -74,7 +74,7 @@ def plot_last_tp(last_tp_index, last_tp_ratio, tpr_arrays, model_names,  informa
     
 
 def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title,
-              ax=None, ax_title=None, information=None):
+              ax=None, ax_title=None, information=None, legend_title=None):
     """
     Plots the ROC curve for 1 or more models.
     
@@ -104,14 +104,17 @@ def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title,
     for i in range(len(fpr_list)):
         ax.plot(fpr_list[i], tpr_list[i], lw=2, label=f'{model_names[i]} (AUC = {aurocs[i]:.4f})')
     
-    ax.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Random guess')
+    ax.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=2, label='Baseline = 0.5')
     if information:
         label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
         ax.plot([], [], ' ', label=label_text) # Invisible line with empty style
-    ax.set_xlabel('False positive rate', fontsize=14)
-    ax.set_ylabel('True positive rate', fontsize=14)
-    ax.set_title(ax_title)
-    ax.legend(loc='lower right', fontsize=11)
+    ax.set_xlabel('False positive rate', fontsize=18)
+    ax.set_ylabel('True positive rate', fontsize=18)
+    ax.tick_params(axis='both', labelsize=14)
+    #ax.set_title(ax_title)
+    
+    ax.legend(loc='lower right', fontsize=14,title=legend_title, title_fontsize=15)
+    
     ax.grid(True)
     if one_pic:
         if not "AUROC" in general_title:
@@ -123,7 +126,7 @@ def plot_roc(fpr_list, tpr_list, aurocs, model_names,output_path,general_title,
 
 
 def plot_pr(recall_list, precision_list, auprcs, model_names, output_path, general_title,
-            ax=None, ax_title=None,information=None):
+            ax=None, ax_title=None,information=None, legend_title=None):
     """
     Plots the Precision-Recall curve for 1 or more models.
     
@@ -155,15 +158,23 @@ def plot_pr(recall_list, precision_list, auprcs, model_names, output_path, gener
     
     for i in range(len(recall_list)):
         ax.plot(recall_list[i], precision_list[i], lw=2,label=f'{model_names[i]} (AUC = {auprcs[i][0]:.3f})')
-    ax.plot([], [], ' ', label=f'Baseline = {auprcs[0][1]:.5f}')  # Empty plot for baseline legend entry
+    baseline_val = auprcs[0][1]
+
+    # Plot a horizontal dashed line at baseline
+    ax.axhline(
+        y=baseline_val,color='gray', linestyle='--', lw=2,
+        label=f"Baseline = {baseline_val:.5f}"
+    )
+    
     if information:
         label_text = '\n'.join([f'{key}: {value}' for key, value in information.items()])
         ax.plot([], [], ' ', label=label_text)  # Invisible line with empty style
-    ax.set_xlabel('Recall', fontsize=14)
-    ax.set_ylabel('Precision', fontsize=14)
-    
-    ax.set_title(ax_title)
-    ax.legend(loc='upper right', fontsize=11)
+    ax.set_xlabel('Recall', fontsize=18)
+    ax.set_ylabel('Precision', fontsize=18)
+    ax.tick_params(axis='both', labelsize=14)
+    #ax.set_title(ax_title)
+    ax.legend(loc='upper right', fontsize=14,title=legend_title, title_fontsize=15)
+
     ax.grid(True)
     if one_pic:
         if not "AUPRC" in general_title:
@@ -191,14 +202,14 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
     ax.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
     ax.set_title(title)
     ax.grid(True)
-    ax.set_xlabel(x_axis_label, fontsize=12)
-    ax.set_ylabel(y_axis_label, fontsize=12)
-    ax.tick_params(axis='both', labelsize=12)
+    ax.set_xlabel(x_axis_label, fontsize=16)
+    ax.set_ylabel(y_axis_label, fontsize=16)
+    ax.tick_params(axis='both', labelsize=14)
     
     num_of_points = len(x)
     # Adding text with correlation coefficient, p-value, and number of points
-    ax.text(0.5, 0.9, f'Correlation coefficient: {r_coeff:.2f}\nP-value: {p_value:.2e}\nn = {num_of_points}', 
-            fontsize=12, ha='center', va='center', transform=ax.transAxes)
+    ax.text(0.5, 0.9, f'R: {r_coeff:.2f}, p-value: {p_value:.2e}\nn = {num_of_points}', 
+            fontsize=16, ha='center', va='center', transform=ax.transAxes)
     
 def plot_logo(counts_df, ax=None, ax_title=None, output_path=None,y_label=None, x_label=None):
     """
@@ -334,14 +345,97 @@ def box_plot(data, ax, x_label, y_label, title, output_path,  showmeans=True,
     ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha='right')
 
     if x_label:
-        ax.set_xlabel(x_label)
+        ax.set_xlabel(x_label, fontsize=16)
     if y_label:
-        ax.set_ylabel(y_label)
+        ax.set_ylabel(y_label, fontsize=16)
     if output_path and ax is None:  # Only save if no subplot (otherwise, user should save the full figure)
         plt.savefig(output_path, dpi=300)
         plt.close()
 
+def plot_all_guides_pertubration(data, output_path,mismatch_numbers=None):
+    feature_color_map = {
+    
+    "H3K9me3": "lavender",
+    "H3K27me3": "sandybrown",
+    "H3K36me3": "peachpuff",
+    
+    "H3K4me1": "lightcoral",
+   
+    "H3K9ac": "mediumpurple",
+    "ATAC-seq": "thistle",
+    "H3K27ac": "tan",
+    "H3K4me3": "linen"
+    
+}
+    guides = list(data.keys())
+    order = ['H3K4me1','H3K27me3','H3K36me3','H3K4me3','ATAC-seq','H3K9ac','H3K9me3','H3K27ac']
+    # Collect all mismatch numbers across guides/features
+    
+    
+    nrows, ncols = len(guides), len(mismatch_numbers)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5.5*ncols, 3.5*nrows), sharey=True,sharex="col")
+    
+    if nrows == 1:
+        axes = np.expand_dims(axes, 0)
+    if ncols == 1:
+        axes = np.expand_dims(axes, 1)
+    
+    
+    for i, guide in enumerate(guides):
+        for j, mismatch in enumerate(mismatch_numbers):
+            ax = axes[i, j]
+            
+            # Collect values into tidy format for seaborn
+            records = []
+            guide_data = data[guide]
+            mismatch_data = guide_data[mismatch] 
+            
+            
+            
+            df = pd.DataFrame(mismatch_data)
+            
+            # Compute medians and order
+            mean_order = df.median().sort_values(ascending=False).index
+            
+            #order = mean_order
+            medians = df.median()
+            
+            # Draw seaborn boxplot
+            sns.boxplot(
+                data=df, order=order,
+                 
+                boxprops={"edgecolor": "black"},
+                palette=feature_color_map,
+                ax=ax,  showfliers=False
+            )
+            ax.axhline(0, linestyle="--", linewidth=1, color="k", alpha=0.8, zorder=0)
+            # Annotate medians
+            # for k, category in enumerate(order):
+            #     median_val = medians[category]
+            #     ax.text(
+            #         k, median_val, f"{median_val:.2e}",
+            #         ha="center", va="bottom", fontsize=11,
+            #         color="black", fontweight="bold", rotation=90
+            #     )
+            
+            # Titles & labels
+            if i == 0:
+                if j==0:
+                    ax.set_title(f"{mismatch} mismatch",fontsize=18)
+                else:
+                    ax.set_title(f"{mismatch} mismatches",fontsize=18)
 
+            if j == 0:
+                ax.set_ylabel(guide,fontsize=13)
+                ax.tick_params(axis="y", labelsize=12)
+            #ax.set_xticklabels(ax.get_xticklabels(), rotation=20, ha="right",fontsize=14)
+            ax.set_xticklabels(order, rotation=20, ha="right",fontsize=14)
+    #fig.supylabel(f"{chr(916)} Prediction", fontsize=18)
+    fig.supylabel(f"Difference in predicted off-target cleavage probability", fontsize=18)
+    fig.supxlabel("Epigenetic features", fontsize=18)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_path, "All_guides_pertubration.png"), dpi=300)
+    plt.close() 
 def get_rows_cols(num_plots):
         """
         Returns a rows and cols number by trying to fill sqroot of num_plots.
@@ -727,6 +821,29 @@ def plot_ensemeble_preformance(y_values, x_values, title, y_label,x_label,stds,o
     plt.ylabel(y_label,fontsize=14)
     output_path = output_path + f"/{title}.png"
     plt.savefig(output_path)
+
+
+def plot_ensemble_performance_on_ax(ax, y_values, x_values, stds,
+                              if_scaling=False, if_ticks=False,small_ticks=False):
+    # clear underscores from the x_values
+    x_positions = np.arange(len(x_values))
+    ax.scatter(x_positions, y_values, color="blue")
+    ax.errorbar(
+        x_positions, y_values, yerr=stds,
+        fmt='none', capsize=5, elinewidth=2,
+        markeredgewidth=2, color='blue'
+    )
+    #ax.set_title(title, fontsize=14)
+    if if_scaling:
+        x_values = [int(x / 100) for x in x_values]
+    if if_ticks:
+        ax.set_xticks(x_positions)
+        if small_ticks:
+            ax.set_xticklabels(x_values, fontsize=14, rotation=45, ha='right')
+        else:
+            ax.set_xticklabels(x_values, fontsize=14)
+    ax.tick_params(axis="y", labelsize=14)
+
 
 def plot_ensemble_performance_mean_std(mean_values, std_values, x_values,p_values, 
                                        title, y_label, path,partition_information= None ,asecnding = False, fmt='.3f', 

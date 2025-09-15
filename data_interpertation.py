@@ -21,7 +21,6 @@ COLUMNS = {
 }
 
 
-
 def binary_feature_enrichment_by_partition(data, features_columns, label_column,
                                            partitions = [], output_path = None,
                                             partition_info_path = None, plot = True):
@@ -98,7 +97,7 @@ def plot_epigenetic_binary_enrichment(folder_path):
     for data,title in zip(datas,titles):
         plot_binary_feature_heatmap(df = data, axes = None, title = title, plots_path = plots_path)   
 
-def plot_feature_correlation( output_path,  feature_columns, label_column,data_path=None,data=None):
+def plot_feature_correlation_to_label( output_path,  feature_columns, label_column,data_path=None,data=None):
     '''This function will plot the correlation between the features and the label.
     The function will plot the scatter plot for each feature and the label.
     Args:

@@ -3,11 +3,13 @@ Module to interpret data and models
 '''
 import pandas as pd
 import numpy as np
+import pickle
 import os
 import shap
+import math
 from file_utilities import create_folder
 from features_and_model_utilities import get_feature_name
-from plotting import plot_subplots, sub_plot_shap_beeswarn, sub_plot_shap_bar_plot
+from plotting import plot_subplots, sub_plot_shap_beeswarn, sub_plot_shap_bar_plot,plot_all_guides_pertubration
 from train_and_test_utilities import keep_intersect_guides_indices
 from interpertation_utilities import *
 from scipy.stats import pearsonr
@@ -15,6 +17,7 @@ from plotting_utilities import return_colormap
 import seaborn as sns
 import signal
 import tensorflow as tf
+from scipy.stats import mannwhitneyu
 tf.experimental.numpy.experimental_enable_numpy_behavior()
 def tf_clean_up():
     tf.keras.backend.clear_session()
@@ -251,9 +254,11 @@ def run_shap(model_path, background_data_path, explainer_type, output_path, expl
         print(f'shap vals for {sgrna}')
         if shuffle_background:
             np.random.shuffle(whole_background)
-        shap_values = get_shaply_values(models, whole_background, explainer_type, sg_x_selected, only_seq=only_seq)
-        shap_vals.append(shap_values)
-        np.save(os.path.join(output_path,f'{sgrna}.npy'), shap_values.values)
+        # shap_values = get_shaply_values(models, whole_background, explainer_type, sg_x_selected, only_seq=only_seq)
+        # shap_vals.append(shap_values)
+        # with open(os.path.join(output_path,f'{sgrna}.pkl'), 'wb') as f:
+        #     pickle.dump(shap_values,f)
+        #np.save(os.path.join(output_path,f'{sgrna}.npy'), shap_values.values)
             
     # all explaination togther:
     whole_selected = [x[:100] for x in whole_selected] # get first 100 samples
@@ -262,7 +267,9 @@ def run_shap(model_path, background_data_path, explainer_type, output_path, expl
             np.random.shuffle(whole_background)
     shap_values = get_shaply_values(models, whole_background, explainer_type, whole_selected, only_seq=only_seq)
     shap_vals.append(shap_values)
-    np.save(os.path.join(output_path,f'all_guides.npy'), shap_values.values)
+    with open(os.path.join(output_path,'all_guides.pkl'), 'wb') as f:
+        pickle.dump(shap_values,f)
+    #np.save(os.path.join(output_path,f'all_guides.npy'), shap_values.values)
     guides.append('All_guides')
     features = [get_feature_name(feature) for feature in features]
     #return shap_vals, features, output_path, guides
@@ -357,7 +364,7 @@ def plot_shap(shap_values, sgrna_otss, output_path,  number_of_epigenetic_featur
                         y_ticks=row_labels, output_path=output_path, general_title="AbsMean-SHAP values all_bg",sgrna_otss=None,**kwargs)
 
 def main_shap():
-    by_clustering = True
+    by_clustering = False
     epi_model_path = "/localdata/alon/Models/Change-seq/vivo-silico/Exclude_Refined_TrueOT/Classification/No_constraints/Full_encoding/No_CW/GRU-EMB/5epochs_1024_batch/Early_stop/Ensemble/With_features_by_columns/All_guides/1_ensembels/50_models/Binary_epigenetics/All-epigenetics/ensemble_1"
     explain_data_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Lazzarotto_withEpigenetic.csv"
     background_data = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/Processed_data/vivo-silico-78_withEpigenetic.csv"
@@ -370,7 +377,7 @@ def main_shap():
                                   explain_data_path = explain_data_path, num_of_points = number_of_points)
     else:
         run_shap(model_path=epi_model_path,background_data_path = background_data,explain_data_path=explain_data_path,explainer_type=explainer_type,
-                output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=False,plot_all_guides=False)
+                output_path=output_path,num_of_points=number_of_points,specific_guides=specific_guides,only_seq=False)
     
 ##################### Gradient asecnt #####################
 def main_gradient_ascent():
@@ -599,6 +606,7 @@ def run_epigenetics(model_path, features, output_path = None, guide_list = None,
     #NOTE: add the creation of off targets that not included in the model outputs already.
     guide_list = ['GAAGGCTGAGATCCTGGAGGCGG','GAGAATCAAAATCGGTGAATCGG','GCTGGTACACGGCAGGGTCAAGG','GGACTGAGGGCCATGGACACAGG',
                   'GTCAGGGTTCTGGATATCTGTGG','GTCCCTAGTGGCCCCACTGTTGG']
+    
     # guide_list = ['GATGCAGAGACCCTGCTCAACGG','GGGACTCTACATCTGCAAGGAGG','GCTTGTCCGTCTGGTTGCTGCGG','GCTGGCGATGCCTCGGCTGCAGG',
     #               'GCCCTGCTCGTGGTGACCGATGG','GGTGAGGGAGGAGAGATGCCTGG']
     mismatch_limit = 3
@@ -624,24 +632,221 @@ def run_epigenetics(model_path, features, output_path = None, guide_list = None,
     # from_file = load_importance_values(importance_scores,guide_list,mismatch_limit)
     # Sub plot all guides togther by mismatch number.
     # Create {guide : {feature : [importance]}} by the same mismatch number
+    # Calculate medians for each guide for 1, 2, 3 mismatches
+   
     color_map = return_colormap(features)
-    
+    alternative = 'greater' # 'two-sided' 'less' 'greater'
+    feature_directions = get_feature_direction(model_outputs)
+    print(feature_directions)
+    stats_dict = get_wilxocon_statistics_between_mismatches(model_outputs,alternative=alternative)
+    tables = build_pval_tables(stats_dict)
+    tables_path = create_folder(output_path,'Statistics_tables')
+    for comparison, table in tables.items():
+        table.to_csv(os.path.join(tables_path,f'{comparison}_table.csv'))
+    plot_all_guides_pertubration(model_outputs,output_path,[i+1 for i in range(mismatch_limit)])
+    return
     mismatch_path = create_folder(output_path,'By_mismatch')
 
     for mismatch_num in range(1,mismatch_limit+1):
         model_outputs_by_mismatch = [model_outputs[guide][mismatch_num] for guide in model_outputs]
         titles = [f'{guide}' for guide in model_outputs]
-        plot_epigenetic_importance_by_pertubation(model_outputs_by_mismatch,mismatch_path,colormap=color_map,title_prefix=f'{mismatch_num}_mismatch',titles=titles)
+        plot_epigenetic_importance_by_pertubation(model_outputs_by_mismatch,mismatch_path,colormap=color_map,title_prefix=f'{mismatch_num} mismatch',titles=titles)
         
     # Sub plot all mismatch number by the same guide.
     guide_path = create_folder(output_path,'By_guide')
     for guide,mismatch_dict in model_outputs.items():
         data = [mismatch_dict[mismatch_num] for mismatch_num in range(1,mismatch_limit+1)]
-        titles = [f'Mismatch_{mismatch_num}' for mismatch_num in range(1,mismatch_limit+1)]
+        titles = [f'Mismatch {mismatch_num}' for mismatch_num in range(1,mismatch_limit+1)]
         plot_epigenetic_importance_by_pertubation(data,guide_path,colormap=color_map,title_prefix=f'{guide}',titles=titles)
 
 
+def compare_medians_between_mismatches(model_outputs):
+    '''
+    Given the model outputs {guide: {mismatch_num: {features:ensemble_score}}} calculate the median between each mismatch number and feature.
+    Args:
+        model_outputs (dict): Dictionary of model outputs.
+    Returns:
+        median_dict (dict): Dictionary of medians.
+            guide: {feature: {mismatch_num: median}}
+    '''
+    guide_medians = {}
+    for guide, mismatch_dict in model_outputs.items():
+        features = list(mismatch_dict[1].keys())
+        median_dict = {feature: {} for feature in features}
+        mismatch_numbers = list(mismatch_dict.keys())
+        for i in range(len(mismatch_numbers)-1):
+            mismatch_num1 = mismatch_numbers[i]
+            mismatch_num2 = mismatch_numbers[i+1]
+            for feature in features:
+                data1 = mismatch_dict[mismatch_num1][feature]
+                data2 = mismatch_dict[mismatch_num2][feature]
+                if len(data1) > 0 and len(data2) > 0:
+                    median1 = np.median(data1)
+                    median2 = np.median(data2)
+                    median_dict[feature][f'{mismatch_num1}_vs_{mismatch_num2}'] = median2 - median1
+                else:
+                    median_dict[feature][f'{mismatch_num1}_vs_{mismatch_num2}'] = np.nan
+        guide_medians[guide] = median_dict
+    return guide_medians
 
+def get_wilxocon_statistics_between_mismatches(model_outputs, if_cliffs_delta = False, alternative='two-sided', feature_directions = None):
+    '''
+    Given the model outputs {guide: {mismatch_num: {features:ensemble_score}}} calculate the wilxocon rank sum test statistics between each mismatch number.
+    and feature.
+    Args:
+        model_outputs (dict): Dictionary of model outputs.
+    Returns:
+        stats_dict (dict): Dictionary of statistics.
+            guide: {feature: {mismatch_num1_vs_mismatch_num2: (statistic, p-value)}}
+    '''
+    guide_stats = {}
+    
+    for guide, mismatch_dict in model_outputs.items():
+        features = list(mismatch_dict[1].keys())
+        mismatch_numbers = list(mismatch_dict.keys())
+        stats_dict = {feature: {} for feature in features}
+        for i in range(len(mismatch_numbers)-1):
+            mismatch_num1 = mismatch_numbers[i]
+            mismatch_num2 = mismatch_numbers[i+1]
+            for feature in features:
+                
+                data1 = mismatch_dict[mismatch_num1][feature]
+                data2 = mismatch_dict[mismatch_num2][feature]
+                if len(data1) > 0 and len(data2) > 0:
+                    if if_cliffs_delta:
+                        delta, var, p = cliffs_delta(data1, data2)
+                        stats_dict[feature][f'{mismatch_num1}_vs_{mismatch_num2}'] = (delta, var, p)
+                    else:
+                        if feature_directions and feature in feature_directions:
+                            alt = feature_directions[feature]
+                        else:
+                            median = np.median(data2) 
+                            if median > 0:
+                                alt = "greater"
+                            elif median < 0:
+                                alt = "less"
+                            else:
+                                alt = "two-sided"  
+                    
+                        stat, p = mannwhitneyu(data2, data1, alternative=alt)
+                        stats_dict[feature][f"{mismatch_num1}_vs_{mismatch_num2}"] = p
+
+            
+        guide_stats[guide] = stats_dict
+    return guide_stats
+def get_feature_direction(model_outputs):
+    '''Guide:mismatch_num: {feature:ensemble_score}}'''
+    feature_vals = {}
+    for guide, mismatch_dict in model_outputs.items():
+        for mismatch_num, feature_dict in mismatch_dict.items():
+            for feature, values in feature_dict.items():
+                if feature not in feature_vals:
+                    feature_vals[feature] = []
+                feature_vals[feature].extend(values)
+    meidan_dict = {feature: np.median(vals) for feature, vals in feature_vals.items()}
+    sorted_by_median = dict(sorted(meidan_dict.items(), key=lambda item: item[1], reverse=True))
+    print(sorted_by_median.keys())
+    feature_direction = {feature: 'greater' if np.median(vals) > 0 else 'less' for feature, vals in feature_vals.items()}
+    return feature_direction
+
+def build_pval_tables(results, threshold=0.05):
+    """
+    results: dict {guide: {feature: {comparison: p_value}}}
+    threshold: float, cutoff for significance
+    
+    Returns dict {comparison: DataFrame}
+    """
+    # get all comparison names
+    comparisons = {comp for gdict in results.values()
+                          for fdict in gdict.values()
+                          for comp in fdict.keys()}
+    order = ['H3K4me1','H3K27me3','H3K36me3','H3K4me3','ATAC-seq','H3K9ac','H3K9me3','H3K27ac']
+    tables = {}
+    m = len(results)
+    for comp in comparisons:
+        # collect table {guide: {feature: p_value}}
+        table_data = {}
+        for guide, fdict in results.items():
+            row = {feat: comps[comp] for feat, comps in fdict.items() if comp in comps}
+            if not row:
+                continue
+
+            # align to your desired column order (use NaN for missing features)
+            aligned = [row.get(feat, np.nan) for feat in order]
+            corrected = [min(1.0, v * m) if pd.notna(v) else np.nan for v in aligned] # Bonferroni correction
+            table_data[guide] = corrected
+             
+        #, columns=sorted(features)
+        df = pd.DataFrame.from_dict(table_data, orient="index", columns=order)
+        
+        counts = (df <= threshold).sum(axis=0)
+        max_above = df.where(df <= threshold).max(axis=0)
+        df = df.map(lambda x: f"{x:.1e}" if pd.notnull(x) else "")
+        # add extra rows
+        df.loc[f"# of p values ≤ {threshold}"] = counts
+        df.loc[f"Maximum p value among significant sgRNAs"] = max_above
+        df.loc[f"Maximum p value among significant sgRNAs"] = df.loc[f"Maximum p value among significant sgRNAs"].map(lambda x: f"{x:.1e}" if pd.notnull(x) else "")
+
+        tables[comp] = df
+
+    return tables
+
+def build_tables(results):
+    # Collect all comparisons (misNvsmisM, etc.)
+    
+    comparisons = {comp for gdict in results.values() for fdict in gdict.values() for comp in fdict.keys()}
+    tables = {}
+
+    for comp in comparisons:
+        # Create a nested dict: {guide: {feature: (delta,var,p)}}
+        table_data = {}
+        features = set()
+
+        for guide, fdict in results.items():
+            row = {}
+            for feat, comps in fdict.items():
+                if comp in comps:
+                    row[feat] = comps[comp]
+                    features.add(feat)
+            if row:
+                table_data[guide] = row
+
+        # Convert to DataFrame
+        df = pd.DataFrame.from_dict(table_data, orient="index", columns=sorted(features))
+
+        # Perform meta-analysis for each feature
+        meta_row = {}
+        for feat in df.columns:
+            values = df[feat].dropna().tolist()
+            if values:
+                deltas, vars_, ps = zip(*values)
+                deltas, vars_ = np.array(deltas), np.array(vars_)
+                pooled_delta, pooled_var = meta_analysis_fixed(deltas, vars_)
+                # Meta-analysis p-value (normal approximation)
+                z = pooled_delta / np.sqrt(pooled_var)
+                pooled_p = 2 * (1 - 0.5*(1 + math.erf(abs(z)/np.sqrt(2))))
+                meta_row[feat] = (pooled_delta, pooled_var, pooled_p)
+
+        df.loc["meta-analysis"] = meta_row
+        tables[comp] = df
+
+    return tables
+
+
+def cliffs_delta(data1, data2):
+    n1, n2 = len(data1), len(data2)
+    stat, p = mannwhitneyu(data2, data1)
+    delta = (2*stat)/(n1*n2) - 1
+    
+    # variance estimate (Feng & Cliff 2004)
+    var = (n1+n2)/(n1*n2*(n1+n2-1)) + ((n1-1)*(n2-1)/(n1*n2*(n1+n2-1))) * delta**2
+    return delta, var, p
+
+def meta_analysis_fixed(deltas, variances):
+    weights = 1/np.array(variances)
+    pooled = np.sum(weights * deltas) / np.sum(weights)
+    pooled_var = 1 / np.sum(weights)
+    return pooled, pooled_var
 
 def old_epigenetics_function(model_path,data_path,output_path = None,
                      num_of_points = 200, specific_guides = None , features = None,
@@ -805,5 +1010,5 @@ def main_epigenetics():
                     features=features, save_model_scores=True,use_model_scores=True,
                     epigenetic_disterbution_path=epi_dis_path)
 if __name__ == "__main__":
-    main_shap()
+    main_epigenetics()
     

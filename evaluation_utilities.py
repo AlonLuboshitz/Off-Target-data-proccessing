@@ -346,7 +346,7 @@ def compute_average_k_cross_results(features_results, k_group_columns,
         std = averaged_results[f'{col}_std'].values
         p_val = p_vals[col]
         plot_ensemble_performance_mean_std(mean_values=mean,std_values=std,x_values=features,
-                                            p_values=p_val,title=col,y_label=col,
+                                            p_values=p_val,title=col.upper(),y_label=col.upper(),
                                             path=average_path,only_seq='Only-sequence')
     if save_results:
         averaged_results.to_csv(os.path.join(average_path, "averaged_results.csv"))
@@ -427,20 +427,34 @@ def get_guide_information(data_name, guide, statistics_file):
     data = pd.read_csv(statistics_file)
     data = data[data['Data_set'] == data_name] # keep corresponding data
     # if multiple guides
-    keys  = ["Data_set", "Gene_name", "guide_sequence", "amplified_otss", "vivo_otss", "potential_otss"]
+    keys  = ["Data set", "Gene name", "Guide sequence", "Verified OTSs", "Cell-based OTSs", "Potential OTSs"]
     if isinstance(guide, list):
         guide_info = data[data['guide_sequence'].isin(guide)]
         guide_info = guide_info.to_dict(orient='list')
-        guide_info["Data_set"] = set(guide_info["Data_set"])
-        guide_info["guides_amount"] = len(guide)
-        guide_info["amplified_otss"] = int(sum(guide_info["amplified_otss"]))
-        guide_info["vivo_otss"] = int(sum(guide_info["vivo_otss"]))
-        guide_info["potential_otss"] = int(sum(guide_info["potential_otss"]))
-        keys.append("guides_amount")
-        keys.remove("guide_sequence")
-        keys.remove("Gene_name")
+        guide_info["Data set"] = set(guide_info["Data_set"])
+        guide_info["sgRNAs"] = len(guide)
+        try:
+            #guide_info["Verified OTSs"] = 0
+            guide_info["Verified OTSs"] = int(sum(guide_info["amplified_otss"]))
+        except Exception as e:
+            print(f"Error calculating Verified OTSs: {e}")
+            guide_info["Verified OTSs"] = 0
+        try:
+            guide_info["Cell-based OTSs"] = int(sum(guide_info["vivo_otss"]))
+        except Exception as e:
+            print(f"Error calculating Cell-based OTSs: {e}")
+            guide_info["Cell-based OTSs"] = 0
+        try:
+            guide_info["Potential OTSs"] = int(sum(guide_info["potential_otss"]))
+        except Exception as e:
+            print(f"Error calculating Potential OTSs: {e}")
+            guide_info["Potential OTSs"] = 0
+        #guide_info = guide_info.to_dict(orient='list')
+        keys.append("sgRNAs")
+        keys.remove("Guide sequence")
+        keys.remove("Gene name")
     else:
-        guide_info = data[data['guide_sequence'] == guide]
+        guide_info = data[data['Guide sequence'] == guide]
         guide_info = guide_info.to_dict(orient='records')[0]
     guide_info = {key: guide_info[key] for key in keys}
     return guide_info

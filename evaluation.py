@@ -9,11 +9,13 @@ from sklearn.metrics import roc_curve, auc, average_precision_score, precision_r
 from utilities import get_X_random_indices
 from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv
 from k_groups_utilities import get_partition_information
-from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp, plot_subplots
+from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp, plot_subplots, plot_ensemble_performance_on_ax
 from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder, find_target_files
 from features_and_model_utilities import get_feature_name, transform_labels
 from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results
 from multiprocessing import Pool
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
 
 PATH_TO_STATISTICS_FILE = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/guides_statistics.csv"
 class evaluation():
@@ -101,13 +103,22 @@ class evaluation():
         # 2. Evaluate the average performance of each model over all partitions.
         features_results = {}
         for feature, feature_partitions in features_dict.items():
+
             feature_results = get_k_groups_results(feature_partitions, self.task, self.k_group_columns)
             features_results[feature] = feature_results
         self.k_group_columns.remove('partition')
         all_partitions_path = create_folder(plots_path, "All_partitions")
+        # Save results                
+        with pd.ExcelWriter(os.path.join(all_partitions_path,'results_summary.xlsx'), engine='openpyxl') as writer:
+            for col in self.k_group_columns:
+                sheet_df = pd.DataFrame()
+                for feature_name, df in features_results.items():
+                    sheet_df[feature_name] = df[col].values
+                sheet_df.to_excel(writer, sheet_name=col, index=False)
         # Average
-        # compute_average_k_cross_results(features_results, self.k_group_columns, self.k_groups_alternatives,
-        #                                 all_partitions_path,error_file=error_file,save_results=save_results)
+
+        compute_average_k_cross_results(features_results, self.k_group_columns, self.k_groups_alternatives,
+                                        all_partitions_path,error_file=error_file,save_results=save_results)
         # Ratio
         compute_average_k_cross_ratios(features_results, self.k_group_columns, self.k_groups_alternatives,
                                         all_partitions_path,error_file=error_file,save_results=save_results)    
@@ -188,29 +199,38 @@ class evaluation():
             new_feature_dict[feature] = feature_results
         return new_feature_dict
     
-    def plot_multiple_ensemble_per_guide(self, guides_dict, feature_dict, n_ensembles, plots_path, data_name):
-
+    def plot_multiple_ensembles_per_guide(self, guides_dict, feature_dict, n_ensembles, plots_path, data_name):
+        """ Plot results for multiple ensembles over seperate guides and all guides togther.
+        
+        Args:
+            guides_dict (dict): spesific guide predictions after getting the predictions for that guide.
+                 {guide: {feature : (y_scores, y_test)}} - y_score - np.array of shape (n_ensembles, n_samples)
+            feature_dict (dict): predictions over all data points. {feature : (y_scores, y_test)} - y_score - np.array of shape (n_ensembles, n_samples).
+            n_ensembles (int): Number of ensembles.
+            plots_path (str): Path to save the plots.
+            data_name (str): Name of the data set.
+            """
         ## NOTE: Make multi process
-        for guide,features in guides_dict.items():
-            print("Checking guide: ",guide)
-            guides_dict[guide] = self.evaluate_multiple_models_per_feature(features)
-            try:
-                p_vals = get_only_seq_vs_group_ensmbels_stats(guides_dict[guide],n_ensembles,compare_to="Only-seq")
-            except ValueError as e:
-                print(e)
-                continue
-            if self.task == "classification": 
-                # get_only_seq_vs_group_ensmbels_stats uses mannwhitneyu test which look for less than hypothesis.
-                # values 3,4 correspond to last tp which should be less than and the hypothesis sign should be changed.
-                for key, values in p_vals.items():
-                    values[3] = 1 - values[3]  # Update pval4 (index 3)
-                    values[4] = 1 - values[4]  # Update pval5 (index 4)
-            mean_std = get_mean_std_from_ensmbel_results(guides_dict[guide])
-            guide_path = os.path.join(plots_path,f'{guide}',f'{n_ensembles}_ensembles')
-            create_folder(guide_path)
-            partition_info = get_guide_information(data_name, guide,PATH_TO_STATISTICS_FILE)
-            args = (mean_std,"all_features",p_vals,guide_path,self.task)
-            plot_ensembles_by_features_and_task(args,self.task,partition_info)
+        # for guide,features in guides_dict.items():
+        #     print("Checking guide: ",guide)
+        #     guides_dict[guide] = self.evaluate_multiple_models_per_feature(features)
+        #     try:
+        #         p_vals = get_only_seq_vs_group_ensmbels_stats(guides_dict[guide],n_ensembles,compare_to="Only-seq")
+        #     except ValueError as e:
+        #         print(e)
+        #         continue
+        #     if self.task == "classification": 
+        #         # get_only_seq_vs_group_ensmbels_stats uses mannwhitneyu test which look for less than hypothesis.
+        #         # values 3,4 correspond to last tp which should be less than and the hypothesis sign should be changed.
+        #         for key, values in p_vals.items():
+        #             values[3] = 1 - values[3]  # Update pval4 (index 3)
+        #             values[4] = 1 - values[4]  # Update pval5 (index 4)
+        #     mean_std = get_mean_std_from_ensmbel_results(guides_dict[guide])
+        #     guide_path = os.path.join(plots_path,f'{guide}',f'{n_ensembles}_ensembles')
+        #     create_folder(guide_path)
+        #     partition_info = get_guide_information(data_name, guide,PATH_TO_STATISTICS_FILE)
+        #     args = (mean_std,"all_features",p_vals,guide_path,self.task)
+        #     plot_ensembles_by_features_and_task(args,self.task,partition_info)
         # all guides
         all_guides_path = os.path.join(plots_path,"All_guides",f'{n_ensembles}_ensembles')
         create_folder(all_guides_path)
@@ -222,9 +242,15 @@ class evaluation():
                 values[3] = 1 - values[3]
                 values[4] = 1 - values[4]
         mean_std = get_mean_std_from_ensmbel_results(feature_dict)
+        # save the results
+        with open(os.path.join(all_guides_path, "all_features.pkl"), 'wb') as f:
+            pickle.dump(feature_dict, f)
+        with open(os.path.join(all_guides_path, "mena_std.pkl"), 'wb') as f:
+            pickle.dump(mean_std, f)
+        with open(os.path.join(all_guides_path, "p_vals.pkl"), 'wb') as f:
+            pickle.dump(p_vals, f)
         args = (mean_std,"all_features",p_vals,all_guides_path,self.task)
         plot_ensembles_by_features_and_task(args,self.task,partition_info)
-
     def evaluate_test_per_guide(self, ml_results_paths, n_ensembles,  indexes_dict , plots_path, data_name,
                                 additional_data = None , if_save_last_tp_gap = True, by_mismatch = False):
         """
@@ -250,9 +276,10 @@ class evaluation():
         # get the scores for each ensmbel
         feature_dict = init_feature_dict_for_all_scores(ml_results_paths, n_ensembles,
                                                          self.reg_classification, additional_data=additional_data)
+        
         guides_dict = split_feature_dict_by_indexes(feature_dict, indexes_dict, by_mismatch)
         if n_ensembles > 1: 
-            self.plot_multiple_ensemble_per_guide(guides_dict,feature_dict,n_ensembles,plots_path, data_name)
+            self.plot_multiple_ensembles_per_guide(guides_dict,feature_dict,n_ensembles,plots_path, data_name)
         ###### guides_dict = {guide: {feature : (y_scores, y_test)}} #########
         if by_mismatch:
             self._evaluate_test_by_mismatch(plots_path, guides_dict, data_name, if_save_last_tp_gap)
@@ -870,7 +897,7 @@ def get_metrics_by_task(task):
         return init_regression_metrics()
     else:
         raise RuntimeError(f"Task: {task} is not supported")
-def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_title):
+def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_title, legend_title = None,axes=None):
     '''This function plots multiple rocs and pr curves togther for multiple models.
     It iterates the score paths given in the score paths list and plots the roc/pr curve for each model.
     The titles list should contain the title for each model.
@@ -896,6 +923,9 @@ def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_titl
     plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","Models_6_intersect")'''
     if len(score_paths) != len(titles):
         raise ValueError("The amount of score paths should be equal to the amount of titles")
+    if axes is not None:
+        if len(axes) != 2:
+            raise ValueError("If axes are given, there should be 2 axes - one for roc and one for pr")
     fprs = []
     tprs = []
     aucs = []
@@ -913,9 +943,13 @@ def plot_roc_pr_for_ensmble_by_paths(score_paths, titles, output_path, plot_titl
         percs.append(precision)
         recalls.append(recall)
         auprcs.append((average_precision_score(y_test, y_scores),np.sum(y_test[y_test > 0]) / len(y_test)))
-    plot_roc(fprs,tprs,aucs,titles,output_path,f'{plot_title}_roc')
-    plot_pr(recall_list=recalls,precision_list=percs,auprcs=auprcs,model_names=titles,output_path=output_path,general_title=f'{plot_title}_pr')
+    plot_pr(recall_list=recalls,precision_list=percs,auprcs=auprcs,model_names=titles,
+            output_path=output_path,general_title=f'{plot_title}_pr',legend_title=legend_title,ax=axes[0] if axes is not None else None)
 
+    plot_roc(fprs,tprs,aucs,titles,output_path,f'{plot_title}_roc',legend_title=legend_title,ax=axes[1] if axes is not None else None)
+    
+
+    
 
 def plot_ensembles_by_features_and_task(args,task,partition_information = None):
     #positives, negatives, number_of_guides = get_partition_information(PARTITION_INFORMATION_PATH,PARTITION)
@@ -939,13 +973,13 @@ def plot_all_ensmbels_means_std_classification(ensmbel_mean_std_dict,features,st
 
     x_values = [str(ensmbel) for ensmbel in ensmbel_mean_std_dict.keys()]
     aurocs_results = [results[n_modles_in_ensmble][0][0] if n_modles_in_ensmble is not None else results[0][0] for results in ensmbel_mean_std_dict.values()]
-    aurocs_stds = [results[n_modles_in_ensmble][1][0] if n_modles_in_ensmble is not None else results[1][0] for results in ensmbel_mean_std_dict.values()]
+    aurocs_stds =     plot_ensemble_performance_mean_std(auprcs_results,auprcs_stds,x_values,prc_pvals,f"AUPRC by ensmbels - {features} {ending}","AUPRC",output_path,partition_information)
+    [results[n_modles_in_ensmble][1][0] if n_modles_in_ensmble is not None else results[1][0] for results in ensmbel_mean_std_dict.values()]
     roc_pvals = {key: stats_dict[key][0] for key in stats_dict.keys()}
     plot_ensemble_performance_mean_std(aurocs_results,aurocs_stds,x_values,roc_pvals,f"AUROC by ensmbels - {features} {ending}","AUROC",output_path, partition_information, fmt=".4f")
     auprcs_results = [results[n_modles_in_ensmble][0][1] if n_modles_in_ensmble is not None else results[0][1] for results in ensmbel_mean_std_dict.values()]
     auprcs_stds = [results[n_modles_in_ensmble][1][1] if n_modles_in_ensmble is not None else results[1][1] for results in ensmbel_mean_std_dict.values()]
     prc_pvals = {key: stats_dict[key][1] for key in stats_dict.keys()}
-    plot_ensemble_performance_mean_std(auprcs_results,auprcs_stds,x_values,prc_pvals,f"AUPRC by ensmbels - {features} {ending}","AUPRC",output_path,partition_information)
     # n_ranks_results = [results[n_modles_in_ensmble][0][2] if n_modles_in_ensmble is not None else results[0][2] for results in ensmbel_mean_std_dict.values()]
     # n_ranks_stds = [results[n_modles_in_ensmble][1][2] if n_modles_in_ensmble is not None else results[1][2] for results in ensmbel_mean_std_dict.values()]
     # n_rank_pvals = {key: stats_dict[key][2] for key in stats_dict.keys()}
@@ -1123,7 +1157,50 @@ def save_bar_plot_data(scores_dict, stats_dict, output_path,columns = None, titl
 
 ### ENSEMBLE AND MODEL EVALUATIONS ###
 
-def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, counts_path =  None, counts_sgRNA = False, counts_OTSs = False):
+
+def get_group_dict(base_path, n_models_in_ensmbel):
+            
+    group_dict = {}
+    folders_names = os.listdir(base_path)
+    folder_paths = create_paths(base_path)
+    for data_group,data_folder in zip(folders_names,folder_paths):
+        
+    
+        group_paths = find_target_folders(data_folder,["Combi"])
+        group_paths.sort() # sort by partition number
+        group_paths = [os.path.join(path,"Combi") for path in group_paths] # Add Combi folder to each path
+        partition_num = len(group_paths)
+        # set array for the values - auroc,auprc,n-rank for each partition in the group
+        values_arr = np.zeros(shape=(partition_num,3)) 
+        for partition,path in enumerate(group_paths):
+            values_arr[partition] = extract_combinatorical_results(path,[n_models_in_ensmbel])[n_models_in_ensmbel]
+        data_group = data_group.replace("group","") # Remove the group notation
+        data_group = data_group.replace("_"," ") # Remove the underscore notation
+        data_group = float(data_group) # convert to float
+        group_dict[data_group] = values_arr.mean(axis=0),values_arr.std(axis=0)  
+    group_dict = dict(sorted(group_dict.items()))
+    return group_dict
+
+def get_roc_pr_values(group_dict):
+        y_vals = [value[0]  for value in group_dict.values()] 
+        y_stds = [value[1] for value in group_dict.values()]
+        roc_vals = [val[0] for val in y_vals]
+        roc_stds = [val[0] for val in y_stds]
+        prc_vals = [val[1] for val in y_vals]
+        prc_stds = [val[1] for val in y_stds]
+        return [prc_vals,roc_vals],[prc_stds,roc_stds]
+        
+def get_x_vals(path, sgrnas, otss):
+    x_ranges = pd.read_csv(path)
+    if sgrnas:
+        x_vals =  list(zip(x_ranges["min"], x_ranges["max"]))
+        x_vals = [f"{val[0]}-{val[1]}" for val in x_vals[:-1]] + [x_vals[-1][0]]
+    elif otss:
+        active_sites = np.sum(x_ranges['Positives'].values[:-1])
+        x_vals = [int((i+1)*0.1*active_sites) for i in range(10)]
+    return x_vals
+
+def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, counts_sgRNA = None, counts_OTSs = None):
     '''This function calculate the prediction performance evaluations over diffrenet number of training data points
     and plot the metric in y axis over data points in the x axis.
     Given a base path with results of ensembles tested on different number of data points (sgRNA, or OTSs)
@@ -1146,49 +1223,37 @@ def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, count
                                "vivo-silico","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/Changeseq_sgRNA_counts.csv","Number of sgRNAs")
     
     ### Test on HENDEL
-    performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Performance-increasing-sgRNAs",50,
+    performance_by_data_points("/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-sgRNAs",50,
                                "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel/Performance_by_parts",
-                               "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel_sgRNA_counts.csv",counts_sgRNA=True,counts_OTSs=False)'''
-    group_dict = {}
-    folders_names = os.listdir(base_path)
-    folder_paths = create_paths(base_path)
-    for data_group,data_folder in zip(folders_names,folder_paths):
-        
-      
-        group_paths = find_target_folders(data_folder,["Combi"])
-        group_paths.sort() # sort by partition number
-        group_paths = [os.path.join(path,"Combi") for path in group_paths] # Add Combi folder to each path
-        partition_num = len(group_paths)
-        # set array for the values - auroc,auprc,n-rank for each partition in the group
-        values_arr = np.zeros(shape=(partition_num,3)) 
-        for partition,path in enumerate(group_paths):
-            values_arr[partition] = extract_combinatorical_results(path,[n_models_in_ensmbel])[n_models_in_ensmbel]
-        data_group = data_group.replace("group","") # Remove the group notation
-        data_group = data_group.replace("_"," ") # Remove the underscore notation
-        data_group = float(data_group) # convert to float
-        group_dict[data_group] = values_arr.mean(axis=0),values_arr.std(axis=0)  
-    # Sort dict by keys
-    group_dict = dict(sorted(group_dict.items()))
+    
+                                                          "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/Hendel_sgRNA_counts.csv",counts_sgRNA=True,counts_OTSs=False)'''
+    
+    
+    
+    
+    
+
     x_vals = [key for key in group_dict.keys()] # defualt x values by group number
     x_label = "Group number" # defualt x label
     title = "increasing by group number" # defualt title
     scaling = False # Defualt scaling is False
-    if counts_path: # if counts given
-        if counts_sgRNA:
-            x_vals = increasing_points(counts_path, True)
-            x_label = "Number of sgRNAs"
-            title = "increasing-sgRNAs"
-        elif counts_OTSs:
-            x_vals = increasing_points(counts_path, False)
-            x_label = "Number of OTSs"
-            title = "increasing-OTSs"
-            scaling = True
-        else: # count path is given but not spesified for OTS/sgRNA
-            print("Count path is given but no bool for sgRNA/OTSs, setting the x axis values to the group numbers")
+    if counts_sgRNA:
+        x_ranges = pd.read_csv(counts_sgRNA)
+        if len(x_ranges) != len(group_dict):
+            raise ValueError("The amount of groups in the counts file is not equal to the amount of groups in the results folder")
+        x_vals = list(zip(x_ranges["min"], x_ranges["max"]))
+        x_label = "Number of sgRNAs"
+        title = "increasing-sgRNAs"
+    elif counts_OTSs:
+        x_vals = increasing_points(counts_path, False)
+        x_label = "Number of OTSs"
+        title = "increasing-OTSs"
+        scaling = True
+    else: # count path is given but not spesified for OTS/sgRNA
+        print ("No count path is given, setting the x axis values to the group numbers")
             
 
-    else: 
-        print ("No count path is given, setting the x axis values to the group numbers")
+        
         
     if len(x_vals) != len(group_dict): # if the amount of x values is not equal to the amount of groups then one group used for testing
         x_vals = x_vals[:-1]
@@ -1196,7 +1261,11 @@ def performance_by_data_points(base_path, n_models_in_ensmbel,output_path, count
     y_stds = [value[1] for value in group_dict.values()]
     plot_ensemeble_preformance(y_values=[val[0] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUROC {title}",y_label="AUROC",x_label=x_label,stds=[val[0] for val in y_stds],output_path=output_path,if_scaling=scaling)
     plot_ensemeble_preformance(y_values=[val[1] for val in y_vals],x_values=x_vals,title=f"Performance by data points AUPRC {title}",y_label="AUPRC",x_label=x_label,stds=[val[1] for val in y_stds],output_path=output_path,if_scaling=scaling)
-    plot_ensemeble_preformance(y_values=[val[2] for val in y_vals],x_values=x_vals,title=f"Performance by data points N-rank {title}",y_label="N-rank",x_label=x_label,stds=[val[2] for val in y_stds],output_path=output_path,if_scaling=scaling)
+    #plot_ensemeble_preformance(y_values=[val[2] for val in y_vals],x_values=x_vals,title=f"Performance by data points N-rank {title}",y_label="N-rank",x_label=x_label,stds=[val[2] for val in y_stds],output_path=output_path,if_scaling=scaling)
+
+
+
+
 
 def increasing_points(path_to_counts, sgRNA = False):
     '''This function gets path to eather sgRNA counts or OTSs counts per group and returns for each group its amount
@@ -1214,7 +1283,7 @@ def increasing_points(path_to_counts, sgRNA = False):
         counts = pd.read_csv(path_to_counts)["OTSs count"].values
     return counts
 ### DIFFERENET DATASETS EVALUATIONS###
-def evaluate_guides_replicates(guide_data_1, guide_data_2, features_columns_1, features_columns_2, title,
+def evaluate_guides_replicates(guide_data_1, guide_data_2, title,
                                 label_column, job, plot_output_path, data_output_path, guides_list = None,
                                 ):
     '''
@@ -1295,13 +1364,12 @@ def plot_correlation_given_df(df,x_column,y_column,x_axis_label,y_axis_label,tit
             print(f'Not enough data n = {numer_of_points} to calculate the correlation for {title}')
         return
     x_lables_log, y_labels_log = transform_labels(x_labels,'log'),transform_labels(y_labels,'log')
-    x_labels_minmax = transform_labels(x_labels,'minmax')
-    r,p = pearson_correlation(x_labels,y_labels)
-    r_log,p_log = pearson_correlation(x_lables_log,y_labels_log)
-    r_minmax,p_minmax = pearson_correlation(x_labels_minmax,y_labels)
+    
+    r,p = pearsonr(x_labels,y_labels)
+    r_log,p_log = pearsonr(x_lables_log,y_labels_log)
+    
     plot_correlation(x=x_labels,y=y_labels,x_axis_label=x_axis_label, y_axis_label=y_axis_label,r_coeff=r,p_value=p,title=title,output_path=output_path)
-    plot_correlation(x=x_lables_log,y=y_labels_log,x_axis_label=x_axis_label, y_axis_label=y_axis_label,r_coeff=r_log,p_value=p_log,title=f'{title} - Log',output_path=output_path)
-    plot_correlation(x=x_labels_minmax,y=y_labels,x_axis_label=x_axis_label, y_axis_label=y_axis_label,r_coeff=r_minmax,p_value=p_minmax,title=f'{title} - MinMax',output_path=output_path)
+    plot_correlation(x=x_lables_log,y=y_labels_log,x_axis_label=f'{x_axis_label} (log)', y_axis_label=f'{y_axis_label} (log)',r_coeff=r_log,p_value=p_log,title=f'{title} - Log',output_path=output_path)
 def off_target_data_by_intersecting_guides(ots_data_1, ots_data_2, guide_column, guide_list = None):
     '''This function takes two off target data frames and returns only the rows with guides presented in both data frames.
     If guide list given is returns rows with guides presented in the list.
@@ -1420,13 +1488,153 @@ def combiscore_by_folder(base_path):
     with Pool(processes=10) as pool:
         pool.starmap(process_single_ensemble_scores,scores_nd_combi_paths)
 
+def plot_hendel_changeseq_increasing_training_data():
+    
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8), sharex="col", sharey="row")
+    #axes = axes.flatten()
+    cs_base_path_sg = '/localdata/alon/ML_results/Change-seq/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence'
+    n_models_in_ensmbel = 50
+    group_dict = get_group_dict(cs_base_path_sg, n_models_in_ensmbel)
+    group_dict_ = {5-key: value for key, value in group_dict.items() if key!=5} # Group by 5
+    group_dict_[5] = group_dict[5] # Add group 5
+    group_dict = group_dict_
+    group_dict = dict(sorted(group_dict.items()))
+    y_values_list,stds_list = get_roc_pr_values(group_dict)
+    path ='Data/Change-seq/change_seq_sgrna_ranges.csv'
+    x_vals = get_x_vals(path,True,False)
+    x_vals = range(1,len(group_dict)+1)
+    plot_ensemble_performance_on_ax(
+        axes[0,0],
+        y_values_list[0],
+        x_vals,
+        stds_list[0],
+        if_scaling=False,
+        if_ticks=True
+    )
+    plot_ensemble_performance_on_ax(
+        axes[1,0],
+        y_values_list[1],
+        x_vals,
+        stds_list[1],
+        if_scaling=False,
+        if_ticks=True
+    )
+        
+    
+    h_base_path_sg = "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-sgRNAs"
+    group_dict = get_group_dict(h_base_path_sg, 50)
+    y_values_list,stds_list = get_roc_pr_values(group_dict)
+    path ='Data/Hendel_lab/hendel_sgrna_ranges.csv'
+    x_vals = get_x_vals(path,True,False)
+    x_vals = range(1,len(group_dict)+1)
+    plot_ensemble_performance_on_ax(
+        axes[0,1],
+        y_values_list[0],
+        x_vals,
+        stds_list[0],
+        if_scaling=False,
+        if_ticks=True,
+        small_ticks=False
+    )
+    plot_ensemble_performance_on_ax(
+        axes[1,1],
+        y_values_list[1],
+        x_vals,
+        stds_list[1],
+        if_scaling=False,
+        if_ticks=True,
+        small_ticks=False
+    )
+    
+    base_path = '/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-OTss/by_positives'
+    group_dict = get_group_dict(base_path, 50)
+    data = 'Data/Hendel_lab/Hendel-Partition_1.csv'
+    x_vals = get_x_vals(data,False,True)
+    y_values_list,stds_list = get_roc_pr_values(group_dict)
+    plot_ensemble_performance_on_ax(
+        axes[0,2],
+        y_values_list[0],
+        x_vals,
+        stds_list[0],
+        if_scaling=True,
+        if_ticks=True,
+        small_ticks=False
+    )
+    plot_ensemble_performance_on_ax(
+        axes[1,2],
+        y_values_list[1],
+        x_vals,
+        stds_list[1],
+        if_scaling=True,
+        if_ticks=True,
+        small_ticks=False
+    )
+    axes[1, 0].set_xlabel("Number of training subsets", fontsize=18)
+    axes[1,1].set_xlabel("Number of training subsets", fontsize=18)
+    #axes[1, 2].set_xlabel("Number of OTSs", fontsize=18)
+    axes[0,0].set_ylabel("AUPRC", fontsize=18)
+    axes[1,0].set_ylabel("AUROC", fontsize=18)
+    axes[0,0].set_title("CHANGE-seq", fontsize=20)
+    axes[0,1].set_title("Hendel", fontsize=20)
+    axes[0,2].set_title("Hendel", fontsize=20)
+    axes[1,2].set_xlabel("Number of OTSs (× 10²)", fontsize=18)
+    letters = ['A', 'B', 'C', 'D','E','F']
+    selected_axes = axes[:, :].flatten()
+    for ax,letter in zip(selected_axes,letters):
+        ax.text(-0.05, 1.02, letter, transform=ax.transAxes,
+            fontsize=16, fontweight="bold", va="bottom", ha="right")
+    first_row_axes = axes[0, :]
+    for ax in first_row_axes:
+        ax.set_yticks(np.arange(0, 0.49, 0.07))  # from 0.00 to 0.45 in steps of 0.05
+    plt.tight_layout()
+    plt.savefig("Plots/Thesis/Performance_by_parts.png", dpi=300)
+def plot_H_C_HC_models():
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex="col", sharey="row")
+    titles = ["CHANGE-seq","Hendel","Hendel + CHANGE-seq"]
+    scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6/Scores/ensemble_1.csv",
+    "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-sgRNAs/11_group/1-2-3-4-5-6-7-8-9-10-11_partition/1-2-3-4-5-6-7-8-9-10-11_partition_50/Scores/ensemble_1.csv",
+    "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_hendel/6_intersecting/all_6/Scores/ensemble_1.csv"]
+    hendel_axes = [axes[0,0],axes[0,1]]
+    plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Thesis","Test_on_hendel",
+                                     legend_title='Training data',axes=hendel_axes)
+    scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50/Scores/ensemble_1.csv",
+                    "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
+                    "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_changeseq/6_intersecting/all_6/Scores/ensemble_1.csv"]
+    
+    cs_axes = [axes[1,0],axes[1,1]]
+    plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Thesis","Test_on_changeseq",
+                                     legend_title='Training data',axes=cs_axes)
+    axes[0,0].set_ylabel("Test on CHANGE-seq\nPrecision", fontsize=18)
+    axes[1,0].set_ylabel("Test on Hendel\nPercision", fontsize=18)
+    letters = ['A', 'B', 'C', 'D']
+    for ax,letter in zip(axes.flatten(),letters):
+        ax.text(-0.05, 1.02, letter, transform=ax.transAxes,
+            fontsize=16, fontweight="bold", va="bottom", ha="right")
+    plt.tight_layout()
+    plt.savefig("Plots/Thesis/H_C_HC_models.png",dpi=300)
+def plot_change_seq_hendel_corr():
+    data = pd.read_csv("Data/Merged_studies/Hendel_vs_CHANGE-seq_regression.csv")
+    hendel  = data["Hendel"].values
+    change = data["CHANGE-seq"].values
+    fig,ax = plt.subplots(1,2,figsize=(12,5))
+    r, p = pearsonr(hendel,change)
+    r_log, p_log = pearsonr(transform_labels(hendel,'log'),transform_labels(change,'log'))
+    plot_correlation(hendel,change,"Hendel - read count","CHANGE-seq - read count",r_coeff=r,p_value=p,title=None,output_path=None,ax=ax[0])
+    plot_correlation(transform_labels(hendel,'log'),transform_labels(change,'log'),"Hendel - read count (log)","CHANGE-seq - read count (log)",r_coeff=r_log,p_value=p_log,title=None,output_path=None,ax=ax[1])
+    letters = ['A', 'B']
+    for axis,letter in zip(ax,letters):
+        axis.text(-0.05, 1.02, letter, transform=axis.transAxes,
+            fontsize=16, fontweight="bold", va="bottom", ha="right")
+    plt.tight_layout()
+    plt.savefig("Plots/Thesis/Hendel_vs_CHANGE-seq_correlation.png",dpi=300)
+    plt.close()
 if __name__ == "__main__":
     pass
     # plot_ensemble_perforamnce_and_std_by_models("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi",50,
     #                                              "/home/dsi/lubosha/Off-Target-data-proccessing/Plots/CHANGE-seq/Vivo_vitro/Classification/Ensemble/old","Only_sequence")
     #process_all_ensembels_scores_in_folder("/localdata/alon/ML_results/Change-seq/vivo-vitro/T_Regression/Log/CNN/Ensemble/Epigenetics_by_features/7_partition/7_partition_10/binary",n_ensmebles=1)
     #process_single_ensemble_scores("/localdata/alon/ML_results/Change-seq/vivo-vitro/T_Regression/Log/CNN/Ensemble/Only_sequence/7_partition/7_partition_50",False)
-    plots_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Feature_correlations/Change-seq/Vivo-vitro"
+    #plots_path = "/home/dsi/lubosha/Off-Target-data-proccessing/Feature_correlations/Change-seq/Vivo-vitro"
     # feature_cor_by_partition(data_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/vivovitro_nobulges_withEpigenetic_indexed_read_count_with_model_scores.csv",
     #                          partitions=[1,2,3,4,5,6,7],
     #                          partition_info="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Change-seq/partition_guides_78/Changeseq-Partition_vivo_vitro.csv",
@@ -1440,15 +1648,34 @@ if __name__ == "__main__":
     # #add_subsets = "/localdata/alon/ML_results/Change-seq/vivo-silico/Change_seq/CNN/Ensemble/Epigenetics_by_features/1_partition/1_partition_50/picked_marks"
     # bar_plot_ensembels_feature_performance(only_seq_path, epigenetic_path, n_models, plots_output_path, data_output_path, title)
     
-    #  gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
-    #  gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
-    #  evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","Lazzarotto et. Al"), "Read_count", "regression","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")
+    # gs_hendel = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv"
+    # gs_change = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/Changeseq/vivosilico_nobulges_withEpigenetic_indexed.csv"
+    #evaluate_guides_replicates(gs_hendel, gs_change, ("Hendel","CHANGE-seq"), "Read_count", "regression","/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","/home/dsi/lubosha/Off-Target-data-proccessing/Data/Merged_studies")
     # models_paths=create_paths()
     # plot_roc_pr_for_ensmble_by_paths()
     # scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50/Scores/ensemble_1.csv",
-    #                 "/localdata/alon/ML_results/Hendel/vivo-silico/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
+    #                 "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
     #                 "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_changeseq/6_intersecting/all_6/Scores/ensemble_1.csv"]
-    # titles = ["L","H","H + L"]
+    # titles = ["CHANGE-seq","Hendel","Hendel + CHANGE-seq"]
 
-    # plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Hendel_vs_Change-seq","Test_on_Lazzarotto")
+    # plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Thesis","Test_on_changeseq",
+    #                                  legend_title='Training data')
+    # scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6/Scores/ensemble_1.csv",
+    # "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-sgRNAs/11_group/1-2-3-4-5-6-7-8-9-10-11_partition/1-2-3-4-5-6-7-8-9-10-11_partition_50/Scores/ensemble_1.csv",
+    # "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_hendel/6_intersecting/all_6/Scores/ensemble_1.csv"]
+    # plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Thesis","Test_on_hendel",
+    #                                  legend_title='Training data')
+    #plot_hendel_changeseq_increasing_training_data()
+    #plot_H_C_HC_models()
+    #plot_change_seq_hendel_corr()
+    
+    
+
+
+
+    
+    
+    
+    
+    
     

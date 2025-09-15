@@ -12,7 +12,7 @@ NORMAL_ORDERED_COLUMNS = ['chrom','chromStart','chromEnd','offtarget_sequence','
 #### Identified guideseq preprocessing functions ####
 
 def process_folder(input_folder):
-    '''
+    """
 Function gets a folder with guide-seq identified txt files.
 It creates a new output folder (if not exists) with csv files filtered by label identified function
 folder name created: _labeled
@@ -20,32 +20,38 @@ Args:
 1. input_folder - folder with identified txt files
 ------------
 Returns: None
-Runs: identified_to_csv function on each txt file in the folder'''
+Runs: identified_to_csv function on each txt file in the folder
+    """
     label_output_folder = input_folder + '_labeled'
     create_folder(label_output_folder)
     for filename in os.listdir(input_folder):
         if filename.endswith('.txt'):
             txt_file_path = os.path.join(input_folder, filename)
-            identified_to_csv(txt_file_path, label_output_folder)
+            filter_identified_guideseqs_to_csv(txt_file_path, label_output_folder)
 
-def identified_to_csv(input_path,output_path):
+def filter_identified_guideseqs_to_csv(input_path,output_path):
     
-    '''given an path for an indentified.txt, filter by bool the BED_site_name culom.
-    BED_site_name colom if not null represents a recognisble off-target site.
-    1. filter by bed site column and mismatches up to 6.
-    2. Get Off target sites with missmatches only/ bulges and missmatches.
-    3. Extract file name - expriment name.
-    4. Create csv file in the output path named with expirement name + "_label"
+    """
+    Filter GUIDE-seq output file (identified.txt) based on the BED_site_name colum.
+    If the BED_site_name colom is not null it represents a detected off-target site.
+
+    Function:
+        1. Filter by bed_site_column and up to 6 mismatches.
+        2. Get Off target sites with missmatches only/ bulges and missmatches.
+        3. Extract file name - expriment name.
+        4. Create csv file in the output path named with expirement name + "_label"
+
     Columns kept are: 
     chrom, chromStart, chromEnd, Position, Filename, strand, offtarget_sequence, target,
     realigned_target, Read_count, missmatches, insertions, deletions, bulges, Label
+
     Args:
-    1. input_path - path to the identified.txt file
-    2. output_path - path to the output folder
+        input_path (str): path to the identified.txt file
+        output_path (str): path to the output folder
     ------------
     Returns: None
     Saves: csv file in the output folder with the columns mentioned above.
-   '''
+   """
 
     identified_file = pd.read_csv(input_path,sep="\t",encoding='latin-1',on_bad_lines='skip')
     # 1. filter by bed_site - accautal off target site
@@ -67,14 +73,17 @@ def identified_to_csv(input_path,output_path):
     print("created {} file in folder: {}".format(output_filename,output_path))
 
 def get_ots_missmatch_only(guideseq_identified_data_frame):
-    '''This function accepets guide seq idenetified data frame
+    """
+    This function accepets GUIDE-seq output file (idenetified) data frame
     It extract Off target sites with missmatches only
     Setting insertions, deletions, bulges to 0.
+    
     Args:
-    1. guideseq_identified_data_frame - data frame with guide-seq identified data
-    ------------
-    Returns: mismatch_df - data frame with off-target sites with missmatches only
-    '''
+        guideseq_identified_data_frame (data frame): data frame with guide-seq identified data
+    
+    Returns: 
+        mismatch_df (data frame): data frame with off-target sites with missmatches only
+    """
     # Drop rows without ots seq in mismatch
     guideseq_identified_data_frame = guideseq_identified_data_frame.dropna(subset=['Site_SubstitutionsOnly.Sequence'])
     columns = {'WindowChromosome':'chrom' ,'Site_SubstitutionsOnly.Start':'chromStart','Site_SubstitutionsOnly.End' : 'chromEnd',
@@ -89,13 +98,15 @@ def get_ots_missmatch_only(guideseq_identified_data_frame):
     return mismatch_df
 
 def get_ots_bulges_nd_mismatches(guideseq_identified_data_frame):
-    '''This function accepets guide seq idenetified data frame
+    """
+    This function accepets GUIDE-seq output file (idenetified) data frame
     It extract Off target sites with bulges and mismatches
     Args:
-    1. guideseq_identified_data_frame - data frame with guide-seq identified data
+        guideseq_identified_data_frame (data frame): with guide-seq identified data
     ------------
-    Returns: bulge_df - data frame with off-target sites with bulges and mismatches
-     '''
+    Returns: 
+        bulge_df (data frame): with off-target sites with bulges and mismatches
+    """
     columns = {'WindowChromosome':'chrom' ,'Site_GapsAllowed.Start':'chromStart','Site_GapsAllowed.End':'chromEnd',
                'Position':'Position','Filename':'Filename','Site_GapsAllowed.Strand':'strand',
                'Site_GapsAllowed.Sequence':'offtarget_sequence','TargetSequence':'target',
@@ -114,20 +125,23 @@ def get_ots_bulges_nd_mismatches(guideseq_identified_data_frame):
 
 def merge_positives(folder_path, n_duplicates, file_ending, output_folder_name):
         
-    '''
-    Function looks for multiple duplicates from the same exprimenet and merge their data.
-    Mergning will be the summation of the read count for the same sites!
+    """
+    Looks for multiple duplicates of the same expriment and merge their data.
+    Utilizes the mergning function.
+    NOTE: Mergning will be the summation (aggregation) of the read counts for the same off-target sites!
     NOTE: all files should have the same ending, for example: -D(n)_labeled
     Function gets each file by iterating on the number of duplicates and changing the file ending.
-    For each 2 or more duplicates concate the data.
+    For each 2 or more duplicates concatanate the data.
+    
     Args:
-     1. folder_path - path to the folder with the labeled files
-     2. n_duplicates - number of duplicates for each expriment
-     3. file_ending - ending of the file name
-     4. output_folder_name - name of the output folder
+        folder_path (str): path to the folder with the labeled files
+        n_duplicates (int): number of duplicates for each expriment
+        file_ending (str): ending of the file name
+        output_folder_name (str): name of the output folder
      ------------
      Returns: None
-     Saves: csv files in the output folder with the merged data'''
+     Saves: csv files in the output folder with the merged data
+     """
     assert n_duplicates > 1, f"duplicates should be more then 1 per expriment, got: {n_duplicates}"
     # more then 1 duplicate
     file_names = os.listdir(folder_path)
@@ -158,7 +172,7 @@ def merge_positives(folder_path, n_duplicates, file_ending, output_folder_name):
 
 
 def mergning(files, n_duplicates, file_ending, folder_path):
-    '''
+    """
     This function gets a list of files and merge them togther summing the read count.
     It merge n duplicates for each file.
     Args:
@@ -167,7 +181,8 @@ def mergning(files, n_duplicates, file_ending, folder_path):
     3. file_ending - ending of the file name
     4. folder_path - path to the folder with the files
     ------------
-    Returns: final_file_list - list of tuples with the merged data frames and the file name''' 
+    Returns: final_file_list - list of tuples with the merged data frames and the file name
+    """ 
     assert n_duplicates > 1, f"duplicates should be more then 1 per expriment, got: {n_duplicates}"  
     # more then 1 duplicate per file
     final_file_list = []
@@ -197,7 +212,7 @@ def mergning(files, n_duplicates, file_ending, folder_path):
     return final_file_list
 
 def concat_data_frames(folder_path = None, first_df = None, second_df = None):
-    '''Function concat data frames vertically.
+    """Function concat data frames vertically.
     If folder path is given it will concat all the csv files in the folder.
     Else it will concat two data frames given in the first and second paths.
     Args:
@@ -205,7 +220,7 @@ def concat_data_frames(folder_path = None, first_df = None, second_df = None):
     2. first_df - first data frame to concat
     3. second_df - second data frame to concat
     ------------
-    Returns: data frame with the concatenated data frames'''
+    Returns: data frame with the concatenated data frames"""
     if folder_path:
         files = os.listdir(folder_path)
         data_frames = []
@@ -995,8 +1010,8 @@ argv 3 - keep the identified label folder or erase it
 '''
 if __name__ == '__main__':
     ### assign epigenetic
-    run_intersection(merged_data_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism_with_model_scores.csv",
-                     bed_folder="Epigenetics/HEK293T/Bed",if_update=False)
+    run_intersection(merged_data_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/TrueOT/Refined_TrueOT_Pavel_dinu.csv",
+                     bed_folder="/home/dsi/lubosha/Off-Target-data-proccessing/Epigenetics/HSPC",if_update=False)
     
     
     

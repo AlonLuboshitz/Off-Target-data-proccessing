@@ -19,11 +19,11 @@ Epigenetic data:
 
 import os
 
-import pyBigWig
+#import pyBigWig
 from utilities import validate_non_negative_int
 from k_groups_utilities import create_guides_list
 from file_utilities import create_paths, get_ending
-import pybedtools
+#import pybedtools
 
 class File_management:
     # Positive and negative are files paths, pigenetics_bed and bigwig are folders path
@@ -561,8 +561,8 @@ class File_management:
             raise Exception("Models path not set")
     '''dtor'''
     def __del__(self):
-        self.close_big_wig([])
-        self.close_bed_files()
+        #self.close_big_wig([])
+        #self.close_bed_files()
         # call more closing
         pass
 

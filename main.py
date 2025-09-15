@@ -322,7 +322,7 @@ def evaluate_ensemble_by_guides_in_other_data():
     #scores_combi_paths = [path for path in scores_combi_paths if any(feature in path for feature in features_to_keep)]
     # scores_combi_paths = [item for item in scores_combi_paths if any(feature not in item for feature in feature_to_remove)]
     eval_obj = evaluation(ARGS.task)
-    by_mismatch = True
+    by_mismatch = False
     guide_indexes = keep_indexes_per_guide(data_frame=file_manager.get_merged_data_path(), target_column=COLUMNS["TARGET_COLUMN"],
                                            ot_constrain=ARGS.off_target_constriants, mismatch_column=COLUMNS["MISMATCH_COLUMN"],
                                            bulges_column=COLUMNS["BULGES_COLUMN"], by_mismatch=by_mismatch)
@@ -681,7 +681,7 @@ def create_ensembels_by_all_feature_columns(model_params = None,cross_val_params
     2. cross_val_params: tuple - cross val parameters for the file manager
     3. multi_process: bool - if True the function will multiprocess the features in the group.'''
     if not feature_dict: # None
-        ### NOTE: ONLY EPIGENETICS IS SET TO TRUE!!!
+        ### NOTE: ONLY EPIGENETICS IS SET TO False!!!
         features_dict = parse_feature_column_dict(ARGS.features_columns, only_epigenetics=True)
     else:
         features_dict = feature_dict
@@ -801,6 +801,8 @@ def test_ensemble_via_onlyseq_feature(model_params = None,cross_val_params=None,
         file_manager.add_type_to_models_paths(group_dir)
     score_path, combi_path = file_manager.create_ensemble_score_nd_combi_folder()
     ensmbels_paths = create_paths(file_manager.get_model_path())  # Create paths for each ensmbel in partition
+    if ensmbels_paths is None or len(ensmbels_paths) == 0:
+        raise ValueError(f"No ensembles found in the given path. Please check the model path.\n{file_manager.get_model_path()}")
     ensmbels_paths = keep_only_folders(ensmbels_paths)  # Keep only folders
     args = [(runner, ensmbel, tested_guides, score_path, x_features, y_features, all_guides) for ensmbel in ensmbels_paths]
     if n_ensmbels>1 and multi_process and MULTI_PROCESS: 
@@ -1042,7 +1044,7 @@ if __name__ == "__main__":
                              
     save_log_time(ARGS)
     
-    #performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")
+    performance_by_increasing_positives("/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv","/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive","")
     
     # test_performance_by_data(Models_folder="/localdata/alon/Models/Hendel/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence/by_positive",
     #                          test_path="/home/dsi/lubosha/Off-Target-data-proccessing/Data/Hendel_lab/merged_gs_caso_onlymism.csv",
