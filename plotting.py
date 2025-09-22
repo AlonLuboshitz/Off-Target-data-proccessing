@@ -182,7 +182,7 @@ def plot_pr(recall_list, precision_list, auprcs, model_names, output_path, gener
         plt.tight_layout()  # Adjust layout to minimize whitespace
         plt.savefig(output_path + f"/{general_title}.png", dpi=300)  # Save the figure
         plt.close()  # Close the figure to free memory
-def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path,ax = None):
+def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, output_path,ax = None,text_size = 16):
     '''This function plots a scatter plot with a linear regression line, and adds the correlation coefficient and p-value to the plot.
     Args:
     1. x: A numpy array representing the x values.
@@ -200,16 +200,18 @@ def plot_correlation(x, y, x_axis_label, y_axis_label, r_coeff, p_value, title, 
         fig, ax = plt.subplots(figsize=(8, 6))
     ax.scatter(x, y, color='blue')
     ax.plot(np.unique(x), np.poly1d(np.polyfit(x, y, 1))(np.unique(x)), color='red')
-    ax.set_title(title)
+    ax.set_title(title,fontsize=16)
     ax.grid(True)
     ax.set_xlabel(x_axis_label, fontsize=16)
     ax.set_ylabel(y_axis_label, fontsize=16)
     ax.tick_params(axis='both', labelsize=14)
-    
+    def sci_str(x, digits=2):
+        m, e = f"{x:.{digits}e}".split("e")
+        return rf"${float(m):.{digits}f} \cdot 10^{{{int(e)}}}$"
     num_of_points = len(x)
     # Adding text with correlation coefficient, p-value, and number of points
-    ax.text(0.5, 0.9, f'R: {r_coeff:.2f}, p-value: {p_value:.2e}\nn = {num_of_points}', 
-            fontsize=16, ha='center', va='center', transform=ax.transAxes)
+    ax.text(0.08, 0.75, f'r = {r_coeff:.2f}\np = {sci_str(p_value,2)}\nn = {num_of_points}', 
+            fontsize=text_size, ha='left', va='center', transform=ax.transAxes)
     
 def plot_logo(counts_df, ax=None, ax_title=None, output_path=None,y_label=None, x_label=None):
     """

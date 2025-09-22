@@ -9,12 +9,13 @@ from sklearn.metrics import roc_curve, auc, average_precision_score, precision_r
 from utilities import get_X_random_indices
 from utilities import extract_scores_labels_indexes_from_files, keep_positive_OTSs_labels, write_2d_array_to_csv
 from k_groups_utilities import get_partition_information
-from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_n_rank, plot_last_tp, plot_subplots, plot_ensemble_performance_on_ax
+from plotting import plot_ensemeble_preformance,plot_ensemble_performance_mean_std,plot_roc, plot_correlation, plot_pr, plot_last_tp, plot_subplots
 from file_utilities import create_paths, find_target_folders, keep_only_folders, create_folder, find_target_files
 from features_and_model_utilities import get_feature_name, transform_labels
 from ml_statistics import get_only_seq_vs_group_ensmbels_stats, get_mean_std_from_ensmbel_results
 from multiprocessing import Pool
-import matplotlib.pyplot as plt
+
+
 from scipy.stats import pearsonr
 
 PATH_TO_STATISTICS_FILE = "/home/dsi/lubosha/Off-Target-data-proccessing/Data/guides_statistics.csv"
@@ -1488,146 +1489,7 @@ def combiscore_by_folder(base_path):
     with Pool(processes=10) as pool:
         pool.starmap(process_single_ensemble_scores,scores_nd_combi_paths)
 
-def plot_hendel_changeseq_increasing_training_data():
     
-    fig, axes = plt.subplots(2, 3, figsize=(12, 8), sharex="col", sharey="row")
-    #axes = axes.flatten()
-    cs_base_path_sg = '/localdata/alon/ML_results/Change-seq/vivo-silico/Performance-by-data/CNN/Ensemble/Only_sequence'
-    n_models_in_ensmbel = 50
-    group_dict = get_group_dict(cs_base_path_sg, n_models_in_ensmbel)
-    group_dict_ = {5-key: value for key, value in group_dict.items() if key!=5} # Group by 5
-    group_dict_[5] = group_dict[5] # Add group 5
-    group_dict = group_dict_
-    group_dict = dict(sorted(group_dict.items()))
-    y_values_list,stds_list = get_roc_pr_values(group_dict)
-    path ='Data/Change-seq/change_seq_sgrna_ranges.csv'
-    x_vals = get_x_vals(path,True,False)
-    x_vals = range(1,len(group_dict)+1)
-    plot_ensemble_performance_on_ax(
-        axes[0,0],
-        y_values_list[0],
-        x_vals,
-        stds_list[0],
-        if_scaling=False,
-        if_ticks=True
-    )
-    plot_ensemble_performance_on_ax(
-        axes[1,0],
-        y_values_list[1],
-        x_vals,
-        stds_list[1],
-        if_scaling=False,
-        if_ticks=True
-    )
-        
-    
-    h_base_path_sg = "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-sgRNAs"
-    group_dict = get_group_dict(h_base_path_sg, 50)
-    y_values_list,stds_list = get_roc_pr_values(group_dict)
-    path ='Data/Hendel_lab/hendel_sgrna_ranges.csv'
-    x_vals = get_x_vals(path,True,False)
-    x_vals = range(1,len(group_dict)+1)
-    plot_ensemble_performance_on_ax(
-        axes[0,1],
-        y_values_list[0],
-        x_vals,
-        stds_list[0],
-        if_scaling=False,
-        if_ticks=True,
-        small_ticks=False
-    )
-    plot_ensemble_performance_on_ax(
-        axes[1,1],
-        y_values_list[1],
-        x_vals,
-        stds_list[1],
-        if_scaling=False,
-        if_ticks=True,
-        small_ticks=False
-    )
-    
-    base_path = '/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-OTss/by_positives'
-    group_dict = get_group_dict(base_path, 50)
-    data = 'Data/Hendel_lab/Hendel-Partition_1.csv'
-    x_vals = get_x_vals(data,False,True)
-    y_values_list,stds_list = get_roc_pr_values(group_dict)
-    plot_ensemble_performance_on_ax(
-        axes[0,2],
-        y_values_list[0],
-        x_vals,
-        stds_list[0],
-        if_scaling=True,
-        if_ticks=True,
-        small_ticks=False
-    )
-    plot_ensemble_performance_on_ax(
-        axes[1,2],
-        y_values_list[1],
-        x_vals,
-        stds_list[1],
-        if_scaling=True,
-        if_ticks=True,
-        small_ticks=False
-    )
-    axes[1, 0].set_xlabel("Number of training subsets", fontsize=18)
-    axes[1,1].set_xlabel("Number of training subsets", fontsize=18)
-    #axes[1, 2].set_xlabel("Number of OTSs", fontsize=18)
-    axes[0,0].set_ylabel("AUPRC", fontsize=18)
-    axes[1,0].set_ylabel("AUROC", fontsize=18)
-    axes[0,0].set_title("CHANGE-seq", fontsize=20)
-    axes[0,1].set_title("Hendel", fontsize=20)
-    axes[0,2].set_title("Hendel", fontsize=20)
-    axes[1,2].set_xlabel("Number of OTSs (× 10²)", fontsize=18)
-    letters = ['A', 'B', 'C', 'D','E','F']
-    selected_axes = axes[:, :].flatten()
-    for ax,letter in zip(selected_axes,letters):
-        ax.text(-0.05, 1.02, letter, transform=ax.transAxes,
-            fontsize=16, fontweight="bold", va="bottom", ha="right")
-    first_row_axes = axes[0, :]
-    for ax in first_row_axes:
-        ax.set_yticks(np.arange(0, 0.49, 0.07))  # from 0.00 to 0.45 in steps of 0.05
-    plt.tight_layout()
-    plt.savefig("Plots/Thesis/Performance_by_parts.png", dpi=300)
-def plot_H_C_HC_models():
-    fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex="col", sharey="row")
-    titles = ["CHANGE-seq","Hendel","Hendel + CHANGE-seq"]
-    scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/test_on_hendel/6_intersect/all_6/Scores/ensemble_1.csv",
-    "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/Performance-increasing-sgRNAs/11_group/1-2-3-4-5-6-7-8-9-10-11_partition/1-2-3-4-5-6-7-8-9-10-11_partition_50/Scores/ensemble_1.csv",
-    "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_hendel/6_intersecting/all_6/Scores/ensemble_1.csv"]
-    hendel_axes = [axes[0,0],axes[0,1]]
-    plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Thesis","Test_on_hendel",
-                                     legend_title='Training data',axes=hendel_axes)
-    scores_path = ["/localdata/alon/ML_results/Change-seq/vivo-silico/CNN/Ensemble/Only_sequence/7_partition/7_partition_50/Scores/ensemble_1.csv",
-                    "/localdata/alon/ML_results/Hendel/vivo-silico/Classification/test_on_changeseq/6_intersect/all_6/Scores/ensemble_1.csv",
-                    "/localdata/alon/ML_results/Hendel_Changeseq/vivo-silico/test_on_changeseq/6_intersecting/all_6/Scores/ensemble_1.csv"]
-    
-    cs_axes = [axes[1,0],axes[1,1]]
-    plot_roc_pr_for_ensmble_by_paths(scores_path,titles,"/home/dsi/lubosha/Off-Target-data-proccessing/Plots/Thesis","Test_on_changeseq",
-                                     legend_title='Training data',axes=cs_axes)
-    axes[0,0].set_ylabel("Test on CHANGE-seq\nPrecision", fontsize=18)
-    axes[1,0].set_ylabel("Test on Hendel\nPercision", fontsize=18)
-    letters = ['A', 'B', 'C', 'D']
-    for ax,letter in zip(axes.flatten(),letters):
-        ax.text(-0.05, 1.02, letter, transform=ax.transAxes,
-            fontsize=16, fontweight="bold", va="bottom", ha="right")
-    plt.tight_layout()
-    plt.savefig("Plots/Thesis/H_C_HC_models.png",dpi=300)
-def plot_change_seq_hendel_corr():
-    data = pd.read_csv("Data/Merged_studies/Hendel_vs_CHANGE-seq_regression.csv")
-    hendel  = data["Hendel"].values
-    change = data["CHANGE-seq"].values
-    fig,ax = plt.subplots(1,2,figsize=(12,5))
-    r, p = pearsonr(hendel,change)
-    r_log, p_log = pearsonr(transform_labels(hendel,'log'),transform_labels(change,'log'))
-    plot_correlation(hendel,change,"Hendel - read count","CHANGE-seq - read count",r_coeff=r,p_value=p,title=None,output_path=None,ax=ax[0])
-    plot_correlation(transform_labels(hendel,'log'),transform_labels(change,'log'),"Hendel - read count (log)","CHANGE-seq - read count (log)",r_coeff=r_log,p_value=p_log,title=None,output_path=None,ax=ax[1])
-    letters = ['A', 'B']
-    for axis,letter in zip(ax,letters):
-        axis.text(-0.05, 1.02, letter, transform=axis.transAxes,
-            fontsize=16, fontweight="bold", va="bottom", ha="right")
-    plt.tight_layout()
-    plt.savefig("Plots/Thesis/Hendel_vs_CHANGE-seq_correlation.png",dpi=300)
-    plt.close()
 if __name__ == "__main__":
     pass
     # plot_ensemble_perforamnce_and_std_by_models("/home/dsi/lubosha/Off-Target-data-proccessing/ML_results/Change_seq/CNN/Ensemble/Only_sequence/1_partition/1_partition_50/Combi",50,
@@ -1668,6 +1530,7 @@ if __name__ == "__main__":
     #plot_hendel_changeseq_increasing_training_data()
     #plot_H_C_HC_models()
     #plot_change_seq_hendel_corr()
+    hendel_change_corr_per_guide()
     
     
 
